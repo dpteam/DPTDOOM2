@@ -2228,6 +2228,254 @@ namespace DPTDOOM
 		// Teleport
 		////////////////////////////////////////////////////////////
 
+		////////////////////////////////////////////////////////////
+		// Boom silent teleporters
+		////////////////////////////////////////////////////////////
+
+		/// <summary>
+		/// Finds the exit marker for a silent teleporter: a teleport destination
+		/// thing in a sector carrying the line's tag.
+		///
+		/// Unlike the vanilla teleporter, a silent one is not "warp to the marker
+		/// and flash"; the marker only supplies the exit angle, and the rest is
+		/// computed so the traveller keeps their speed and heading relative to the
+		/// line they walked through.
+		/// </summary>
+		private Mobj FindTeleportDestination(LineDef line)
+		{
+			var sectors = world.Map.Sectors;
+
+			for (var i = 0; i < sectors.Length; i++)
+			{
+				if (sectors[i].Tag != line.Tag)
+				{
+					continue;
+				}
+
+				foreach (var thinker in world.Thinkers)
+				{
+					var dest = thinker as Mobj;
+
+					if (dest == null || dest.Type != MobjType.Teleportman)
+					{
+						continue;
+					}
+
+					if (dest.Subsector.Sector.Number == i)
+					{
+						return dest;
+					}
+				}
+			}
+
+			return null;
+		}
+
+		/// <summary>
+		/// Boom's silent teleporter with a destination thing (207-210).
+		///
+		/// The point of it is that nothing flashes and nothing stops: the traveller
+		/// comes out with the same speed, rotated to match the difference between
+		/// the entry and exit angles, and at the same height above the floor. That
+		/// is what makes rooms-over-rooms work — walking through a doorway continues
+		/// into another room as if the two were adjacent.
+		///
+		/// The rotation is the part that makes it feel natural: crossing a line
+		/// perpendicular leaves you moving in the direction the exit marker faces,
+		/// rather than always in the marker's direction regardless of how you
+		/// entered.
+		/// </summary>
+		public bool SilentTeleport(LineDef line, int side, Mobj thing)
+		{
+			if (side != 0 || (thing.Flags & MobjFlags.Missile) != 0)
+			{
+				return false;
+			}
+
+			var destination = FindTeleportDestination(line);
+
+			if (destination == null)
+			{
+				return false;
+			}
+
+			// Height above the floor, so a mid-air teleport stays at the same
+			// height above whatever it lands on.
+			var heightAboveFloor = thing.Z - thing.FloorZ;
+
+			// Angle between the exit marker and the entry line, turned a quarter
+			// so that crossing perpendicularly exits along the marker's facing.
+			var lineAngle = Geometry.PointToAngle(
+				Fixed.Zero, Fixed.Zero, line.Dx, line.Dy);
+
+			var angle = lineAngle - destination.Angle + Angle.Ang90;
+
+			var sin = Trig.Sin(angle);
+			var cos = Trig.Cos(angle);
+
+			var momX = thing.MomX;
+			var momY = thing.MomY;
+
+			if (!world.ThingMovement.TeleportMove(thing, destination.X, destination.Y))
+			{
+				return false;
+			}
+
+			thing.Angle += angle;
+			thing.Z = heightAboveFloor + thing.FloorZ;
+
+			// Rotate the momentum so the traveller keeps going the same way
+			// relative to the new room.
+			thing.MomX = momX * cos - momY * sin;
+			thing.MomY = momY * cos + momX * sin;
+
+			ResetPlayerView(thing);
+
+			return true;
+		}
+
+		/// <summary>
+		/// Boom's silent teleporter between two linedefs sharing a tag (243/244,
+		/// 261-269).
+		///
+		/// This is the general form: instead of a destination marker it finds
+		/// another line with the same tag and maps the crossing position across it.
+		/// Walk through at a quarter of the way along the entry line and you come
+		/// out a quarter of the way along the exit line. That is what lets two rooms
+		/// of different sizes line up.
+		///
+		/// <paramref name="reverse"/> mirrors the position along the exit line,
+		/// which is how a teleporter can be made to feel like it turned you around.
+		/// </summary>
+		public bool SilentLineTeleport(LineDef line, int side, Mobj thing, bool reverse)
+		{
+			if (side != 0 || (thing.Flags & MobjFlags.Missile) != 0)
+			{
+				return false;
+			}
+
+			foreach (var other in world.Map.Lines)
+			{
+				if (other == line || other.Tag != line.Tag || other.BackSector == null)
+				{
+					continue;
+				}
+
+				// Position along the entry line, as a fraction from its start. The
+				// larger of the two axes is used, which is what Boom does: on a
+				// nearly vertical line the Y difference is the reliable one.
+				Fixed position;
+
+				if (Math.Abs(line.Dx.Data) > Math.Abs(line.Dy.Data))
+				{
+					position = (thing.X - line.Vertex1.X) / line.Dx;
+				}
+				else
+				{
+					position = (thing.Y - line.Vertex1.Y) / line.Dy;
+				}
+
+				if (reverse)
+				{
+					position = Fixed.One - position;
+				}
+
+				// Angle between the two lines, turned a half circle so that a
+				// straight crossing continues straight.
+				var angle = (reverse ? Angle.Ang0 : Angle.Ang180) +
+					Geometry.PointToAngle(Fixed.Zero, Fixed.Zero, other.Dx, other.Dy) -
+					Geometry.PointToAngle(Fixed.Zero, Fixed.Zero, line.Dx, line.Dy);
+
+				// Map the position across the exit line, measured back from its end.
+				var x = other.Vertex2.X - position * other.Dx;
+				var y = other.Vertex2.Y - position * other.Dy;
+
+				var heightAboveFloor = thing.Z - thing.FloorZ;
+
+				// Land on the correct side of the exit line. Rounding can put the
+				// traveller on the wrong side, and then they immediately teleport
+				// back, which looks like being stuck in a doorway forever.
+				var exitSide = reverse || (thing.Player != null && StepDownAt(other));
+
+				var fudge = 10;
+
+				while (Geometry.PointOnLineSide(x, y, other) != (exitSide ? 1 : 0) && --fudge >= 0)
+				{
+					if (Math.Abs(other.Dx.Data) > Math.Abs(other.Dy.Data))
+					{
+						y += (other.Dx.Data < 0) != exitSide ? Fixed.One : -Fixed.One;
+					}
+					else
+					{
+						x += (other.Dy.Data < 0) != exitSide ? Fixed.One : -Fixed.One;
+					}
+				}
+
+				if (!world.ThingMovement.TeleportMove(thing, x, y))
+				{
+					return false;
+				}
+
+				// Ground level at the exit is the higher of the two floors there, so
+				// a step down does not drop the traveller into the floor. Boom picks
+				// it by side; the higher of the two is the same answer and does not
+				// depend on getting the side convention right.
+				var frontFloor = other.FrontSector.FloorHeight;
+				var backFloor = other.BackSector.FloorHeight;
+				var exitFloor = frontFloor > backFloor ? frontFloor : backFloor;
+
+				thing.Z = heightAboveFloor + exitFloor;
+				thing.Angle += angle;
+
+				var momX = thing.MomX;
+				var momY = thing.MomY;
+
+				var sin = Trig.Sin(angle);
+				var cos = Trig.Cos(angle);
+
+				thing.MomX = momX * cos - momY * sin;
+				thing.MomY = momY * cos + momX * sin;
+
+				ResetPlayerView(thing);
+
+				return true;
+			}
+
+			return false;
+		}
+
+		/// <summary>
+		/// True when walking toward the first side of this line goes down a step.
+		/// </summary>
+		private static bool StepDownAt(LineDef line)
+		{
+			return line.FrontSector.FloorHeight < line.BackSector.FloorHeight;
+		}
+
+		/// <summary>
+		/// Recalculates the player's view height after a teleport, without letting
+		/// the step-up animation play.
+		///
+		/// A silent teleporter is supposed to be invisible, so the view must not bob
+		/// as if the player had just climbed a step. The delta is saved, cleared,
+		/// recalculated and restored, which is exactly what Boom does.
+		/// </summary>
+		private void ResetPlayerView(Mobj thing)
+		{
+			var player = thing.Player;
+
+			if (player == null || player.Mobj != thing)
+			{
+				return;
+			}
+
+			var delta = player.DeltaViewHeight;
+
+			player.DeltaViewHeight = Fixed.Zero;
+			world.PlayerBehavior.CalcHeight(player);
+			player.DeltaViewHeight = delta;
+		}
+
 		public bool Teleport(LineDef line, int side, Mobj thing)
 		{
 			// Don't teleport missiles.

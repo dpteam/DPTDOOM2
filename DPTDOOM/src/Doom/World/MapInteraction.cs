@@ -1257,6 +1257,90 @@ namespace DPTDOOM
 				case 236:
 					sa.DoElevator(line, ElevatorType.Current);
 					break;
+
+				// Boom's silent teleporters. Nothing flashes and nothing stops: the
+				// traveller keeps their speed and arrives at the same height above
+				// the floor. That is what makes rooms-over-rooms work, and it is the
+				// reason a map can have two rooms occupying the same space.
+				//
+				// Only the forms PrBoom actually implements are here. 209 and 210
+				// appear in Boom's documentation as monster-only silent teleporters
+				// but have no handler in PrBoom's dispatcher, so they are left out
+				// rather than guessed at.
+				case 207:
+					if (sa.SilentTeleport(line, side, thing))
+					{
+						line.Special = 0;
+					}
+					break;
+
+				case 208:
+					sa.SilentTeleport(line, side, thing);
+					break;
+
+				case 268:
+					if (thing.Player == null && sa.SilentTeleport(line, side, thing))
+					{
+						line.Special = 0;
+					}
+					break;
+
+				case 269:
+					if (thing.Player == null)
+					{
+						sa.SilentTeleport(line, side, thing);
+					}
+					break;
+
+				case 243:
+					if (sa.SilentLineTeleport(line, side, thing, false))
+					{
+						line.Special = 0;
+					}
+					break;
+
+				case 244:
+					sa.SilentLineTeleport(line, side, thing, false);
+					break;
+
+				case 262:
+					if (sa.SilentLineTeleport(line, side, thing, true))
+					{
+						line.Special = 0;
+					}
+					break;
+
+				case 263:
+					sa.SilentLineTeleport(line, side, thing, true);
+					break;
+
+				case 264:
+					if (thing.Player == null && sa.SilentLineTeleport(line, side, thing, true))
+					{
+						line.Special = 0;
+					}
+					break;
+
+				case 265:
+					if (thing.Player == null)
+					{
+						sa.SilentLineTeleport(line, side, thing, true);
+					}
+					break;
+
+				case 266:
+					if (thing.Player == null && sa.SilentLineTeleport(line, side, thing, false))
+					{
+						line.Special = 0;
+					}
+					break;
+
+				case 267:
+					if (thing.Player == null)
+					{
+						sa.SilentLineTeleport(line, side, thing, false);
+					}
+					break;
 			}
 		}
 
