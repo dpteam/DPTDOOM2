@@ -52,6 +52,15 @@ dptdoom.exe -iwad doom2.wad -coopbots 3 -warp 1 -skill 3
 складывается из сравнения частот нескольких популяций нейронов — десяток чисел
 на тик, а не глубокие сети.
 
+Чтобы разбирать поведение, есть `-botdump`: трасса по тикам (позиция, угол,
+движение, цель, причина решения) и PNG-карта с путём и направлением взгляда.
+
+```powershell
+dptdoom.exe -headless -iwad doom2.wad -bots -botstyle 0 -warp 1 -skill 3 `
+    -tics 3000 -botdump artifacts/bottrace/run.json
+powershell -NoProfile -File tools/render-bot-trace.ps1 -Trace artifacts/bottrace/run.json
+```
+
 Подробности и честный список того, что бот пока не умеет, —
 [docs/BOTS.md](docs/BOTS.md).
 

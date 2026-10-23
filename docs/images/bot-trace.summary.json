@@ -1,0 +1,22 @@
+﻿{
+    "map":  "MAP01",
+    "skill":  3,
+    "tics":  2401,
+    "png":  "artifacts\\bottrace\\style0.png",
+    "trace":  "artifacts\\bottrace\\style0.json",
+    "bots":  [
+                 {
+                     "player":  1,
+                     "style":  "Rush",
+                     "samples":  2401,
+                     "idleTics":  182,
+                     "idlePercent":  7.6,
+                     "strafeOnly":  77,
+                     "strafePercent":  3.2,
+                     "turnedDegrees":  14940,
+                     "circles":  0,
+                     "circlePlaces":  "",
+                     "health":  100
+                 }
+             ]
+}
