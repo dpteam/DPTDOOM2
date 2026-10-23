@@ -47,6 +47,7 @@ namespace DPTDOOM.Video
 
         private int frames;
         private int lateFrames;
+        private int totalTics;
         private double worstLateness;
         private double totalInterval;
 
@@ -72,7 +73,8 @@ namespace DPTDOOM.Video
 
         /// <summary>
         /// Opens a per-frame timing log. Columns: frame, nominal time, measured
-        /// interval, render, present, wait, update flag, interpolation fraction.
+        /// interval, render, present, wait, tics run this frame, interpolation
+        /// fraction.
         /// </summary>
         public void OpenLog(string path)
         {
@@ -86,7 +88,7 @@ namespace DPTDOOM.Video
 
             line = new StringBuilder(128);
             log = new StreamWriter(path, false, Encoding.UTF8);
-            log.WriteLine("frame\tnominal_ms\tinterval_ms\trender_ms\tpresent_ms\twait_ms\tupdate\tfrac");
+            log.WriteLine("frame\tnominal_ms\tinterval_ms\trender_ms\tpresent_ms\twait_ms\ttics\tfrac");
             log.AutoFlush = true;
 
             LogPath = path;
@@ -133,6 +135,19 @@ namespace DPTDOOM.Video
 
                 return 1000.0 / (recentTotal / recentCount);
             }
+        }
+
+        /// <summary>
+        /// Monotonic time since the clock was created, in seconds.
+        ///
+        /// The frame loop needs the real interval between frames so the simulation
+        /// can be driven by time rather than by frame count. The clock already owns
+        /// the stopwatch, so it hands the value out instead of the loop keeping a
+        /// second one.
+        /// </summary>
+        public double NowSeconds
+        {
+            get { return stopwatch.Elapsed.TotalSeconds; }
         }
 
         /// <summary>
@@ -207,6 +222,7 @@ namespace DPTDOOM.Video
             lastFrameStart = now;
 
             frames++;
+            totalTics += step.UpdateCount;
 
             if (interval > 0)
             {
@@ -239,7 +255,7 @@ namespace DPTDOOM.Video
             line.Append(renderMs.ToString("0.000", CultureInfo.InvariantCulture)).Append('\t');
             line.Append(presentMs.ToString("0.000", CultureInfo.InvariantCulture)).Append('\t');
             line.Append(waitMs.ToString("0.000", CultureInfo.InvariantCulture)).Append('\t');
-            line.Append(step.Update ? '1' : '0').Append('\t');
+            line.Append(step.UpdateCount.ToString(CultureInfo.InvariantCulture)).Append('\t');
             line.Append((step.Fraction.ToDouble()).ToString("0.000", CultureInfo.InvariantCulture));
 
             log.WriteLine(line.ToString());
@@ -249,17 +265,28 @@ namespace DPTDOOM.Video
         /// Prints a summary. A healthy run averages close to the target with
         /// very few late frames; a regular pattern of late frames points at the
         /// loop, an irregular one at the system.
+        ///
+        /// The tic rate is reported next to the frame rate on purpose. They are
+        /// two different numbers and the difference is exactly the bug this log
+        /// was extended for: a run can show a healthy frame rate while the game
+        /// itself runs slow, and only the tic rate reveals it.
         /// </summary>
         public void WriteSummary(TextWriter output)
         {
             var target = 1.0 / frameTime;
             var average = frames > 1 ? totalInterval / (frames - 1) : 0;
+            var elapsed = frames > 1 ? totalInterval / 1000.0 : 0;
 
             output.WriteLine("Frames: " + frames);
             output.WriteLine("Target: " + target.ToString("0.0", CultureInfo.InvariantCulture) + " fps (" +
                              (frameTime * 1000).ToString("0.00", CultureInfo.InvariantCulture) + " ms)");
             output.WriteLine("Average interval: " + average.ToString("0.00", CultureInfo.InvariantCulture) + " ms" +
                              (average > 0 ? " (" + (1000.0 / average).ToString("0.0", CultureInfo.InvariantCulture) + " fps)" : ""));
+            output.WriteLine("Tics: " + totalTics +
+                             (elapsed > 0
+                                 ? " (" + (totalTics / elapsed).ToString("0.0", CultureInfo.InvariantCulture) +
+                                   " per second, should be 35)"
+                                 : ""));
             output.WriteLine("Late frames: " + lateFrames + ", worst " +
                              (worstLateness * 1000).ToString("0.00", CultureInfo.InvariantCulture) + " ms");
         }

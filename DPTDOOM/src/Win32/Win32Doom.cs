@@ -344,7 +344,8 @@ namespace DPTDOOM.Win32
             if (args.fpslog.Present || clock.IsLogging)
             {
                 text += "\nrender " + video.LastRenderMs.ToString("0.0") +
-                        " ms   present " + video.LastPresentMs.ToString("0.0") + " ms";
+                        " ms   present " + video.LastPresentMs.ToString("0.0") + " ms" +
+                        "   tics/frame " + step.UpdateCount;
             }
 
             var bots = doom.BotReport;
@@ -703,7 +704,11 @@ namespace DPTDOOM.Win32
 
                 try
                 {
-                    while (true)
+                    var lastFrameTime = 0.0;
+                    var started = false;
+                    var finished = false;
+
+                    while (!finished)
                     {
                         video.Window.PumpMessages();
 
@@ -712,29 +717,49 @@ namespace DPTDOOM.Win32
                             break;
                         }
 
+                        // Benchmark mode must not be throttled, or it measures the
+                        // throttle instead of the machine. It also has to advance
+                        // exactly one tic per iteration: -timedemo runs at
+                        // fpsScale 1 and reports iterations per second, which only
+                        // means anything if each iteration is one tic.
+                        if (args.timedemo.Present)
+                        {
+                            var benchStep = pacer.Advance();
+                            finished = doom.Update() == UpdateResult.Completed;
+                            clock.EndFrame(benchStep, 0, 0, 0);
+                            continue;
+                        }
+
                         clock.WaitForNextFrame();
 
-                        var step = pacer.Advance();
+                        // The simulation is driven by elapsed time, not by how many
+                        // frames were drawn. If drawing a bigger window is slower
+                        // than the target frame rate, the frame count drops but the
+                        // tic rate must not: a pistol fires on tics, and tying tics
+                        // to frames made it fire slower at large window sizes while
+                        // the frame counter still looked healthy.
+                        var now = clock.NowSeconds;
+                        var elapsed = started ? now - lastFrameTime : 1.0 / pacer.TargetFps;
 
-                        if (step.Update)
+                        lastFrameTime = now;
+                        started = true;
+
+                        var step = pacer.AdvanceBy(elapsed);
+
+                        for (var tic = 0; tic < step.UpdateCount && !finished; tic++)
                         {
                             // Slow motion skips simulation tics, which is only
                             // meaningful in single player.
                             if (DebugSettings.SlowMotion <= 1 ||
                                 (slowCounter++ % DebugSettings.SlowMotion) == 0)
                             {
-                                if (doom.Update() == UpdateResult.Completed)
-                                {
-                                    break;
-                                }
+                                finished = doom.Update() == UpdateResult.Completed;
                             }
                         }
 
-                        if (args.timedemo.Present)
+                        if (finished)
                         {
-                            // Benchmark mode: run as fast as possible, no drawing.
-                            clock.EndFrame(step, 0, 0, clock.LastWaitMs);
-                            continue;
+                            break;
                         }
 
                         if (video.Window.ShowOverlay)

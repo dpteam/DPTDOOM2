@@ -439,6 +439,16 @@ html.dark .mode button.selected {
 
 html.dark .hint { color: #b2bed2; }
 
+/* A warning that has to be read, not skimmed: the relay does not exist, and a
+   host without port forwarding will wonder why nobody joins. */
+.hint.warn {
+  border-left: 3px solid #d08b2c;
+  padding-left: 10px;
+  color: #7a4f10;
+}
+
+html.dark .hint.warn { color: #e8bd77; }
+
 /* ---------- mods ---------- */
 
 ol.mods {

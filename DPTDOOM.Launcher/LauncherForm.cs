@@ -17,6 +17,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
+using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 using System.Windows.Forms;
@@ -286,10 +287,24 @@ namespace DPTDOOM.Launcher
 
         /// <summary>
         /// Single entry point for everything the page asks for.
+        ///
+        /// The comparison is **case-insensitive**, and that is not defensive
+        /// coding: MSHTML lower-cases the authority part of a URI, so
+        /// <c>dptdoom://masterRefresh</c> arrives here as <c>masterrefresh</c>.
+        /// A case-sensitive switch silently ignored every camel-case verb —
+        /// "save master", "refresh servers" and "open log" all did nothing at all,
+        /// which is why the server browser sat on "Querying master…" forever.
+        ///
+        /// An unknown verb is logged rather than dropped, because a verb that
+        /// arrives and is not recognised is exactly the symptom this produced.
         /// </summary>
         public void HandleVerb(string verb, string payload)
         {
-            switch (verb)
+            var name = (verb ?? "").Trim();
+
+            Log("verb " + name + " (payload " + (payload == null ? 0 : payload.Length) + " chars)");
+
+            switch (name.ToLowerInvariant())
             {
                 case "ready":
                     OnReady();
@@ -311,20 +326,24 @@ namespace DPTDOOM.Launcher
                     OnProfile(payload);
                     break;
 
-                case "themeSave":
+                case "themesave":
                     OnThemeSave(payload);
                     break;
 
-                case "masterSave":
+                case "mastersave":
                     OnMasterSave(payload);
                     break;
 
-                case "masterRefresh":
+                case "masterrefresh":
                     OnMasterRefresh(payload);
                     break;
 
-                case "openLog":
+                case "openlog":
                     OnOpenLog();
+                    break;
+
+                default:
+                    Log("  unknown verb '" + name + "' — ignored");
                     break;
             }
         }
@@ -336,7 +355,7 @@ namespace DPTDOOM.Launcher
             Send("hasLog", lastLogPath != null ? "1" : "0");
             Send("storage",
                 (LauncherSettings.IsPortable ? "PORTABLE · " : "APPDATA · ") +
-                LauncherSettings.GetDataDirectory());
+                LauncherSettings.GetDataDirectory() + " · лог: launcher.log");
 
             Send("running", IsGameRunning() ? "1" : "0");
             SendStatus("Готов. Выбери IWAD и нажми «Запустить игру».", false);
@@ -526,6 +545,43 @@ namespace DPTDOOM.Launcher
             settings.Save();
         }
 
+        /// <summary>
+        /// Appends one line to the launcher log.
+        ///
+        /// A launcher is a program whose failures are invisible: the window stays
+        /// up, a status line stays on whatever it said last, and there is nothing
+        /// to look at afterwards. The master query hanging on "Querying master…"
+        /// was exactly that — a verb arriving with the wrong case and being
+        /// dropped without a word. So every verb, every network attempt and every
+        /// error goes to a file with a timestamp.
+        ///
+        /// The log is deliberately plain text and small: it is meant to be opened
+        /// by a person after something went wrong, not parsed by a tool.
+        /// </summary>
+        private static void Log(string message)
+        {
+            try
+            {
+                var path = Path.Combine(LauncherSettings.GetDataDirectory(), "launcher.log");
+
+                // Start fresh once the file gets big. A launcher log that grows
+                // without limit is a support problem of its own.
+                if (File.Exists(path) && new FileInfo(path).Length > 512 * 1024)
+                {
+                    File.Delete(path);
+                }
+
+                File.AppendAllText(
+                    path,
+                    DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff") + "  " + message +
+                    Environment.NewLine);
+            }
+            catch
+            {
+                // Logging must never be the reason the launcher fails.
+            }
+        }
+
         private void OnMasterSave(string endpoint)
         {
             settings.Master = (endpoint ?? "").Trim();
@@ -539,37 +595,92 @@ namespace DPTDOOM.Launcher
             string host;
             int port;
 
+            Log("master refresh requested: '" + endpoint + "'");
+
             if (!TryParseEndpoint(endpoint, out host, out port))
             {
-                SendStatus("Некорректный адрес master: " + endpoint, true);
+                Log("  rejected: cannot parse the endpoint");
+                SendStatus("Некорректный адрес master: " + (endpoint ?? "(пусто)") +
+                           ". Нужен вид host:port, например play.example.com:25135.", true);
                 return;
             }
 
+            Log("  parsed " + host + ":" + port);
+
             var thread = new Thread(() =>
             {
+                var started = Environment.TickCount;
+
                 try
                 {
-                    var servers = MasterClient.List(host, port, 4000);
-                    var payload = EncodeServers(servers);
+                    var servers = MasterClient.List(host, port, MasterClient.DefaultTimeoutMs);
+
+                    var elapsed = Environment.TickCount - started;
+
+                    Log("  ok: " + servers.Count + " session(s) in " + elapsed + " ms");
 
                     BeginInvoke((MethodInvoker)(() =>
                     {
-                        Send("servers", payload);
+                        Send("servers", EncodeServers(servers));
                         SendStatus(servers.Count == 0
                             ? "Список пуст. Хост мог ещё не опубликоваться."
-                            : "Получено сессий: " + servers.Count + ".", false);
+                            : "Получено сессий: " + servers.Count + " (" + elapsed + " мс).", false);
                     }));
                 }
                 catch (Exception e)
                 {
+                    var elapsed = Environment.TickCount - started;
+
+                    Log("  failed after " + elapsed + " ms: " + e.GetType().Name + ": " + e.Message);
+
                     BeginInvoke((MethodInvoker)(() =>
-                        SendStatus("Master недоступен: " + e.Message, true)));
+                        SendStatus(DescribeMasterFailure(host, port, e), true)));
                 }
             });
 
             thread.IsBackground = true;
             thread.Name = "DPTDOOM launcher master query";
             thread.Start();
+        }
+
+        /// <summary>
+        /// Turns a master failure into something a person can act on.
+        ///
+        /// "Master недоступен: Connection refused" is technically true and
+        /// useless. The three failures a launcher actually sees are a wrong
+        /// address, a closed port (usually a firewall or a master that is not
+        /// running) and a name that does not resolve, and each has a different
+        /// thing for the user to check.
+        /// </summary>
+        private static string DescribeMasterFailure(string host, int port, Exception error)
+        {
+            var socket = error as SocketException;
+
+            if (socket != null)
+            {
+                switch (socket.SocketErrorCode)
+                {
+                    case SocketError.ConnectionRefused:
+                        return "Master " + host + ":" + port + " отклонил подключение. " +
+                               "Похоже, сервер не запущен или порт закрыт.";
+
+                    case SocketError.TimedOut:
+                    case SocketError.WouldBlock:
+                        return "Master " + host + ":" + port + " не ответил за " +
+                               (MasterClient.DefaultTimeoutMs / 1000) + " с. " +
+                               "Порт закрыт файрволом, или адрес неверный.";
+
+                    case SocketError.HostNotFound:
+                    case SocketError.NoData:
+                        return "Имя " + host + " не находится в DNS. Проверь адрес.";
+
+                    case SocketError.NetworkUnreachable:
+                    case SocketError.HostUnreachable:
+                        return "Сеть до " + host + " недоступна. Проверь подключение.";
+                }
+            }
+
+            return "Master " + host + ":" + port + ": " + error.Message;
         }
 
         private static string EncodeServers(List<MasterServerEntry> servers)

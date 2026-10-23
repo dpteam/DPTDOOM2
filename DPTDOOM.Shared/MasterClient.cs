@@ -27,6 +27,15 @@ namespace DPTDOOM.Shared
     /// </summary>
     public static class MasterClient
     {
+        /// <summary>
+        /// Default time budget for one request, in milliseconds.
+        ///
+        /// Four seconds is deliberately short: the master is a directory, not a
+        /// game server, so a slow answer means something is wrong. A launcher that
+        /// waits thirty seconds on a closed port looks broken.
+        /// </summary>
+        public const int DefaultTimeoutMs = 4000;
+
         public static List<MasterServerEntry> List(string host, int port, int timeoutMs)
         {
             var body = Exchange(host, port, MasterProtocol.OpList, new byte[0], timeoutMs);
@@ -89,37 +98,56 @@ namespace DPTDOOM.Shared
             Exchange(host, port, MasterProtocol.OpRemove, auth, timeoutMs);
         }
 
+        /// <summary>
+        /// One request, one response.
+        ///
+        /// The time budget is **total**, not per operation. The first version set
+        /// a timeout on each step — connect, write, read header, read body — which
+        /// meant a dead host could occupy four times the advertised limit before
+        /// the launcher gave up. A single deadline is what a person means by
+        /// "should answer in four seconds".
+        ///
+        /// Failures are surfaced as <see cref="SocketException"/> wherever possible,
+        /// because the caller can turn a socket error code into advice ("port
+        /// closed" versus "name not found") and cannot do that with a bare message.
+        /// </summary>
         private static byte[] Exchange(string host, int port, ushort operation, byte[] payload, int timeoutMs)
         {
+            var deadline = Environment.TickCount + timeoutMs;
+
             using (var client = new TcpClient())
             {
                 client.NoDelay = true;
 
                 var result = client.BeginConnect(host, port, null, null);
-                if (!result.AsyncWaitHandle.WaitOne(timeoutMs, false))
+
+                if (!result.AsyncWaitHandle.WaitOne(Remaining(deadline), false))
                 {
-                    throw new Exception("Master " + host + ":" + port + " did not answer.");
+                    // Leave the socket in a known state before throwing, or the
+                    // half-open connect keeps retrying in the background.
+                    try
+                    {
+                        client.Close();
+                    }
+                    catch
+                    {
+                    }
+
+                    throw new SocketException((int)SocketError.TimedOut);
                 }
 
                 client.EndConnect(result);
 
                 using (var stream = client.GetStream())
                 {
-                    stream.ReadTimeout = timeoutMs;
-                    stream.WriteTimeout = timeoutMs;
-
                     var header = MasterProtocol.Header(operation, payload.Length, 0);
-                    stream.Write(header, 0, header.Length);
 
-                    if (payload.Length > 0)
-                    {
-                        stream.Write(payload, 0, payload.Length);
-                    }
-
+                    WriteAll(stream, header, deadline);
+                    WriteAll(stream, payload, deadline);
                     stream.Flush();
 
                     var responseHeader = new byte[MasterProtocol.HeaderSize];
-                    ReadExactly(stream, responseHeader, 0, responseHeader.Length);
+                    ReadExactly(stream, responseHeader, 0, responseHeader.Length, deadline);
 
                     var status = (ushort)MasterProtocol.Get16(responseHeader, 12);
                     var length = (int)MasterProtocol.Get32(responseHeader, 8);
@@ -130,7 +158,7 @@ namespace DPTDOOM.Shared
                     }
 
                     var body = new byte[length];
-                    ReadExactly(stream, body, 0, length);
+                    ReadExactly(stream, body, 0, length, deadline);
 
                     if (status != MasterProtocol.StatusOk)
                     {
@@ -142,11 +170,27 @@ namespace DPTDOOM.Shared
             }
         }
 
-        private static void ReadExactly(Stream stream, byte[] buffer, int offset, int count)
+        /// <summary>Milliseconds left before the deadline, never below one.</summary>
+        private static int Remaining(int deadline)
+        {
+            var left = deadline - Environment.TickCount;
+
+            return left < 1 ? 1 : left;
+        }
+
+        private static void WriteAll(Stream stream, byte[] buffer, int deadline)
+        {
+            stream.WriteTimeout = Remaining(deadline);
+            stream.Write(buffer, 0, buffer.Length);
+        }
+
+        private static void ReadExactly(Stream stream, byte[] buffer, int offset, int count, int deadline)
         {
             var read = 0;
             while (read < count)
             {
+                stream.ReadTimeout = Remaining(deadline);
+
                 var current = stream.Read(buffer, offset + read, count - read);
                 if (current <= 0)
                 {

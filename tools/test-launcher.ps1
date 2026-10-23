@@ -104,6 +104,33 @@ Assert-True ($botOptions -notlike "*hidden*") "bots mode shows the bot count"
 $botsPreview = Invoke-Page "document.getElementById('preview').innerHTML"
 Assert-True ($botsPreview -like "*-coopbots*") "bots mode passes -coopbots"
 
+# 8. Every verb reaches the host, including the camel-case ones.
+#
+# MSHTML lower-cases the authority part of a URI, so "masterRefresh" arrives as
+# "masterrefresh". A case-sensitive switch in the host silently dropped every
+# camel-case verb, which is why the server browser sat on "Querying master…"
+# forever. The check is that the status line changes at all after a refresh
+# against a dead endpoint: it must end in an error, not stay on the query text.
+$before = Invoke-Page "document.getElementById('status').innerHTML"
+
+Invoke-Page "document.getElementById('masterEndpoint').value='127.0.0.1:1'" | Out-Null
+Invoke-Page "document.getElementById('refreshServers').onclick()" | Out-Null
+
+# The master client gives up after four seconds; allow a little more than that.
+Pump 6000
+
+$after = Invoke-Page "document.getElementById('status').innerHTML"
+Assert-True ($after -ne $before) "master refresh updates the status line"
+Assert-True ($after -like "*127.0.0.1*") "the failure names the endpoint it tried"
+
+# 9. Saving the master address is a camel-case verb too, and it must persist.
+Invoke-Page "document.getElementById('masterEndpoint').value='example.test:1234'" | Out-Null
+Invoke-Page "document.getElementById('masterSave').onclick()" | Out-Null
+Pump 400
+
+$saved = Invoke-Page "document.getElementById('status').innerHTML"
+Assert-True ($saved -like "*example.test:1234*") "saving the master address is acknowledged"
+
 $form.Close()
 
 if ($failures -gt 0) {
