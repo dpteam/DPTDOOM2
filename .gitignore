@@ -606,3 +606,25 @@ fabric.properties
 
 # Coverlet Test Result
 test-results
+
+# DPT.DOOM
+
+# Development references: WADs, upstream sources, icons, design material.
+# Never part of the repository (and never redistributed).
+refs/
+
+# Local build output
+bin/
+obj/
+publish/
+artifacts/
+
+# Runtime data created next to the executables
+*.cfg
+*.dsg
+*.log
+user/
+
+# OS noise
+Thumbs.db
+desktop.ini

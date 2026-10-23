@@ -1,0 +1,37 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      DPT.DOOM targets .NET Framework 4.0 so it can run on Windows XP SP3.
+      The net9.0 target exists only so the unit/compatibility tests can run on a
+      modern SDK; the shipped game is the net40 build.
+    -->
+    <TargetFrameworks>net40;net9.0</TargetFrameworks>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>dptdoom</AssemblyName>
+    <RootNamespace>DPTDOOM</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
+    <ApplicationIcon>..\resources\dptdoom.ico</ApplicationIcon>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <AssemblyTitle>DPT.DOOM</AssemblyTitle>
+    <Product>DPT.DOOM</Product>
+    <Company>DartPower Team</Company>
+    <Copyright>Copyright (C) DartPower Team. Based on Managed Doom by Nobuaki Tanaka and Doom by id Software.</Copyright>
+    <Version>0.1.0</Version>
+    <NeutralLanguage>en</NeutralLanguage>
+    <InvariantGlobalization Condition="'$(TargetFramework)' == 'net9.0'">true</InvariantGlobalization>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net40'">
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="DPTDOOMTest" />
+  </ItemGroup>
+
+</Project>
