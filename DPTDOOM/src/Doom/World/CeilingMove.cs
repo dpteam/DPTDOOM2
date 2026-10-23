@@ -83,6 +83,7 @@ namespace DPTDOOM
 						switch (type)
 						{
 							case CeilingMoveType.RaiseToHighest:
+							case CeilingMoveType.Generalized:
 								sa.RemoveActiveCeiling(this);
 								sector.DisableFrameInterpolationForOneFrame();
 								break;
@@ -148,6 +149,7 @@ namespace DPTDOOM
 
 							case CeilingMoveType.LowerAndCrush:
 							case CeilingMoveType.LowerToFloor:
+							case CeilingMoveType.Generalized:
 								sa.RemoveActiveCeiling(this);
 								sector.DisableFrameInterpolationForOneFrame();
 								break;

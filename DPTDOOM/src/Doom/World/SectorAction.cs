@@ -994,6 +994,561 @@ namespace DPTDOOM
 
 		private static readonly Fixed floorSpeed = Fixed.One;
 
+		////////////////////////////////////////////////////////////
+		// Boom generalized linedefs
+		////////////////////////////////////////////////////////////
+
+		/// <summary>
+		/// Next floor height below the given one among the sector's neighbours, or
+		/// the given height when there is none. The mirror of
+		/// <see cref="FindNextHighestFloor"/>, which Boom also needs.
+		/// </summary>
+		private Fixed FindNextLowestFloor(Sector sector, Fixed currentHeight)
+		{
+			var best = currentHeight;
+			var found = false;
+
+			foreach (var line in sector.Lines)
+			{
+				var other = GetNextSector(line, sector);
+
+				if (other == null)
+				{
+					continue;
+				}
+
+				if (other.FloorHeight < currentHeight)
+				{
+					if (!found || other.FloorHeight > best)
+					{
+						best = other.FloorHeight;
+						found = true;
+					}
+				}
+			}
+
+			return best;
+		}
+
+		private Fixed FindNextHighestCeiling(Sector sector, Fixed currentHeight)
+		{
+			var best = currentHeight;
+			var found = false;
+
+			foreach (var line in sector.Lines)
+			{
+				var other = GetNextSector(line, sector);
+
+				if (other == null)
+				{
+					continue;
+				}
+
+				if (other.CeilingHeight > currentHeight)
+				{
+					if (!found || other.CeilingHeight < best)
+					{
+						best = other.CeilingHeight;
+						found = true;
+					}
+				}
+			}
+
+			return best;
+		}
+
+		private Fixed FindNextLowestCeiling(Sector sector, Fixed currentHeight)
+		{
+			var best = currentHeight;
+			var found = false;
+
+			foreach (var line in sector.Lines)
+			{
+				var other = GetNextSector(line, sector);
+
+				if (other == null)
+				{
+					continue;
+				}
+
+				if (other.CeilingHeight < currentHeight)
+				{
+					if (!found || other.CeilingHeight > best)
+					{
+						best = other.CeilingHeight;
+						found = true;
+					}
+				}
+			}
+
+			return best;
+		}
+
+		/// <summary>
+		/// Runs a Boom generalized line type.
+		///
+		/// The decoding lives in <see cref="BoomGeneralized"/>; this turns the
+		/// decoded definition into the movers the engine already has. The mapping
+		/// is deliberately direct — a generalized floor is a <see cref="FloorMove"/>
+		/// with its destination, speed and crush flag computed from the bit fields,
+		/// not a new kind of mover.
+		///
+		/// What is **not** implemented, and is refused rather than approximated:
+		/// the numeric change model, where Boom searches the map for a sector whose
+		/// floor sits at the target height and copies its texture. Without that
+		/// search the texture would have to come from somewhere else, and a wrong
+		/// texture is worse than the vanilla one. Floors and ceilings whose change
+		/// field asks for a numeric model are treated as trigger models instead,
+		/// which is what most maps mean anyway.
+		/// </summary>
+		public bool DoGeneralized(LineDef line)
+		{
+			var definition = BoomGeneralized.Decode((int)line.Special);
+
+			if (!definition.IsGeneralized)
+			{
+				return false;
+			}
+
+			switch (definition.Family)
+			{
+				case BoomGeneralized.Family.Floor:
+					return DoGeneralizedFloor(line, definition);
+
+				case BoomGeneralized.Family.Ceiling:
+					return DoGeneralizedCeiling(line, definition);
+
+				case BoomGeneralized.Family.Door:
+				case BoomGeneralized.Family.LockedDoor:
+					return DoGeneralizedDoor(line, definition);
+
+				case BoomGeneralized.Family.Lift:
+					return DoGeneralizedLift(line, definition);
+
+				case BoomGeneralized.Family.Crusher:
+					return DoGeneralizedCrusher(line, definition);
+
+				case BoomGeneralized.Family.Stairs:
+					// Boom's generalized stairs differ from the vanilla ones only in
+					// step size and speed, both of which the existing builder takes.
+					return BuildStairs(
+						line,
+						definition.StairStep == 16 ? StairType.Turbo16 : StairType.Build8);
+			}
+
+			return false;
+		}
+
+		private bool DoGeneralizedFloor(LineDef line, BoomGeneralized.Definition definition)
+		{
+			var sectors = world.Map.Sectors;
+			var sectorNumber = -1;
+			var result = false;
+
+			var change = definition.Change != 0;
+			var type = change ? FloorMoveType.GeneralizedChange : FloorMoveType.Generalized;
+
+			while ((sectorNumber = FindSectorFromLineTag(line, sectorNumber)) >= 0)
+			{
+				var sector = sectors[sectorNumber];
+
+				if (sector.SpecialData != null)
+				{
+					continue;
+				}
+
+				result = true;
+
+				var floor = new FloorMove(world);
+				world.Thinkers.Add(floor);
+				sector.SpecialData = floor;
+
+				floor.Type = type;
+				floor.Sector = sector;
+				floor.Crush = definition.Crush;
+				floor.Direction = definition.Up ? 1 : -1;
+				floor.Speed = BoomGeneralized.SpeedOf(definition.Family, definition.Speed);
+
+				floor.FloorDestHeight = GeneralizedFloorTarget(sector, definition);
+
+				if (change)
+				{
+					// The trigger model: the texture comes from the line's own
+					// front sector, which is what Boom does when the numeric model
+					// bit is clear.
+					floor.Texture = (int)line.FrontSector.FloorFlat;
+
+					if (definition.Change == 1)
+					{
+						floor.NewSpecial = 0;
+					}
+					else if (definition.Change == 3)
+					{
+						floor.NewSpecial = line.FrontSector.Special;
+					}
+					else
+					{
+						floor.NewSpecial = sector.Special;
+					}
+				}
+			}
+
+			return result;
+		}
+
+		/// <summary>
+		/// Destination height for a generalized floor, from the target field.
+		///
+		/// The eight targets are Boom's, and they are not interchangeable with the
+		/// vanilla floor types: "lowest neighbouring ceiling" and "next highest
+		/// floor" have no vanilla equivalent in the same direction.
+		/// </summary>
+		private Fixed GeneralizedFloorTarget(Sector sector, BoomGeneralized.Definition definition)
+		{
+			switch (definition.Target)
+			{
+				case 0:
+					// Highest neighbouring floor.
+					return FindHighestFloorSurrounding(sector);
+
+				case 1:
+					// Lowest neighbouring floor.
+					return FindLowestFloorSurrounding(sector);
+
+				case 2:
+					// Next floor up or down.
+					return definition.Up
+						? FindNextHighestFloor(sector, sector.FloorHeight)
+						: FindNextLowestFloor(sector, sector.FloorHeight);
+
+				case 3:
+					// Lowest neighbouring ceiling.
+					return FindLowestCeilingSurrounding(sector);
+
+				case 4:
+					// Own ceiling.
+					return sector.CeilingHeight;
+
+				case 5:
+					// By the shortest texture around: the classic "lift by the
+					// height of the surrounding wall" trick.
+				{
+					var amount = Fixed.FromInt(ShortestLowerTexture(sector));
+					return sector.FloorHeight + (definition.Up ? amount : -amount);
+				}
+
+				case 6:
+					return sector.FloorHeight + (definition.Up ? Fixed.FromInt(24) : Fixed.FromInt(-24));
+
+				default:
+					return sector.FloorHeight + (definition.Up ? Fixed.FromInt(32) : Fixed.FromInt(-32));
+			}
+		}
+
+		private bool DoGeneralizedCeiling(LineDef line, BoomGeneralized.Definition definition)
+		{
+			var sectors = world.Map.Sectors;
+			var sectorNumber = -1;
+			var result = false;
+
+			while ((sectorNumber = FindSectorFromLineTag(line, sectorNumber)) >= 0)
+			{
+				var sector = sectors[sectorNumber];
+
+				if (sector.SpecialData != null)
+				{
+					continue;
+				}
+
+				result = true;
+
+				var ceiling = new CeilingMove(world);
+				world.Thinkers.Add(ceiling);
+				sector.SpecialData = ceiling;
+
+				ceiling.Type = CeilingMoveType.Generalized;
+				ceiling.Sector = sector;
+				ceiling.Crush = definition.Crush;
+				ceiling.Direction = definition.Up ? 1 : -1;
+				ceiling.Speed = BoomGeneralized.SpeedOf(definition.Family, definition.Speed);
+
+				var target = GeneralizedCeilingTarget(sector, definition);
+
+				ceiling.TopHeight = target;
+				ceiling.BottomHeight = target;
+
+				AddActiveCeiling(ceiling);
+			}
+
+			return result;
+		}
+
+		private Fixed GeneralizedCeilingTarget(Sector sector, BoomGeneralized.Definition definition)
+		{
+			switch (definition.Target)
+			{
+				case 0:
+					return FindHighestCeilingSurrounding(sector);
+
+				case 1:
+					return FindLowestCeilingSurrounding(sector);
+
+				case 2:
+					return definition.Up
+						? FindNextHighestCeiling(sector, sector.CeilingHeight)
+						: FindNextLowestCeiling(sector, sector.CeilingHeight);
+
+				case 3:
+					return FindHighestFloorSurrounding(sector);
+
+				case 4:
+					return sector.FloorHeight;
+
+				case 5:
+				{
+					var amount = Fixed.FromInt(ShortestUpperTexture(sector));
+					return sector.CeilingHeight + (definition.Up ? amount : -amount);
+				}
+
+				case 6:
+					return sector.CeilingHeight + (definition.Up ? Fixed.FromInt(24) : Fixed.FromInt(-24));
+
+				default:
+					return sector.CeilingHeight + (definition.Up ? Fixed.FromInt(32) : Fixed.FromInt(-32));
+			}
+		}
+
+		private bool DoGeneralizedDoor(LineDef line, BoomGeneralized.Definition definition)
+		{
+			var sectors = world.Map.Sectors;
+			var sectorNumber = -1;
+			var result = false;
+
+			while ((sectorNumber = FindSectorFromLineTag(line, sectorNumber)) >= 0)
+			{
+				var sector = sectors[sectorNumber];
+
+				if (sector.SpecialData != null)
+				{
+					continue;
+				}
+
+				result = true;
+
+				var door = new VerticalDoor(world);
+				world.Thinkers.Add(door);
+				sector.SpecialData = door;
+
+				door.Sector = sector;
+				door.Speed = BoomGeneralized.SpeedOf(definition.Family, definition.Speed);
+
+				// Boom's delay field is in units of the standard door wait.
+				switch (definition.Delay)
+				{
+					case 1: door.TopWait = 150; break;
+					case 2: door.TopWait = 300; break;
+					case 3: door.TopWait = 1050; break;
+					default: door.TopWait = 35; break;
+				}
+
+				// Door kinds: open-and-close, open, close-and-open, close.
+				switch (definition.DoorKind)
+				{
+					case 0:
+						door.Type = VerticalDoorType.Normal;
+						door.Direction = 1;
+						door.TopHeight = FindLowestCeilingSurrounding(sector) - Fixed.FromInt(4);
+						break;
+
+					case 1:
+						door.Type = VerticalDoorType.Open;
+						door.Direction = 1;
+						door.TopHeight = FindLowestCeilingSurrounding(sector) - Fixed.FromInt(4);
+						break;
+
+					case 2:
+						door.Type = VerticalDoorType.Close30ThenOpen;
+						door.Direction = -1;
+						door.TopHeight = sector.CeilingHeight;
+						break;
+
+					default:
+						door.Type = VerticalDoorType.Close;
+						door.Direction = -1;
+						door.TopHeight = FindLowestCeilingSurrounding(sector) - Fixed.FromInt(4);
+						break;
+				}
+
+				door.TopCountDown = door.TopWait;
+			}
+
+			return result;
+		}
+
+		private bool DoGeneralizedLift(LineDef line, BoomGeneralized.Definition definition)
+		{
+			var sectors = world.Map.Sectors;
+			var sectorNumber = -1;
+			var result = false;
+
+			while ((sectorNumber = FindSectorFromLineTag(line, sectorNumber)) >= 0)
+			{
+				var sector = sectors[sectorNumber];
+
+				if (sector.SpecialData != null)
+				{
+					continue;
+				}
+
+				result = true;
+
+				var plat = new Platform(world);
+				world.Thinkers.Add(plat);
+				sector.SpecialData = plat;
+
+				plat.Type = PlatformType.DownWaitUpStay;
+				plat.Sector = sector;
+				plat.Tag = line.Tag;
+				plat.Speed = BoomGeneralized.SpeedOf(definition.Family, definition.Speed);
+				plat.Low = FindLowestFloorSurrounding(sector);
+
+				if (plat.Low > sector.FloorHeight)
+				{
+					plat.Low = sector.FloorHeight;
+				}
+
+				switch (definition.Target)
+				{
+					case 0:
+						// Lowest neighbouring floor.
+						break;
+
+					case 1:
+						plat.Low = FindNextLowestFloor(sector, sector.FloorHeight);
+						break;
+
+					case 2:
+						plat.Low = FindLowestCeilingSurrounding(sector) - Fixed.FromInt(8);
+						break;
+
+					default:
+						plat.High = FindNextHighestFloor(sector, sector.FloorHeight);
+						break;
+				}
+
+				if (plat.High <= Fixed.Zero)
+				{
+					plat.High = sector.FloorHeight;
+				}
+
+				plat.Wait = definition.Delay * 35;
+				plat.Status = PlatformState.Down;
+				plat.Crush = false;
+			}
+
+			return result;
+		}
+
+		private bool DoGeneralizedCrusher(LineDef line, BoomGeneralized.Definition definition)
+		{
+			var sectors = world.Map.Sectors;
+			var sectorNumber = -1;
+			var result = false;
+
+			while ((sectorNumber = FindSectorFromLineTag(line, sectorNumber)) >= 0)
+			{
+				var sector = sectors[sectorNumber];
+
+				if (sector.SpecialData != null)
+				{
+					continue;
+				}
+
+				result = true;
+
+				var ceiling = new CeilingMove(world);
+				world.Thinkers.Add(ceiling);
+				sector.SpecialData = ceiling;
+
+				ceiling.Type = definition.Silent
+					? CeilingMoveType.SilentCrushAndRaise
+					: CeilingMoveType.CrushAndRaise;
+
+				ceiling.Sector = sector;
+				ceiling.Crush = true;
+				ceiling.Direction = -1;
+				ceiling.Speed = BoomGeneralized.SpeedOf(BoomGeneralized.Family.Floor, definition.Speed);
+
+				ceiling.TopHeight = FindHighestCeilingSurrounding(sector);
+				ceiling.BottomHeight = sector.FloorHeight;
+
+				AddActiveCeiling(ceiling);
+			}
+
+			return result;
+		}
+
+		/// <summary>
+		/// Height of the shortest lower texture around a sector, in map units. Boom
+		/// uses it for the "raise or lower by the surrounding wall height" target.
+		/// </summary>
+		private int ShortestLowerTexture(Sector sector)
+		{
+			var shortest = int.MaxValue;
+
+			foreach (var line in sector.Lines)
+			{
+				if (line.FrontSector == sector && line.BackSector != null)
+				{
+					var height = world.Map.Textures[line.FrontSide.BottomTexture].Height;
+					if (height < shortest)
+					{
+						shortest = height;
+					}
+				}
+
+				if (line.BackSector == sector && line.FrontSector != null && line.BackSide != null)
+				{
+					var height = world.Map.Textures[line.BackSide.BottomTexture].Height;
+					if (height < shortest)
+					{
+						shortest = height;
+					}
+				}
+			}
+
+			return shortest == int.MaxValue ? 0 : shortest;
+		}
+
+		/// <summary>Height of the shortest upper texture around a sector.</summary>
+		private int ShortestUpperTexture(Sector sector)
+		{
+			var shortest = int.MaxValue;
+
+			foreach (var line in sector.Lines)
+			{
+				if (line.FrontSector == sector && line.BackSector != null)
+				{
+					var height = world.Map.Textures[line.FrontSide.TopTexture].Height;
+					if (height < shortest)
+					{
+						shortest = height;
+					}
+				}
+
+				if (line.BackSector == sector && line.FrontSector != null && line.BackSide != null)
+				{
+					var height = world.Map.Textures[line.BackSide.TopTexture].Height;
+					if (height < shortest)
+					{
+						shortest = height;
+					}
+				}
+			}
+
+			return shortest == int.MaxValue ? 0 : shortest;
+		}
+
 		public bool DoFloor(LineDef line, FloorMoveType type)
 		{
 			var sectors = world.Map.Sectors;

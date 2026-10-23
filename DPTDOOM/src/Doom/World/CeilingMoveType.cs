@@ -26,6 +26,12 @@ namespace DPTDOOM
         LowerAndCrush,
         CrushAndRaise,
         FastCrushAndRaise,
-        SilentCrushAndRaise
+        SilentCrushAndRaise,
+
+        /// <summary>
+        /// A Boom generalized ceiling: destination, speed and crush flag come from
+        /// the line's bit fields.
+        /// </summary>
+        Generalized
     }
 }

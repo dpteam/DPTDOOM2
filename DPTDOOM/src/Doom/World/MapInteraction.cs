@@ -97,6 +97,62 @@ namespace DPTDOOM
 		}
 
 		/// <summary>
+		/// Runs a Boom generalized line when its trigger matches the way the line
+		/// was activated.
+		///
+		/// Boom's rule for who may activate: floors and ceilings are player-only,
+		/// while doors, lifts, crushers and stairs carry their own "monsters can
+		/// trigger" bit. Getting that backwards would let a wandering imp open
+		/// every door on the map, so it is checked here rather than in the handler.
+		/// </summary>
+		private bool TryGeneralized(LineDef line, Mobj thing, bool walk, bool gun, bool manual)
+		{
+			var definition = BoomGeneralized.Decode((int)line.Special);
+
+			if (!definition.IsGeneralized)
+			{
+				return false;
+			}
+
+			if (walk && !BoomGeneralized.IsWalk(definition.Trigger))
+			{
+				return false;
+			}
+
+			if (gun && !BoomGeneralized.IsGun(definition.Trigger))
+			{
+				return false;
+			}
+
+			if (manual && !BoomGeneralized.IsManual(definition.Trigger))
+			{
+				return false;
+			}
+
+			if (thing.Player == null)
+			{
+				var playerOnly = definition.Family == BoomGeneralized.Family.Floor ||
+				                 definition.Family == BoomGeneralized.Family.Ceiling;
+
+				if (playerOnly || !definition.MonstersCanTrigger)
+				{
+					return false;
+				}
+			}
+
+			var result = world.SectorAction.DoGeneralized(line);
+
+			// A one-shot trigger becomes inert once it has fired, which is how Boom
+			// stops a walk-over line from repeating.
+			if (result && !BoomGeneralized.IsRepeatable(definition.Trigger))
+			{
+				line.Special = 0;
+			}
+
+			return result;
+		}
+
+		/// <summary>
 		/// Called when a thing uses a special line.
 		/// Only the front sides of lines are usable.
 		/// </summary>
@@ -104,6 +160,11 @@ namespace DPTDOOM
 		{
 			var specials = world.Specials;
 			var sa = world.SectorAction;
+
+			if (TryGeneralized(line, thing, false, false, true))
+			{
+				return true;
+			}
 
 			// Err...
 			// Use the back sides of VERY SPECIAL lines...
@@ -571,6 +632,11 @@ namespace DPTDOOM
 		/// </summary>
 		public void CrossSpecialLine(LineDef line, int side, Mobj thing)
 		{
+			if (TryGeneralized(line, thing, true, false, false))
+			{
+				return;
+			}
+
 			//	Triggers that other things can activate.
 			if (thing.Player == null)
 			{
@@ -1033,6 +1099,11 @@ namespace DPTDOOM
 		/// </summary>
 		public void ShootSpecialLine(Mobj thing, LineDef line)
 		{
+			if (TryGeneralized(line, thing, false, true, false))
+			{
+				return;
+			}
+
 			bool ok;
 
 			//	Impacts that other things can activate.

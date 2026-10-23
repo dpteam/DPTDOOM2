@@ -50,6 +50,18 @@ namespace DPTDOOM
         // Raise to next highest floor, turbo-speed.
         RaiseFloorTurbo,
         DonutRaise,
-        RaiseFloor512
+        RaiseFloor512,
+
+        /// <summary>
+        /// A Boom generalized floor: the destination, speed and crush flag were
+        /// computed from the line's bit fields, so the type only says "move".
+        /// </summary>
+        Generalized,
+
+        /// <summary>
+        /// A Boom generalized floor that also replaces the sector's floor texture
+        /// and special when it arrives.
+        /// </summary>
+        GeneralizedChange
     }
 }

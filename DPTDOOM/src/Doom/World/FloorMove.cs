@@ -68,6 +68,11 @@ namespace DPTDOOM
 							sector.Special = newSpecial;
 							sector.FloorFlat = texture;
 							break;
+
+						case FloorMoveType.GeneralizedChange:
+							sector.Special = newSpecial;
+							sector.FloorFlat = texture;
+							break;
 					}
 				}
 				else if (direction == -1)
@@ -75,6 +80,11 @@ namespace DPTDOOM
 					switch (type)
 					{
 						case FloorMoveType.LowerAndChange:
+							sector.Special = newSpecial;
+							sector.FloorFlat = texture;
+							break;
+
+						case FloorMoveType.GeneralizedChange:
 							sector.Special = newSpecial;
 							sector.FloorFlat = texture;
 							break;
