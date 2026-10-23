@@ -23,11 +23,13 @@ Workflow: `.github/workflows/ci.yml`. Триггеры — push, pull request,
 1. Сборка всего решения в `Release` (включая `net40`).
 2. `tools/check-standalone.ps1` — обещание «без сторонних библиотек».
 3. `tools/test-window.ps1` — заголовок окна (пропускается без IWAD).
-4. `tools/test-master.ps1` — полный цикл directory-протокола против живого
+4. `tools/test-headless.ps1` — воспроизводимость headless-прогонов и
+   прозрачность PK3 (WAD внутри контейнера даёт тот же мир).
+5. `tools/test-master.ps1` — полный цикл directory-протокола против живого
    сервера.
-5. `tools/test-launcher.ps1` — мост HTML-лаунчера.
-6. `tools/package-build.ps1` — ZIP с сборкой, лицензией и исходниками.
-7. Артефакт `dptdoom-windows-<sha>` на 30 дней.
+6. `tools/test-launcher.ps1` — мост HTML-лаунчера.
+7. `tools/package-build.ps1` — ZIP с сборкой, лицензией и исходниками.
+8. Артефакт `dptdoom-windows-<sha>` на 30 дней.
 
 ## Что именно проверяет `check-standalone.ps1`
 

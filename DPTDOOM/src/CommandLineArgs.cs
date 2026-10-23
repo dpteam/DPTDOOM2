@@ -150,6 +150,12 @@ namespace DPTDOOM
                             pwadPaths.Add(path);
                         }
                     }
+                    else if (extension == ".pk3" || extension == ".zip")
+                    {
+                        // A PK3 is a resource container, never an IWAD, so it
+                        // always goes in the load order.
+                        pwadPaths.Add(path);
+                    }
                     else if (extension == ".deh")
                     {
                         dehPaths.Add(path);

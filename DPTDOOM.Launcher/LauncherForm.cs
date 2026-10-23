@@ -374,7 +374,7 @@ namespace DPTDOOM.Launcher
             }
             else if (kind == "iwad")
             {
-                var path = Browse("Основной IWAD", "Doom WAD (*.wad)|*.wad|Все файлы (*.*)|*.*", state.Iwad, false);
+                var path = Browse("Основной IWAD", "Doom WAD или PK3 (*.wad;*.pk3;*.zip)|*.wad;*.pk3;*.zip|Все файлы (*.*)|*.*", state.Iwad, false);
                 if (path != null)
                 {
                     state.Iwad = path;
@@ -382,7 +382,7 @@ namespace DPTDOOM.Launcher
             }
             else if (kind == "pwad")
             {
-                var paths = Browse("PWAD", "Doom WAD (*.wad)|*.wad|Все файлы (*.*)|*.*", null, true);
+                var paths = Browse("PWAD", "Doom WAD или PK3 (*.wad;*.pk3;*.zip)|*.wad;*.pk3;*.zip|Все файлы (*.*)|*.*", null, true);
                 if (paths != null)
                 {
                     foreach (var path in paths.Split('\n'))

@@ -46,7 +46,7 @@ dotnet build DPTDOOM\DPTDOOM.csproj -f net40 -c Release
 | Параметр | Значение |
 |---|---|
 | `-iwad <file>` | основной WAD |
-| `-file <wad...>` | PWAD, порядок загрузки важен |
+| `-file <wad/pk3...>` | PWAD или PK3/ZIP, в порядке загрузки |
 | `-deh <file...>` | DeHackEd патчи |
 | `-warp <map>` / `-warp <ep> <map>` | сразу на карту |
 | `-skill <1..5>` | сложность |
@@ -57,7 +57,7 @@ dotnet build DPTDOOM\DPTDOOM.csproj -f net40 -c Release
 | `-loadgame <0..5>` | загрузка сохранения |
 | `-nomouse`, `-nosound`, `-nosfx`, `-nomusic` | отключение подсистем |
 | `-headless` | без окна (для тестов) |
-| `-tics <n>` | ограничить число тиков в headless |
+| `-tics <n>` | ограничить число **симулированных тиков** в headless (не вызовов `Update`) |
 | `-shot <file.bmp>` | сохранить кадр в BMP |
 | `-soundtest <file.wav>` | отрендерить звуки в WAV (нужен `-headless`) |
 | `-sfx <NAME,...>` | какие звуки рендерить (`PISTOL,SHOTGN`); по умолчанию набор |
@@ -96,6 +96,7 @@ dotnet test DPTDOOMTest\DPTDOOMTest.csproj -c Release
 
 ```powershell
 powershell -NoProfile -File tools\test-master.ps1     # протокол master
+powershell -NoProfile -File tools\test-headless.ps1   # воспроизводимость headless
 powershell -NoProfile -File tools\test-launcher.ps1   # мост HTML-лаунчера
 powershell -NoProfile -File tools\check-standalone.ps1 # нет сторонних зависимостей
 powershell -NoProfile -File tools\test-icon.ps1       # иконка совместима с XP

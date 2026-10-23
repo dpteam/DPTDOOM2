@@ -67,6 +67,14 @@ jobs:
         shell: pwsh
         run: ./tools/test-window.ps1 -Exe ./DPTDOOM/bin/Release/net40/dptdoom.exe
 
+      - name: Headless runs are reproducible
+        # "-tics" used to count Update calls, and the level-start wipe consumed a
+        # variable number of them, so the same command produced a different world
+        # every run. This keeps that fixed, and checks that a WAD inside a PK3
+        # gives the same world as the WAD itself.
+        shell: pwsh
+        run: ./tools/test-headless.ps1
+
       - name: Master directory protocol
         shell: pwsh
         run: |

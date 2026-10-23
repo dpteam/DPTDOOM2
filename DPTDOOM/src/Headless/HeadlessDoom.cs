@@ -26,6 +26,23 @@ namespace DPTDOOM.Headless
     /// </summary>
     internal static class HeadlessDoom
     {
+        /// <summary>
+        /// Game tics simulated so far. Falls back to the update counter while the
+        /// world does not exist yet (opening, menus, demo loading), so a run that
+        /// never reaches a level still terminates.
+        /// </summary>
+        private static int GameTics(Doom doom, int updateCount)
+        {
+            var game = doom.Game;
+
+            if (game != null && game.World != null)
+            {
+                return game.World.LevelTime;
+            }
+
+            return updateCount;
+        }
+
         public static int Run(CommandLineArgs args)
         {
             var config = ConfigUtilities.GetConfig();
@@ -65,7 +82,18 @@ namespace DPTDOOM.Headless
 
                         tics++;
 
-                        var simulated = driver != null ? driver.CurrentTic : tics;
+                        // -tics means simulated game tics, not calls to Update.
+                        //
+                        // It used to count Update calls, and the level-start wipe
+                        // consumes a variable number of them: WipeEffect seeds its
+                        // column heights from DateTime.Now.Millisecond, so it takes
+                        // anywhere from a few to forty updates to finish. The result
+                        // was that "-tics 70" produced a different world every run —
+                        // level time 28, 29, 32, 33, 35 across five launches of the
+                        // same command — and any hash comparison was meaningless.
+                        var simulated = driver != null
+                            ? driver.CurrentTic
+                            : GameTics(doom, tics);
 
                         if (limit > 0 && simulated >= limit)
                         {
@@ -125,7 +153,8 @@ namespace DPTDOOM.Headless
                     {
                         Console.WriteLine(
                             "State: mobj=" + DoomDebug.GetMobjHash(doom.Game.World).ToString("x8") +
-                            " sector=" + DoomDebug.GetSectorHash(doom.Game.World).ToString("x8"));
+                            " sector=" + DoomDebug.GetSectorHash(doom.Game.World).ToString("x8") +
+                            " tic=" + doom.Game.World.LevelTime);
                     }
 
                     if (doom.QuitMessage != null)

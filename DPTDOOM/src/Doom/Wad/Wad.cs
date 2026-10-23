@@ -51,6 +51,17 @@ namespace DPTDOOM
                 missionPack = GetMissionPack(names);
                 gameVersion = GetGameVersion(names);
 
+                if (gameMode == GameMode.Indetermined)
+                {
+                    gameMode = DetectGameModeFromLumps();
+                }
+
+                if (gameMode == GameMode.Indetermined)
+                {
+                    throw new Exception(
+                        "Cannot tell which game this is: no known IWAD name and no maps found.");
+                }
+
                 Console.WriteLine("OK (" + string.Join(", ", fileNames.Select(x => Path.GetFileName(x))) + ")");
             }
             catch (Exception e)
@@ -63,11 +74,93 @@ namespace DPTDOOM
 
         private void AddFile(string fileName)
         {
+            var extension = Path.GetExtension(fileName).ToLowerInvariant();
+
+            if (extension == ".pk3" || extension == ".zip")
+            {
+                AddZip(fileName);
+                return;
+            }
+
             names.Add(Path.GetFileNameWithoutExtension(fileName).ToLower());
 
             var stream = new FileStream(fileName, FileMode.Open, FileAccess.Read);
             streams.Add(stream);
 
+            AddWad(stream);
+        }
+
+        /// <summary>
+        /// Reads a PK3 or ZIP container.
+        ///
+        /// A PK3 is a ZIP. Two kinds of content inside it are useful here:
+        ///
+        ///   - a WAD, which is loaded exactly as if it had been passed on the
+        ///     command line. Plenty of PK3s ship their maps this way, and it is
+        ///     the case the roadmap asked for.
+        ///
+        ///   - loose lumps with a Doom lump name, which older archives use
+        ///     instead of a WAD. Each is registered under its upper-case base name
+        ///     so the existing lookups find it.
+        ///
+        /// What is **not** supported yet: PNG graphics under `flats/`,
+        /// `textures/` and `sprites/`. Those need a PNG decoder, which is a
+        /// separate piece of work; a PK3 that only carries its graphics that way
+        /// will load its maps and use the IWAD's artwork. That limitation is
+        /// recorded in docs/ROADMAP.md rather than papered over.
+        /// </summary>
+        private void AddZip(string fileName)
+        {
+            names.Add(Path.GetFileNameWithoutExtension(fileName).ToLower());
+
+            var archive = new ZipArchiveReader(fileName);
+
+            foreach (var entry in archive.Entries)
+            {
+                var entryExtension = Path.GetExtension(entry.Name).ToLowerInvariant();
+
+                if (entryExtension == ".wad")
+                {
+                    // The entry's own name counts for game detection. A PK3 that
+                    // carries tnt.wad should still be recognised as TNT, even
+                    // though the container is called something else.
+                    names.Add(Path.GetFileNameWithoutExtension(entry.Name).ToLowerInvariant());
+
+                    var data = archive.ReadEntry(entry);
+
+                    var memory = new MemoryStream(data, false);
+                    streams.Add(memory);
+
+                    AddWad(memory);
+                    continue;
+                }
+
+                var lumpName = Path.GetFileNameWithoutExtension(entry.Name).ToUpperInvariant();
+
+                if (lumpName.Length == 0 || lumpName.Length > 8)
+                {
+                    continue;
+                }
+
+                var lumpData = archive.ReadEntry(entry);
+
+                if (lumpData.Length == 0)
+                {
+                    continue;
+                }
+
+                var lumpStream = new MemoryStream(lumpData, false);
+                streams.Add(lumpStream);
+
+                lumpInfos.Add(new LumpInfo(lumpName, lumpStream, 0, lumpData.Length));
+            }
+        }
+
+        /// <summary>
+        /// Reads one WAD out of an open stream and appends its lumps.
+        /// </summary>
+        private void AddWad(Stream stream)
+        {
             string identification;
             int lumpCount;
             int lumpInfoTableOffset;
@@ -106,6 +199,41 @@ namespace DPTDOOM
                     lumpInfos.Add(lumpInfo);
                 }
             }
+        }
+
+        /// <summary>
+        /// Works out the game from the maps the WAD contains.
+        ///
+        /// File names are the usual way — DOOM2.WAD, TNT.WAD — but they are only
+        /// a convention, and a container breaks it: a PK3 called "my-stuff.pk3"
+        /// that happens to carry doom2.wad has no useful name at all. The maps
+        /// cannot lie, though: a commercial game has MAP01, and Doom 1 has E1M1.
+        /// </summary>
+        private GameMode DetectGameModeFromLumps()
+        {
+            if (GetLumpNumber("MAP01") >= 0)
+            {
+                return GameMode.Commercial;
+            }
+
+            if (GetLumpNumber("E1M1") < 0)
+            {
+                return GameMode.Indetermined;
+            }
+
+            // Shareware ships one episode; registered ships three; retail ships
+            // four. That is the only difference the engine cares about.
+            if (GetLumpNumber("E4M1") >= 0)
+            {
+                return GameMode.Retail;
+            }
+
+            if (GetLumpNumber("E2M1") >= 0)
+            {
+                return GameMode.Registered;
+            }
+
+            return GameMode.Shareware;
         }
 
         public int GetLumpNumber(string name)
