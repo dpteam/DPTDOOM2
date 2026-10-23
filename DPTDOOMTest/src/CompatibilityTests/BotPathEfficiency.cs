@@ -62,7 +62,7 @@ namespace DPTDOOMTest.CompatibilityTests
             game.Update(cmds);
 
             var nav = new NavGraph(game.World.Map);
-            runner = new DoomBot(game.World, game.World.ConsolePlayer, nav, brain, style);
+            runner = GameBot.Create(game.World, game.World.ConsolePlayer, nav, brain, style, 0);
 
             for (var tic = 0; tic < maxTics; tic++)
             {
@@ -266,7 +266,7 @@ namespace DPTDOOMTest.CompatibilityTests
                 game.Update(cmds);
 
                 var player = game.World.ConsolePlayer;
-                var bot = new DoomBot(game.World, player, null, null, BotStyle.Rush);
+                var bot = GameBot.Create(game.World, player, null, null, BotStyle.Rush, 0);
 
                 var startX = player.Mobj.X.ToFloat();
                 var startY = player.Mobj.Y.ToFloat();

@@ -66,7 +66,7 @@ namespace DPTDOOMTest.CompatibilityTests
                 game.Update(cmds);
 
                 var nav = new NavGraph(game.World.Map);
-                var bot = new DoomBot(game.World, game.World.ConsolePlayer, nav, null, BotStyle.Rush);
+                var bot = GameBot.Create(game.World, game.World.ConsolePlayer, nav, null, BotStyle.Rush, 0);
 
                 var path = Path.Combine(folder, "trace.json");
                 var trace = new BotTrace(path, game.World);
@@ -136,7 +136,7 @@ namespace DPTDOOMTest.CompatibilityTests
                 game.Update(cmds);
 
                 var nav = new NavGraph(game.World.Map);
-                var bot = new DoomBot(game.World, game.World.ConsolePlayer, nav, null, BotStyle.Rush);
+                var bot = GameBot.Create(game.World, game.World.ConsolePlayer, nav, null, BotStyle.Rush, 0);
 
                 var path = Path.Combine(folder, "trace.json");
                 var trace = new BotTrace(path, game.World);
