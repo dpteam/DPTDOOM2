@@ -131,6 +131,38 @@ Pump 400
 $saved = Invoke-Page "document.getElementById('status').innerHTML"
 Assert-True ($saved -like "*example.test:1234*") "saving the master address is acknowledged"
 
+# 10. Relay fields reach the argument builder.
+#
+# The relay is the reason a host no longer needs a port forward, so the two
+# fields that carry it must not be decorative: host mode with the checkbox must
+# produce -master and -relay, and guest mode with a session id must produce
+# -relay-master and -relay-session. A checked box that builds nothing is the
+# same silent failure as the dead buttons this script was written for.
+Invoke-Page "document.getElementById('masterEndpoint').value='relay.test:25135';document.getElementById('masterSave').onclick();" | Out-Null
+Pump 300
+
+Invoke-Page "var b=document.querySelectorAll('[data-mode]');b[1].onclick();document.getElementById('relay').checked=true;document.getElementById('relay').onchange();" | Out-Null
+Pump 500
+
+$hostPreview = Invoke-Page "document.getElementById('preview').innerHTML"
+Assert-True ($hostPreview -like "*-relay*") "host mode with the relay box passes -relay"
+Assert-True ($hostPreview -like "*-master relay.test:25135*") "host mode passes the master address"
+
+Invoke-Page "var b=document.querySelectorAll('[data-mode]');b[2].onclick();document.getElementById('relaySession').value='0123456789abcdef0123456789abcdef';document.getElementById('relaySession').onchange();" | Out-Null
+Pump 500
+
+$guestPreview = Invoke-Page "document.getElementById('preview').innerHTML"
+Assert-True ($guestPreview -like "*-relay-session 0123456789abcdef0123456789abcdef*") "guest mode passes the relay session"
+Assert-True ($guestPreview -like "*-relay-master relay.test:25135*") "guest mode passes the relay master"
+
+# The session id is the one value a person copies by hand, and a stale one sends
+# the next game to the previous host's tunnel.
+Invoke-Page "var b=document.querySelectorAll('[data-mode]');b[1].onclick();document.getElementById('relay').checked=false;document.getElementById('relay').onchange();" | Out-Null
+Pump 400
+
+$plainPreview = Invoke-Page "document.getElementById('preview').innerHTML"
+Assert-True ($plainPreview -notlike "*-relay *") "host mode without the relay box stays direct"
+
 $form.Close()
 
 if ($failures -gt 0) {

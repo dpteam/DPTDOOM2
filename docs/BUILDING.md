@@ -101,6 +101,7 @@ powershell -NoProfile -File tools\test-launcher.ps1   # мост HTML-лаунч
 powershell -NoProfile -File tools\check-standalone.ps1 # нет сторонних зависимостей
 powershell -NoProfile -File tools\test-icon.ps1       # иконка совместима с XP
 powershell -NoProfile -File tools\test-window.ps1     # заголовок окна (нужен IWAD)
+powershell -NoProfile -File tools\test-relay.ps1      # игра через relay (нужен IWAD)
 ```
 
 Отдельно, это не тест: открыть порты в файрволе для хоста и master —

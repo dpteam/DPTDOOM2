@@ -18,6 +18,7 @@ using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading;
+using DPTDOOM.Shared;
 
 namespace DPTDOOM.Net
 {
@@ -125,6 +126,11 @@ namespace DPTDOOM.Net
         private TcpClient hostConnection;
         private Thread acceptThread;
 
+        private readonly List<RelayLink> relayLinks = new List<RelayLink>();
+        private RelayLink relayLink;
+        private Thread relayHostThread;
+        private Presence presence;
+
         private volatile bool disposed;
         private volatile bool faulted;
         private volatile bool finished;
@@ -161,7 +167,21 @@ namespace DPTDOOM.Net
         public static NetSession Join(string address, int port, string name, int timeoutMs)
         {
             var session = new NetSession(false, 2, name);
-            session.Connect(address, port, timeoutMs);
+
+            try
+            {
+                session.Connect(address, port, timeoutMs);
+            }
+            catch
+            {
+                // A failed connect must not leave a half-open socket retrying in
+                // the background - the caller may immediately retry through the
+                // relay, and the leaked socket would still be trying the direct
+                // address.
+                session.Dispose();
+                throw;
+            }
+
             return session;
         }
 
@@ -215,15 +235,25 @@ namespace DPTDOOM.Net
         private void AcceptGuest(TcpClient client)
         {
             client.NoDelay = true;
+            AcceptGuestStream(client.GetStream(), client);
+        }
 
-            var stream = client.GetStream();
+        /// <summary>
+        /// A guest arriving through the relay is not a socket this process
+        /// accepted - it is a stream the master paired with us. Everything after
+        /// the hello is identical, which is deliberate: the game cannot tell a
+        /// direct guest from a relayed one, so a relayed session cannot drift
+        /// from a direct one.
+        /// </summary>
+        private void AcceptGuestStream(Stream stream, TcpClient client)
+        {
             var reader = new BinaryReader(stream);
 
             var hello = ReadFrame(reader);
             if (hello == null || hello.Value.Type != NetProtocol.TypeHello)
             {
                 SendFrame(stream, NetProtocol.TypeReject, EncodeReason("expected hello"), null);
-                client.Close();
+                CloseGuest(client, stream);
                 return;
             }
 
@@ -239,7 +269,7 @@ namespace DPTDOOM.Net
                 if (connectedPlayers >= expectedPlayers)
                 {
                     SendFrame(stream, NetProtocol.TypeReject, EncodeReason("session is full"), null);
-                    client.Close();
+                    CloseGuest(client, stream);
                     return;
                 }
 
@@ -264,6 +294,28 @@ namespace DPTDOOM.Net
                 thread.Start();
 
                 Console.WriteLine("Net: '" + guestName + "' joined as player " + (playerIndex + 1) + ".");
+            }
+        }
+
+        private static void CloseGuest(TcpClient client, Stream stream)
+        {
+            try
+            {
+                stream.Close();
+            }
+            catch
+            {
+            }
+
+            if (client != null)
+            {
+                try
+                {
+                    client.Close();
+                }
+                catch
+                {
+                }
             }
         }
 
@@ -307,7 +359,84 @@ namespace DPTDOOM.Net
 
             hostConnection.EndConnect(result);
 
-            var stream = hostConnection.GetStream();
+            Handshake(hostConnection.GetStream());
+        }
+
+        /// <summary>
+        /// Joins through the master's relay. The stream is already open, so there
+        /// is no address to dial and no timeout of our own: the only thing left
+        /// is the ordinary game handshake, byte for byte the same as direct.
+        /// </summary>
+        public static NetSession JoinRelay(RelayLink link, string name)
+        {
+            var session = new NetSession(false, 2, name);
+            session.relayLink = link;
+            session.Relayed = true;
+            session.Handshake(link.Stream);
+            return session;
+        }
+
+        /// <summary>
+        /// Opens and keeps a relay channel for this host and accepts whatever the
+        /// master pairs with it. The local listener keeps running, so a host is
+        /// reachable both directly and through the relay with one command line.
+        /// </summary>
+        public void StartRelayHost(string masterAddress, int masterPort, byte[] auth)
+        {
+            relayHostThread = new Thread(() => RelayHostLoop(masterAddress, masterPort, auth));
+            relayHostThread.IsBackground = true;
+            relayHostThread.Name = "DPTDOOM relay host";
+            relayHostThread.Start();
+        }
+
+        private void RelayHostLoop(string address, int port, byte[] auth)
+        {
+            while (!disposed && !faulted && !finished)
+            {
+                RelayLink link = null;
+
+                try
+                {
+                    link = MasterClient.RelayHost(address, port, auth, 10000);
+
+                    Console.WriteLine("Net: relay channel open, waiting for a guest.");
+                    Relayed = true;
+
+                    lock (sync)
+                    {
+                        relayLinks.Add(link);
+                    }
+
+                    AcceptGuestStream(link.Stream, null);
+
+                    lock (sync)
+                    {
+                        relayLinks.Remove(link);
+                    }
+
+                    // Do not park a second waiting channel while the session is
+                    // full: the master would hold a socket open for a guest that
+                    // could never be admitted.
+                    while (!disposed && !faulted && PlayerCount >= expectedPlayers)
+                    {
+                        Thread.Sleep(500);
+                    }
+                }
+                catch (Exception e)
+                {
+                    if (disposed || faulted || finished)
+                    {
+                        break;
+                    }
+
+                    Console.WriteLine("Net: relay attach failed: " + e.Message);
+                    Thread.Sleep(2000);
+                }
+            }
+        }
+
+        private void Handshake(Stream stream)
+        {
             var reader = new BinaryReader(stream);
 
             using (var payload = new MemoryStream())
@@ -641,6 +770,11 @@ namespace DPTDOOM.Net
             return new Frame { Type = type, Payload = payload };
         }
 
+        public void AttachPresence(Presence value)
+        {
+            presence = value;
+        }
+
         public void Finish()
         {
             finished = true;
@@ -666,6 +800,19 @@ namespace DPTDOOM.Net
 
             disposed = true;
 
+            if (presence != null)
+            {
+                try
+                {
+                    presence.Dispose();
+                }
+                catch
+                {
+                }
+
+                presence = null;
+            }
+
             try
             {
                 if (listener != null)
@@ -682,7 +829,7 @@ namespace DPTDOOM.Net
                 try
                 {
                     SendFrame(peer.Stream, NetProtocol.TypeBye, new byte[0], peer);
-                    peer.Client.Close();
+                    peer.Stream.Close();
                 }
                 catch
                 {
@@ -698,6 +845,33 @@ namespace DPTDOOM.Net
                 catch
                 {
                 }
+            }
+
+            if (relayLink != null)
+            {
+                try
+                {
+                    relayLink.Dispose();
+                }
+                catch
+                {
+                }
+            }
+
+            lock (sync)
+            {
+                foreach (var link in relayLinks)
+                {
+                    try
+                    {
+                        link.Dispose();
+                    }
+                    catch
+                    {
+                    }
+                }
+
+                relayLinks.Clear();
             }
         }
 
@@ -735,6 +909,7 @@ namespace DPTDOOM.Net
         public bool Faulted => faulted;
         public string FaultReason => faultReason;
         public bool Finished => finished;
+        public bool Relayed { get; private set; }
 
         public string[] Names
         {

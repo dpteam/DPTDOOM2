@@ -36,6 +36,14 @@ namespace DPTDOOM.Master
             string logPath = null;
             int? port = null;
             int? lease = null;
+            bool relayEnabled = false;
+            int? relayPort = null;
+            int? relaySessions = null;
+            int? relayPerSource = null;
+            int? relayRate = null;
+            int? relayBuffer = null;
+            int? relayIdle = null;
+            int? relayLifetime = null;
 
             try
             {
@@ -61,6 +69,39 @@ namespace DPTDOOM.Master
 
                         case "--log":
                             logPath = Next(args, ref i);
+                            break;
+
+                        case "--relay":
+                            relayEnabled = true;
+                            break;
+
+                        case "--relay-port":
+                            relayPort = int.Parse(Next(args, ref i), CultureInfo.InvariantCulture);
+                            relayEnabled = true;
+                            break;
+
+                        case "--relay-sessions":
+                            relaySessions = int.Parse(Next(args, ref i), CultureInfo.InvariantCulture);
+                            break;
+
+                        case "--relay-per-source":
+                            relayPerSource = int.Parse(Next(args, ref i), CultureInfo.InvariantCulture);
+                            break;
+
+                        case "--relay-rate":
+                            relayRate = int.Parse(Next(args, ref i), CultureInfo.InvariantCulture);
+                            break;
+
+                        case "--relay-buffer":
+                            relayBuffer = int.Parse(Next(args, ref i), CultureInfo.InvariantCulture);
+                            break;
+
+                        case "--relay-idle-seconds":
+                            relayIdle = int.Parse(Next(args, ref i), CultureInfo.InvariantCulture);
+                            break;
+
+                        case "--relay-lifetime-seconds":
+                            relayLifetime = int.Parse(Next(args, ref i), CultureInfo.InvariantCulture);
                             break;
 
                         case "--version":
@@ -131,6 +172,55 @@ namespace DPTDOOM.Master
                 config.LogPath = logPath;
             }
 
+            try
+            {
+                if (relayEnabled)
+                {
+                    config.RelayEnabled = true;
+                }
+
+                if (relayPort.HasValue)
+                {
+                    config.RelayPort = Check(relayPort, 1, 65535, "--relay-port");
+                    config.RelayEnabled = true;
+                }
+
+                if (relaySessions.HasValue)
+                {
+                    config.RelaySessions = Check(relaySessions, 1, 64, "--relay-sessions");
+                }
+
+                if (relayPerSource.HasValue)
+                {
+                    config.RelayPerSource = Check(relayPerSource, 1, 16, "--relay-per-source");
+                }
+
+                if (relayRate.HasValue)
+                {
+                    config.RelayRate = Check(relayRate, 4096, 1048576, "--relay-rate");
+                }
+
+                if (relayBuffer.HasValue)
+                {
+                    config.RelayBuffer = Check(relayBuffer, 512, 65536, "--relay-buffer");
+                }
+
+                if (relayIdle.HasValue)
+                {
+                    config.RelayIdleSeconds = Check(relayIdle, 10, 3600, "--relay-idle-seconds");
+                }
+
+                if (relayLifetime.HasValue)
+                {
+                    config.RelayLifetimeSeconds = Check(relayLifetime, 60, 86400, "--relay-lifetime-seconds");
+                }
+            }
+            catch (Exception e)
+            {
+                Console.Error.WriteLine(e.Message);
+                return 2;
+            }
+
             if (config.LogPath == null)
             {
                 config.LogPath = Path.Combine(PortablePaths.GetDataDirectory(), "dptdoom-master.log");
@@ -184,6 +274,16 @@ namespace DPTDOOM.Master
             return 0;
         }
 
+        private static int Check(int? value, int min, int max, string name)
+        {
+            if (value.Value < min || value.Value > max)
+            {
+                throw new Exception(name + " must be " + min + ".." + max);
+            }
+
+            return value.Value;
+        }
+
         private static string Next(string[] args, ref int index)
         {
             index++;
@@ -201,11 +301,19 @@ namespace DPTDOOM.Master
             Console.WriteLine();
             Console.WriteLine("Usage: dptdoom-master [options]");
             Console.WriteLine();
-            Console.WriteLine("  --config <file>        read bind/port/lease/banlist/allowlist from a file");
+            Console.WriteLine("  --config <file>        read bind/port/lease/relay/banlist/allowlist from a file");
             Console.WriteLine("  --bind <ipv4>          listen address (default 127.0.0.1)");
             Console.WriteLine("  --port <1..65535>      listen port (default 25135)");
             Console.WriteLine("  --lease-seconds <3..300>  listing lifetime (default 60)");
             Console.WriteLine("  --log <file>           log file (default user/dptdoom-master.log)");
+            Console.WriteLine("  --relay                accept relay attach (host without a port forward)");
+            Console.WriteLine("  --relay-port <1..65535>  relay listener (default: control port + 1)");
+            Console.WriteLine("  --relay-sessions <1..64>  concurrent relay pairs (default 8)");
+            Console.WriteLine("  --relay-per-source <1..16>  waiting hosts per source address (default 4)");
+            Console.WriteLine("  --relay-rate <4096..1048576>  bytes per second per direction (default 65536)");
+            Console.WriteLine("  --relay-buffer <512..65536>  relay copy buffer (default 4096)");
+            Console.WriteLine("  --relay-idle-seconds <10..3600>  silence before a relay closes (default 120)");
+            Console.WriteLine("  --relay-lifetime-seconds <60..86400>  hard relay cap (default 21600)");
             Console.WriteLine("  --version              print the version");
             Console.WriteLine("  --help                 print this text");
         }

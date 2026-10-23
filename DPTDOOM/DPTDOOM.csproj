@@ -36,4 +36,16 @@
     <InternalsVisibleTo Include="DPTDOOMTest" />
   </ItemGroup>
 
+  <!--
+    The game ships as a single executable, so it cannot reference
+    DPTDOOM.Shared.dll even though that assembly is ours. The master protocol
+    sources are compiled into the game instead: one copy of the code, no extra
+    file next to dptdoom.exe, and the wire format still has a single definition.
+  -->
+  <ItemGroup>
+    <Compile Include="..\DPTDOOM.Shared\MasterProtocol.cs" Link="Shared\MasterProtocol.cs" />
+    <Compile Include="..\DPTDOOM.Shared\MasterSessionInfo.cs" Link="Shared\MasterSessionInfo.cs" />
+    <Compile Include="..\DPTDOOM.Shared\MasterClient.cs" Link="Shared\MasterClient.cs" />
+  </ItemGroup>
+
 </Project>

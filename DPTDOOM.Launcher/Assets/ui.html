@@ -63,6 +63,7 @@
       <button id="refreshServers" type="button">Обновить список</button>
       <p class="hint">Объявления недоверенные: master не проверяет прямой порт и ресурсы.
          Автоматических запросов нет — только по кнопке.</p>
+      <p class="hint">Этот же адрес используется для relay в сетевой игре.</p>
       <div id="serverList" class="server-list">Нажми «Обновить список».</div>
     </div>
 
@@ -105,11 +106,14 @@
         <div id="network" class="hidden">
           <label>Адрес напарника<input id="address" type="text" value="127.0.0.1:5029" spellcheck="false"></label>
           <label>TCP-порт<input id="port" type="number" min="1024" max="65535" value="5029"></label>
+          <label class="check"><input id="relay" type="checkbox">Хостить через relay</label>
+          <label>Relay-сессия · гостю<input id="relaySession" type="text" maxlength="32" spellcheck="false" placeholder="32 hex-символа от хоста"></label>
           <p class="hint">Одинаковые ресурсы, карта и правила на обеих сторонах.
              Хост ждёт игрока до 5 минут.</p>
-          <p class="hint warn">Хосту нужен <b>проброс порта</b> на роутере и открытый порт
-             в файрволе. Relay через master объявлен в протоколе, но <b>не реализован</b>:
-             без проброса напарник снаружи не подключится. См. docs/NETWORK.md.</p>
+          <p class="hint">Relay идёт через master, адрес — в разделе «Серверы».
+             Хост не открывает порт и не пробрасывает его на роутере: обе стороны
+             подключаются наружу, master их соединяет. Прямое подключение
+             пробуется первым, relay — запасной путь.</p>
         </div>
         <div id="botOptions" class="hidden">
           <label>Ботов-напарников

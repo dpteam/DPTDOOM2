@@ -109,11 +109,34 @@ namespace DPTDOOM.Launcher
                 builder.Append("-net host ");
                 Append(builder, "-players", "2");
                 Append(builder, "-port", state.Port.ToString());
+
+                if (state.Relay && !string.IsNullOrEmpty(state.Master))
+                {
+                    // The host registers itself, so the field does not need a
+                    // port forward: both ends connect out to the master.
+                    Append(builder, "-master", state.Master);
+                    builder.Append("-relay ");
+                }
             }
             else if (state.Mode == 2)
             {
                 builder.Append("-net join ");
-                Append(builder, "-address", JoinAddress(state));
+
+                var relaySession = (state.RelaySession ?? "").Trim();
+
+                if (!string.IsNullOrEmpty(state.Address) || relaySession.Length == 0)
+                {
+                    Append(builder, "-address", JoinAddress(state));
+                }
+
+                if (relaySession.Length > 0 && !string.IsNullOrEmpty(state.Master))
+                {
+                    // Direct first, relay second: the game itself falls back, so
+                    // a LAN game stays direct and only an unreachable address
+                    // costs the extra round trip.
+                    Append(builder, "-relay-master", state.Master);
+                    Append(builder, "-relay-session", relaySession);
+                }
             }
             else if (state.Mode == 3)
             {

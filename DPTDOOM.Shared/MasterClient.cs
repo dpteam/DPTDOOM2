@@ -99,6 +99,121 @@ namespace DPTDOOM.Shared
         }
 
         /// <summary>
+        /// Opens the host end of a relay channel. What comes back is already an
+        /// established TCP stream: the caller hands it straight to the game
+        /// handshake and never speaks the directory protocol again.
+        ///
+        /// The relay is not a simulation server. It copies bytes, so the game
+        /// stays lockstep between host and guest and no world state crosses the
+        /// master.
+        /// </summary>
+        public static RelayLink RelayHost(string host, int port, byte[] auth, int timeoutMs)
+        {
+            return OpenRelay(host, port, MasterProtocol.OpRelayHost, auth, timeoutMs);
+        }
+
+        /// <summary>Opens the guest end of a relay channel by public session id.</summary>
+        public static RelayLink RelayJoin(string host, int port, byte[] sessionId, int timeoutMs)
+        {
+            return OpenRelay(host, port, MasterProtocol.OpRelayJoin, sessionId, timeoutMs);
+        }
+
+        /// <summary>
+        /// One relay request, following at most one redirect.
+        ///
+        /// A client knows only the master's address; the operator decides where
+        /// the relay actually listens and says so with a redirect. Following it
+        /// here means the launcher, the game and the tests do not each have to
+        /// carry a second port around.
+        /// </summary>
+        private static RelayLink OpenRelay(string host, int port, ushort operation, byte[] payload, int timeoutMs)
+        {
+            var deadline = Environment.TickCount + timeoutMs;
+            var relayPort = port;
+
+            for (var attempt = 0; attempt < 2; attempt++)
+            {
+                var client = Connect(host, relayPort, deadline);
+                var stream = client.GetStream();
+
+                var header = MasterProtocol.Header(operation, payload.Length, 0);
+
+                WriteAll(stream, header, deadline);
+                WriteAll(stream, payload, deadline);
+                stream.Flush();
+
+                var responseHeader = new byte[MasterProtocol.HeaderSize];
+                ReadExactly(stream, responseHeader, 0, responseHeader.Length, deadline);
+
+                var status = (ushort)MasterProtocol.Get16(responseHeader, 12);
+                var length = (int)MasterProtocol.Get32(responseHeader, 8);
+
+                if (length < 0 || length > MasterProtocol.MaxBodySize)
+                {
+                    client.Close();
+                    throw new Exception("The master sent an invalid relay response length.");
+                }
+
+                var body = new byte[length];
+                ReadExactly(stream, body, 0, length, deadline);
+
+                if (status == MasterProtocol.StatusRedirect && attempt == 0)
+                {
+                    if (body.Length < 2)
+                    {
+                        client.Close();
+                        throw new Exception("The master sent a relay redirect without a port.");
+                    }
+
+                    client.Close();
+                    relayPort = MasterProtocol.Get16(body, 0);
+                    continue;
+                }
+
+                if (status != MasterProtocol.StatusOk)
+                {
+                    client.Close();
+                    throw new MasterException(status, DescribeRelayStatus(status));
+                }
+
+                // The request/response deadline must not reach the game stream:
+                // a relay session is idle for long stretches by design.
+                client.ReceiveTimeout = 0;
+                client.SendTimeout = 0;
+
+                return new RelayLink(client, stream);
+            }
+
+            throw new Exception("The master kept redirecting the relay request.");
+        }
+
+        private static TcpClient Connect(string host, int port, int deadline)
+        {
+            var client = new TcpClient();
+            client.NoDelay = true;
+
+            var result = client.BeginConnect(host, port, null, null);
+
+            if (!result.AsyncWaitHandle.WaitOne(Remaining(deadline), false))
+            {
+                // Leave the socket in a known state before throwing, or the
+                // half-open connect keeps retrying in the background.
+                try
+                {
+                    client.Close();
+                }
+                catch
+                {
+                }
+
+                throw new SocketException((int)SocketError.TimedOut);
+            }
+
+            client.EndConnect(result);
+            return client;
+        }
+
+        /// <summary>
         /// One request, one response.
         ///
         /// The time budget is **total**, not per operation. The first version set
@@ -115,58 +230,35 @@ namespace DPTDOOM.Shared
         {
             var deadline = Environment.TickCount + timeoutMs;
 
-            using (var client = new TcpClient())
+            using (var client = Connect(host, port, deadline))
+            using (var stream = client.GetStream())
             {
-                client.NoDelay = true;
+                var header = MasterProtocol.Header(operation, payload.Length, 0);
 
-                var result = client.BeginConnect(host, port, null, null);
+                WriteAll(stream, header, deadline);
+                WriteAll(stream, payload, deadline);
+                stream.Flush();
 
-                if (!result.AsyncWaitHandle.WaitOne(Remaining(deadline), false))
+                var responseHeader = new byte[MasterProtocol.HeaderSize];
+                ReadExactly(stream, responseHeader, 0, responseHeader.Length, deadline);
+
+                var status = (ushort)MasterProtocol.Get16(responseHeader, 12);
+                var length = (int)MasterProtocol.Get32(responseHeader, 8);
+
+                if (length < 0 || length > MasterProtocol.MaxBodySize)
                 {
-                    // Leave the socket in a known state before throwing, or the
-                    // half-open connect keeps retrying in the background.
-                    try
-                    {
-                        client.Close();
-                    }
-                    catch
-                    {
-                    }
-
-                    throw new SocketException((int)SocketError.TimedOut);
+                    throw new Exception("The master sent an invalid response length.");
                 }
 
-                client.EndConnect(result);
+                var body = new byte[length];
+                ReadExactly(stream, body, 0, length, deadline);
 
-                using (var stream = client.GetStream())
+                if (status != MasterProtocol.StatusOk)
                 {
-                    var header = MasterProtocol.Header(operation, payload.Length, 0);
-
-                    WriteAll(stream, header, deadline);
-                    WriteAll(stream, payload, deadline);
-                    stream.Flush();
-
-                    var responseHeader = new byte[MasterProtocol.HeaderSize];
-                    ReadExactly(stream, responseHeader, 0, responseHeader.Length, deadline);
-
-                    var status = (ushort)MasterProtocol.Get16(responseHeader, 12);
-                    var length = (int)MasterProtocol.Get32(responseHeader, 8);
-
-                    if (length < 0 || length > MasterProtocol.MaxBodySize)
-                    {
-                        throw new Exception("The master sent an invalid response length.");
-                    }
-
-                    var body = new byte[length];
-                    ReadExactly(stream, body, 0, length, deadline);
-
-                    if (status != MasterProtocol.StatusOk)
-                    {
-                        throw new MasterException(status, DescribeStatus(status));
-                    }
-
-                    return body;
+                    throw new MasterException(status, DescribeStatus(status));
                 }
+
+                return body;
             }
         }
 
@@ -211,6 +303,55 @@ namespace DPTDOOM.Shared
                 case MasterProtocol.StatusCapacity: return "the master is full";
                 case MasterProtocol.StatusRedirect: return "the master redirected the request";
                 default: return "status " + status;
+            }
+        }
+
+        private static string DescribeRelayStatus(ushort status)
+        {
+            switch (status)
+            {
+                case MasterProtocol.StatusBadRequest: return "relay is not enabled on this master";
+                case MasterProtocol.StatusUnauthorized: return "the session lease is not valid for relay";
+                case MasterProtocol.StatusConflict: return "no waiting host for this session id, or this host is already attached";
+                case MasterProtocol.StatusCapacity: return "the relay is full";
+                default: return DescribeStatus(status);
+            }
+        }
+    }
+
+    /// <summary>
+    /// An open relay tunnel. The stream is a plain TCP stream, which is the point:
+    /// the game does not know whether it is talking directly or through the
+    /// master, so a relayed session cannot drift from a direct one.
+    /// </summary>
+    public sealed class RelayLink : IDisposable
+    {
+        private readonly TcpClient client;
+
+        public RelayLink(TcpClient client, Stream stream)
+        {
+            this.client = client;
+            Stream = stream;
+        }
+
+        public Stream Stream { get; private set; }
+
+        public void Dispose()
+        {
+            try
+            {
+                Stream.Close();
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                client.Close();
+            }
+            catch
+            {
             }
         }
     }

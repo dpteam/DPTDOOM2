@@ -174,6 +174,73 @@ namespace DPTDOOM.Shared
             return null;
         }
 
+        /// <summary>
+        /// Session identifiers travel as 16 raw bytes on the wire and as 32 hex
+        /// characters whenever a person has to retype one. Keeping both
+        /// conversions here means the master, the launcher and the tests cannot
+        /// disagree about the spelling.
+        /// </summary>
+        public static string IdToHex(byte[] id)
+        {
+            const string digits = "0123456789abcdef";
+
+            var text = new char[id.Length * 2];
+
+            for (var i = 0; i < id.Length; i++)
+            {
+                text[i * 2] = digits[id[i] >> 4];
+                text[i * 2 + 1] = digits[id[i] & 0x0F];
+            }
+
+            return new string(text);
+        }
+
+        /// <summary>Returns null when the text is not exactly 32 hex characters.</summary>
+        public static byte[] IdFromHex(string text)
+        {
+            if (text == null || text.Length != 32)
+            {
+                return null;
+            }
+
+            var id = new byte[16];
+
+            for (var i = 0; i < 16; i++)
+            {
+                var high = HexDigit(text[i * 2]);
+                var low = HexDigit(text[i * 2 + 1]);
+
+                if (high < 0 || low < 0)
+                {
+                    return null;
+                }
+
+                id[i] = (byte)((high << 4) | low);
+            }
+
+            return id;
+        }
+
+        private static int HexDigit(char ch)
+        {
+            if (ch >= '0' && ch <= '9')
+            {
+                return ch - '0';
+            }
+
+            if (ch >= 'a' && ch <= 'f')
+            {
+                return ch - 'a' + 10;
+            }
+
+            if (ch >= 'A' && ch <= 'F')
+            {
+                return ch - 'A' + 10;
+            }
+
+            return -1;
+        }
+
         public static bool IsPrintableAscii(string text)
         {
             foreach (var ch in text)

@@ -18,6 +18,8 @@
   музыка — MUS → MIDI через системный синтезатор. Никаких DLL рядом с EXE.
 - **Headless** — прогон без окна, с дампом кадра и хешами мира (для тестов).
 - **Кооператив по сети** — lockstep TCP-сессия host/join на 2–4 игроков.
+- **Relay** — игра без проброса порта: хост и гость подключаются наружу к master,
+  он соединяет их потоки. Снимает и NAT hairpin.
 - **Кооп-боты** — `-coopbots 1..3` добавляет ботов в одиночную игру.
 - **HTML-лаунчер** — интерфейс на HTML/CSS/JS внутри EXE.
 - **Master server** — нативный сервер списка сессий.
@@ -152,14 +154,20 @@ dptdoom.exe -iwad doom2.wad -net host -players 2 -port 5029 -warp 1
 # Подключение к хосту
 dptdoom.exe -iwad doom2.wad -net join -address 192.168.1.10:5029
 
+# Без проброса порта: хост публикуется на master и открывает relay-канал
+dptdoom.exe -iwad doom2.wad -net host -players 2 -master play.dartpower.xyz:25135 -relay
+
+# Гость идёт туда же по id, который напечатал хост
+dptdoom.exe -iwad doom2.wad -net join -relay-master play.dartpower.xyz:25135 -relay-session <id>
+
 # Headless: 70 тиков и кадр в BMP
 dptdoom.exe -headless -iwad doom2.wad -warp 1 -tics 70 -shot frame.bmp
 
 # Бенчмарк демо
 dptdoom.exe -headless -iwad doom2.wad -timedemo demo1
 
-# Master server
-dptdoom-master.exe --bind 0.0.0.0 --port 25135
+# Master server с relay
+dptdoom-master.exe --bind 0.0.0.0 --port 25135 --relay
 ```
 
 ## Структура
@@ -181,6 +189,7 @@ DPTDOOMTest/        unit и compatibility тесты
 ```powershell
 dotnet test DPTDOOMTest\DPTDOOMTest.csproj -c Release
 powershell -NoProfile -File tools/test-master.ps1
+powershell -NoProfile -File tools/test-relay.ps1
 powershell -NoProfile -File tools/test-launcher.ps1
 powershell -NoProfile -File tools/check-standalone.ps1
 ```

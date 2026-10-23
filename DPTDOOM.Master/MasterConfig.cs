@@ -36,6 +36,18 @@ namespace DPTDOOM.Master
         public string LogPath;
         public int MaxClients = 24;
 
+        // Relay is opt-in. Enabling it turns the master into a proxy for other
+        // people's game traffic, which is a different promise than "a directory
+        // that answers two UDP-sized questions" - so it is never on by default.
+        public bool RelayEnabled;
+        public int RelayPort; // 0 = Port + 1
+        public int RelaySessions = 8;
+        public int RelayPerSource = 4;
+        public int RelayRate = 65536;
+        public int RelayBuffer = 4096;
+        public int RelayIdleSeconds = 120;
+        public int RelayLifetimeSeconds = 21600;
+
         public static MasterConfig Load(string path, List<string> warnings)
         {
             var config = new MasterConfig();
@@ -115,6 +127,51 @@ namespace DPTDOOM.Master
 
                     case "log":
                         config.LogPath = Resolve(baseDirectory, value);
+                        break;
+
+                    case "relay":
+                        if (value == "on" || value == "yes" || value == "true")
+                        {
+                            config.RelayEnabled = true;
+                        }
+                        else if (value == "off" || value == "no" || value == "false")
+                        {
+                            config.RelayEnabled = false;
+                        }
+                        else
+                        {
+                            throw new Exception("relay must be 'on' or 'off'");
+                        }
+
+                        break;
+
+                    case "relay-port":
+                        config.RelayPort = ParseInt(value, 1, 65535, "relay-port");
+                        config.RelayEnabled = true;
+                        break;
+
+                    case "relay-sessions":
+                        config.RelaySessions = ParseInt(value, 1, 64, "relay-sessions");
+                        break;
+
+                    case "relay-per-source":
+                        config.RelayPerSource = ParseInt(value, 1, 16, "relay-per-source");
+                        break;
+
+                    case "relay-rate":
+                        config.RelayRate = ParseInt(value, 4096, 1048576, "relay-rate");
+                        break;
+
+                    case "relay-buffer":
+                        config.RelayBuffer = ParseInt(value, 512, 65536, "relay-buffer");
+                        break;
+
+                    case "relay-idle-seconds":
+                        config.RelayIdleSeconds = ParseInt(value, 10, 3600, "relay-idle-seconds");
+                        break;
+
+                    case "relay-lifetime-seconds":
+                        config.RelayLifetimeSeconds = ParseInt(value, 60, 86400, "relay-lifetime-seconds");
                         break;
 
                     default:

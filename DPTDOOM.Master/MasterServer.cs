@@ -43,6 +43,7 @@ namespace DPTDOOM.Master
         private readonly Dictionary<uint, RateBucket> buckets = new Dictionary<uint, RateBucket>();
 
         private TcpListener listener;
+        private RelayService relay;
         private volatile bool stopping;
         private long startTime;
 
@@ -80,6 +81,17 @@ namespace DPTDOOM.Master
             log.Info("DPT.DOOM master v" + ApplicationInfo.Version + " listening on " + bind + ":" + config.Port);
             log.Info("lease=" + config.LeaseSeconds + "s bans=" + bans.Count +
                      " allow=" + allowed.Count + " mode=" + (config.AllowListOnly ? "allowlist" : "open"));
+
+            if (config.RelayEnabled)
+            {
+                // A separate listener, not the control port: a relay connection
+                // lives for hours and moves megabytes, while a directory request
+                // is one bounded exchange. Sharing one port would mean one accept
+                // loop with two completely different lifetimes, and one slow
+                // reader would start holding up LIST replies.
+                relay = new RelayService(config, log, directory, IsRelaySourceAllowed);
+                relay.Start();
+            }
 
             var acceptThread = new Thread(AcceptLoop);
             acceptThread.IsBackground = true;
@@ -183,10 +195,16 @@ namespace DPTDOOM.Master
                     var operation = (ushort)MasterProtocol.Get16(header, 6);
                     var length = MasterProtocol.RequestLength(header);
 
-                    if (operation == MasterProtocol.OpRelayHost || operation == MasterProtocol.OpRelayJoin)
+                    // Drain the request body before any reply. Replying and then
+                    // closing with unread bytes still in the receive buffer makes
+                    // Windows send a reset instead of a clean shutdown, and the
+                    // reset destroys the reply that was just written. The client
+                    // then sees "connection forcibly closed" for what should have
+                    // been a clear Unauthorized or Redirect.
+                    var body = new byte[length];
+                    if (length > 0 && !ReadExactly(stream, body, 0, length))
                     {
-                        log.Event(Describe(host, remote) + " relay operation is not implemented yet");
-                        Reply(stream, operation, new byte[0], MasterProtocol.StatusBadRequest);
+                        log.Event(Describe(host, remote) + " truncated request");
                         return;
                     }
 
@@ -204,17 +222,37 @@ namespace DPTDOOM.Master
                         return;
                     }
 
+                    if (operation == MasterProtocol.OpRelayHost || operation == MasterProtocol.OpRelayJoin)
+                    {
+                        // The request reached the control port, which never
+                        // carries game bytes. Answer with the relay port instead
+                        // of a refusal so a client only ever has to know the
+                        // master's address: one extra round trip, no extra
+                        // setting, and the operator stays free to move the relay.
+                        //
+                        // The ban and allow lists are checked first: a refused
+                        // source should learn it is refused, not be handed the
+                        // address of a second listener to try.
+                        if (relay != null)
+                        {
+                            var redirect = new byte[2];
+                            MasterProtocol.Put16(redirect, 0, relay.Port);
+                            log.Event(Describe(host, remote) + " relay redirected to port " + relay.Port);
+                            Reply(stream, operation, redirect, MasterProtocol.StatusRedirect);
+                        }
+                        else
+                        {
+                            log.Event(Describe(host, remote) + " relay rejected: not enabled on this master");
+                            Reply(stream, operation, new byte[0], MasterProtocol.StatusBadRequest);
+                        }
+
+                        return;
+                    }
+
                     if (!TakeRateLimit(host))
                     {
                         log.Event(Describe(host, remote) + " rejected: rate limit");
                         Reply(stream, operation, new byte[0], MasterProtocol.StatusCapacity);
-                        return;
-                    }
-
-                    var body = new byte[length];
-                    if (length > 0 && !ReadExactly(stream, body, 0, length))
-                    {
-                        log.Event(Describe(host, remote) + " truncated request");
                         return;
                     }
 
@@ -245,7 +283,7 @@ namespace DPTDOOM.Master
             {
                 case MasterProtocol.OpList:
                 {
-                    var reply = directory.List(now);
+                    var reply = directory.List(now, relay != null);
                     Reply(stream, operation, reply, MasterProtocol.StatusOk);
                     break;
                 }
@@ -373,6 +411,16 @@ namespace DPTDOOM.Master
             return false;
         }
 
+        private bool IsRelaySourceAllowed(byte[] host)
+        {
+            if (IsBanned(host))
+            {
+                return false;
+            }
+
+            return !config.AllowListOnly || IsAllowed(host);
+        }
+
         private bool TakeRateLimit(byte[] host)
         {
             var key = AddressRule.ToUInt32(new IPAddress(host));
@@ -407,6 +455,11 @@ namespace DPTDOOM.Master
         public void Stop()
         {
             stopping = true;
+
+            if (relay != null)
+            {
+                relay.Stop();
+            }
 
             if (listener != null)
             {

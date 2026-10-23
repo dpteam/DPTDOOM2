@@ -73,6 +73,9 @@ var DPT = (function () {
         parts.push(mods.join(LIST_SEPARATOR));
         parts.push(String(slot));
         parts.push(String(parseInt($('coopbots').value, 10) || 3));
+        parts.push($('masterEndpoint').value);
+        parts.push($('relaySession').value);
+        parts.push($('relay').checked ? '1' : '0');
 
         return parts.join('\n');
     }
@@ -108,6 +111,15 @@ var DPT = (function () {
         var bots = parseInt(parts[FIELDS.length + 4], 10) || 3;
         $('coopbots').value = String(bots);
 
+        // An older state has nothing at these offsets; keep the field defaults
+        // in that case rather than blanking the master address.
+        if (typeof parts[FIELDS.length + 5] === 'string' && parts[FIELDS.length + 5].length > 0) {
+            $('masterEndpoint').value = parts[FIELDS.length + 5];
+        }
+
+        $('relaySession').value = parts[FIELDS.length + 6] || '';
+        $('relay').checked = (parts[FIELDS.length + 7] || '0') === '1';
+
         syncMode();
         renderMods();
         requestPreview();
@@ -130,6 +142,8 @@ var DPT = (function () {
         $('network').className = (mode === 1 || mode === 2) ? '' : 'hidden';
         $('botOptions').className = mode === 3 ? '' : 'hidden';
         $('address').disabled = mode !== 2;
+        $('relay').disabled = mode !== 1;
+        $('relaySession').disabled = mode !== 2;
     }
 
     function renderMods() {
@@ -254,10 +268,13 @@ var DPT = (function () {
         title.appendChild(document.createTextNode(f[0]));
         card.appendChild(title);
 
+        var session = f.length > 6 ? f[6] : '';
+        var relay = f.length > 7 && f[7] === '1';
+
         var detail = document.createElement('p');
         detail.appendChild(document.createTextNode(
             f[1] + ':' + f[2] + ' · ' + f[3] + ' · skill ' + f[4] +
-            ' · TTL ' + f[5] + 's · UNVERIFIED'));
+            ' · TTL ' + f[5] + 's · ' + (relay ? 'DIRECT + RELAY' : 'DIRECT') + ' · UNVERIFIED'));
         card.appendChild(detail);
 
         var address = f[1] + ':' + f[2];
@@ -266,10 +283,16 @@ var DPT = (function () {
         pick.appendChild(document.createTextNode('Выбрать'));
         pick.onclick = function () {
             $('address').value = address;
+
+            // The relay session is part of the listing, so picking a server
+            // fills in everything a guest needs. Leaving it stale would send
+            // the next game to the previous host's tunnel.
+            $('relaySession').value = relay ? session : '';
+
             mode = 2;
             syncMode();
             requestPreview();
-            setStatus('Адрес выбран: ' + address, false);
+            setStatus('Адрес выбран: ' + address + (relay ? ' (relay доступен)' : ''), false);
         };
 
         card.appendChild(pick);

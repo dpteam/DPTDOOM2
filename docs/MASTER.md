@@ -18,7 +18,10 @@ dptdoom-master.exe --bind 0.0.0.0 --port 25135
 
 Параметры: `--config <file>`, `--bind <ipv4>`, `--port <1..65535>`,
 `--lease-seconds <3..300>`, `--log <file>`, `--version`, `--help`.
-CLI перекрывает конфиг.
+Relay: `--relay`, `--relay-port <1..65535>`, `--relay-sessions <1..64>`,
+`--relay-per-source <1..16>`, `--relay-rate <4096..1048576>`,
+`--relay-buffer <512..65536>`, `--relay-idle-seconds <10..3600>`,
+`--relay-lifetime-seconds <60..86400>`. CLI перекрывает конфиг.
 
 По умолчанию слушает `127.0.0.1:25135`, lease 60 с. Это безопасный дефолт, а не
 ошибка: для внешнего доступа нужен `--bind 0.0.0.0` или `bind=` в конфиге.
@@ -54,11 +57,23 @@ allowlist=allow.txt
 access-mode=open
 log=dptdoom-master.log
 max-clients=24
+
+relay=on
+relay-port=25136
+relay-sessions=8
+relay-per-source=4
+relay-rate=65536
+relay-buffer=4096
+relay-idle-seconds=120
+relay-lifetime-seconds=21600
 ```
 
 `access-mode=allowlist` включается **только явно**; наличие файла allowlist само
 по себе режим не включает. Пустой allowlist при включённом режиме — отказ
 стартовать, а не тихое «пускаем всех».
+
+`relay-port=` включает relay так же, как `--relay-port` в командной строке: порта
+без включённого relay не бывает.
 
 ## Списки правил
 
@@ -94,8 +109,8 @@ Directory v1, одно ограниченное TCP-соединение на з
 | 2 | REGISTER | info 132 байта | lease 48 байт |
 | 3 | HEARTBEAT | auth 40 байт | 4 байта (lease) |
 | 4 | REMOVE | auth 40 байт | 4 байта |
-| 5 | RELAY_HOST | — | пока не реализовано |
-| 6 | RELAY_JOIN | — | пока не реализовано |
+| 5 | RELAY_HOST | auth 40 байт | OK, затем байты; на порту каталога — REDIRECT |
+| 6 | RELAY_JOIN | id 16 байт | OK, затем байты; на порту каталога — REDIRECT |
 
 Статусы: 0 OK, 1 BAD_REQUEST, 2 UNAUTHORIZED, 3 CONFLICT, 4 CAPACITY,
 5 REDIRECT.
@@ -115,8 +130,22 @@ Directory v1, одно ограниченное TCP-соединение на з
 129..131 резерв, нули
 ```
 
+Строка LIST (160 байт):
+
+```
+0..15    id сессии
+16..19   адрес
+20..23   остаток lease, секунды
+24..155  запись сессии выше
+156..159 flags: bit 0 = relay доступен
+```
+
+Флаг relay — свойство master, а не объявления, но публикуется в каждой строке:
+клиент не должен предлагать relay, который оператор не включал.
+
 Регистрация выдаёт `lease`: 16 байт id + 24 байта токена. Токен привязан к
 исходному IP, поэтому перехваченный lease с другого адреса не продлит запись.
+Этот же lease служит ключом к relay — отдельного пароля нет.
 
 ## Ограничения
 
@@ -127,14 +156,15 @@ Directory v1, одно ограниченное TCP-соединение на з
 - Регистрация без аутентификации: любой может объявить сессию, поэтому
   лаунчер помечает строки как **UNVERIFIED**.
 
-Relay (прямое соединение через master, когда NAT не пускает) объявлен в
-протоколе, но **не реализован** в этой версии: операции 5/6 отвечают
-BAD_REQUEST. Не считать это работающей функцией.
+Relay включён отдельно: `--relay` поднимает второй слушатель на порту каталога +1
+(`--relay-port` задаёт его явно). Это TCP-прокси между хостом и гостем, а не
+игровой сервер: симуляция остаётся на хосте. Полное описание — `docs/RELAY.md`,
+включая лимиты `--relay-*`, обработку half-close и то, чего relay не делает.
 
 ## Проверка
 
 ```powershell
-dptdoom-master.exe --port 25140 --log master.log
+dptdoom-master.exe --port 25140 --relay --log master.log
 powershell -NoProfile -File tools\test-master.ps1 -Port 25140
 ```
 

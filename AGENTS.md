@@ -23,6 +23,11 @@
   сохранения, логи и личные пути.
 - Исключение: showcase PNG в `docs/images/` для README, снятые из кадрового
   буфера или окна лаунчера. Без рамок, рабочего стола и чужих окон.
+  **Без тени окна и без полос фона по краям.** `GetWindowRect` отдаёт
+  расширенную рамку, в которую на Windows 10/11 входит ~7 px невидимой границы и
+  тени; снимать надо по `DwmGetWindowAttribute(DWMWA_EXTENDED_FRAME_BOUNDS)`.
+  `tools/capture-window.ps1` это уже делает — не заменять его на `CopyFromScreen`
+  по `GetWindowRect`.
 - Сохранять GPL и copyright исходных авторов (id Software, Nobuaki Tanaka).
   Код из `refs/` не становится своим от того, что лежит рядом: сначала
   проверять происхождение и лицензию.
@@ -34,6 +39,7 @@ dotnet build DPTDOOM.slnx -c Release
 dotnet test DPTDOOMTest\DPTDOOMTest.csproj -c Release
 powershell -NoProfile -File tools\check-standalone.ps1
 powershell -NoProfile -File tools\test-master.ps1
+powershell -NoProfile -File tools\test-relay.ps1
 powershell -NoProfile -File tools\test-launcher.ps1
 ```
 

@@ -79,13 +79,21 @@ jobs:
         shell: pwsh
         run: |
           $master = Start-Process -FilePath ./DPTDOOM.Master/bin/Release/net40/dptdoom-master.exe `
-            -ArgumentList '--port', '25145', '--log', 'master-ci.log' -PassThru
+            -ArgumentList '--port', '25145', '--relay', '--relay-port', '25146', '--log', 'master-ci.log' -PassThru
           try {
             Start-Sleep -Seconds 2
             ./tools/test-master.ps1 -Port 25145
           } finally {
             if (-not $master.HasExited) { $master.Kill() }
           }
+
+      - name: Relay end to end
+        # Skips itself when no IWAD is available, like the headless test. When an
+        # IWAD is present it runs a real host and a real guest through the relay
+        # and compares world hashes, which is the only check that proves the
+        # tunnel is invisible to the simulation.
+        shell: pwsh
+        run: ./tools/test-relay.ps1
 
       - name: Window menu and tray
         shell: pwsh

@@ -51,6 +51,15 @@ namespace DPTDOOM.Launcher
         /// <summary>How many local co-op bots join when Mode is 3.</summary>
         public int CoopBots = 3;
 
+        /// <summary>Master used for the relay. One address for listing and relay.</summary>
+        public string Master = "";
+
+        /// <summary>Public session id a guest types in, 32 hex characters.</summary>
+        public string RelaySession = "";
+
+        /// <summary>Host through the master's relay instead of a port forward.</summary>
+        public bool Relay;
+
         public string Encode()
         {
             var flags = 0;
@@ -72,7 +81,10 @@ namespace DPTDOOM.Launcher
                 Mode.ToString(CultureInfo.InvariantCulture),
                 string.Join(ListSeparator.ToString(), Pwads.ToArray()),
                 Slot.ToString(CultureInfo.InvariantCulture),
-                CoopBots.ToString(CultureInfo.InvariantCulture)
+                CoopBots.ToString(CultureInfo.InvariantCulture),
+                Master,
+                RelaySession,
+                Relay ? "1" : "0"
             });
         }
 
@@ -117,6 +129,9 @@ namespace DPTDOOM.Launcher
 
             state.Slot = ParseInt(Field(fields, 10), 1, 3, 1);
             state.CoopBots = ParseInt(Field(fields, 11), 1, 3, 3);
+            state.Master = Field(fields, 12).Trim();
+            state.RelaySession = Field(fields, 13).Trim();
+            state.Relay = Field(fields, 14).Trim() == "1";
 
             return state;
         }
@@ -149,6 +164,20 @@ namespace DPTDOOM.Launcher
         public string Theme = "dark";
         public string Master = "play.dartpower.xyz:25135";
         public LauncherState State = new LauncherState();
+
+        /// <summary>
+        /// A settings file written before the relay existed carries no master in
+        /// its state, and an empty field would silently disable the relay. Seed
+        /// it once from the saved master so an upgrade keeps working without the
+        /// user retyping an address that never changed.
+        /// </summary>
+        private void SeedRelayDefaults()
+        {
+            if (string.IsNullOrEmpty(State.Master))
+            {
+                State.Master = Master;
+            }
+        }
 
         public static string GetDataDirectory()
         {
@@ -202,6 +231,7 @@ namespace DPTDOOM.Launcher
 
             if (!File.Exists(path))
             {
+                settings.SeedRelayDefaults();
                 return settings;
             }
 
@@ -239,6 +269,7 @@ namespace DPTDOOM.Launcher
                 }
             }
 
+            settings.SeedRelayDefaults();
             return settings;
         }
 

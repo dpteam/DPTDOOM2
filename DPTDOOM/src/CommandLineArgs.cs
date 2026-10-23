@@ -61,6 +61,10 @@ namespace DPTDOOM
         public readonly Arg<int> players;
         public readonly Arg<string> address;
         public readonly Arg<string> name;
+        public readonly Arg<string> master;
+        public readonly Arg relay;
+        public readonly Arg<string> relayMaster;
+        public readonly Arg<string> relaySession;
         public readonly Arg botinput;
         public readonly Arg<string> userdir;
         public readonly Arg<string> soundtest;
@@ -114,6 +118,10 @@ namespace DPTDOOM
             players = GetInt(args, "-players");
             address = GetString(args, "-address");
             name = GetString(args, "-name");
+            master = GetString(args, "-master");
+            relay = new Arg(args.Contains("-relay"));
+            relayMaster = GetString(args, "-relay-master");
+            relaySession = GetString(args, "-relay-session");
             botinput = new Arg(args.Contains("-botinput"));
             userdir = GetString(args, "-userdir");
             soundtest = GetString(args, "-soundtest");

@@ -14,6 +14,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using DPTDOOM.Shared;
 
 namespace DPTDOOM.Master
@@ -141,7 +142,78 @@ namespace DPTDOOM.Master
             return MasterProtocol.StatusUnauthorized;
         }
 
+        /// <summary>
+        /// Checks a relay attach against a live listing: the 40 bytes are the
+        /// 16-byte session id followed by the 24-byte secret, and the request has
+        /// to come from the address that registered the session. Reusing the
+        /// listing identity means there is no second credential to leak.
+        /// </summary>
+        public bool AuthorizeRelay(byte[] host, byte[] auth, out byte[] id)
+        {
+            id = null;
+
+            if (auth == null || auth.Length != MasterProtocol.AuthSize)
+            {
+                return false;
+            }
+
+            Prune(Now());
+
+            for (var i = 0; i < entries.Length; i++)
+            {
+                var entry = entries[i];
+
+                if (!entry.Active || !SameBytes(entry.Id, auth, 0, 16))
+                {
+                    continue;
+                }
+
+                if (!SameBytes(entry.Host, host, 0, 4) || !SameBytes(entry.Token, auth, 16, 24))
+                {
+                    return false;
+                }
+
+                id = new byte[16];
+                Array.Copy(entry.Id, id, 16);
+                return true;
+            }
+
+            return false;
+        }
+
+        public bool IsActive(byte[] id)
+        {
+            Prune(Now());
+
+            for (var i = 0; i < entries.Length; i++)
+            {
+                var entry = entries[i];
+
+                if (entry.Active && SameBytes(entry.Id, id, 0, 16))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static long Now()
+        {
+            return Stopwatch.GetTimestamp() / (Stopwatch.Frequency / 1000);
+        }
+
         public byte[] List(long now)
+        {
+            return List(now, false);
+        }
+
+        /// <summary>
+        /// The relay flag is a property of the master, not of the listing, but it
+        /// is published per row because that is the only place a client looks.
+        /// A client must not offer a relay that the operator has not enabled.
+        /// </summary>
+        public byte[] List(long now, bool relayAvailable)
         {
             Prune(now);
 
@@ -165,6 +237,11 @@ namespace DPTDOOM.Master
                 MasterProtocol.Put32(body, row + 20, remaining);
 
                 Array.Copy(entry.Info, 0, body, row + 24, MasterProtocol.InfoSize);
+
+                if (relayAvailable)
+                {
+                    MasterProtocol.Put32(body, row + 156, MasterProtocol.RelayAvailable);
+                }
 
                 count++;
             }

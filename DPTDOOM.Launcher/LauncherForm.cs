@@ -585,8 +585,11 @@ namespace DPTDOOM.Launcher
         private void OnMasterSave(string endpoint)
         {
             settings.Master = (endpoint ?? "").Trim();
+            state.Master = settings.Master;
             settings.State = state;
             settings.Save();
+
+            SendState();
             SendStatus("Master сохранён: " + settings.Master, false);
         }
 
@@ -699,7 +702,9 @@ namespace DPTDOOM.Launcher
                 builder.Append(entry.Info.Port).Append('\t');
                 builder.Append(Sanitize(entry.Info.MapText)).Append('\t');
                 builder.Append(entry.Info.Skill).Append('\t');
-                builder.Append(entry.LeaseSecondsLeft);
+                builder.Append(entry.LeaseSecondsLeft).Append('\t');
+                builder.Append(MasterProtocol.IdToHex(entry.Id)).Append('\t');
+                builder.Append(entry.RelayAvailable ? "1" : "0");
             }
 
             return builder.ToString();
