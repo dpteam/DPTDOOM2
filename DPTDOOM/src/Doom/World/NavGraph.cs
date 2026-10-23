@@ -71,6 +71,9 @@ namespace DPTDOOM
         /// </summary>
         private const float BannedCost = 1e18F;
 
+        /// <summary>Half the width of a player body, in map units.</summary>
+        private const float BodyRadius = 16F;
+
         /// <summary>Sampling step used to test whether a line stays in a sector.</summary>
         private const float VisibilityStep = 8F;
 
@@ -290,6 +293,19 @@ namespace DPTDOOM
                 {
                     ConnectDirected(edges, costs, xs, ys, back, front);
                 }
+
+                // Also link the neighbours of the doorway points, when they are
+                // close to it.
+                //
+                // One edge per portal is fragile: if the nearest point on either
+                // side happens to be a poor one, that doorway is effectively shut
+                // for the search even though a person could walk through it. A
+                // few extra links cost nothing and make the graph survive a bad
+                // point.
+                LinkNeighbours(edges, costs, xs, ys, pointsOfSector, line.FrontSector.Number, front, back,
+                    CanWalk(line, line.FrontSector, line.BackSector));
+                LinkNeighbours(edges, costs, xs, ys, pointsOfSector, line.BackSector.Number, back, front,
+                    CanWalk(line, line.BackSector, line.FrontSector));
             }
 
             // 6. Flatten to compressed sparse rows.
@@ -466,6 +482,49 @@ namespace DPTDOOM
             return best;
         }
 
+        /// <summary>
+        /// Links the points near a doorway point to the point on the far side of
+        /// the doorway.
+        ///
+        /// One edge per portal is fragile: if the nearest point on either side is
+        /// a poor one, the doorway is effectively shut for the search even though
+        /// a person could walk through it. A few extra links cost nothing and let
+        /// the graph survive a bad point.
+        /// </summary>
+        private static void LinkNeighbours(
+            List<int>[] edges, List<float>[] costs,
+            List<float> xs, List<float> ys,
+            List<int>[] pointsOfSector,
+            int sectorNumber, int anchor, int farSide, bool allowed)
+        {
+            if (!allowed || anchor < 0 || farSide < 0)
+            {
+                return;
+            }
+
+            var list = pointsOfSector[sectorNumber];
+
+            for (var i = 0; i < list.Count; i++)
+            {
+                var node = list[i];
+
+                if (node == anchor)
+                {
+                    continue;
+                }
+
+                var ax = xs[node] - xs[anchor];
+                var ay = ys[node] - ys[anchor];
+
+                if (ax * ax + ay * ay > 64F * 64F)
+                {
+                    continue;
+                }
+
+                ConnectDirected(edges, costs, xs, ys, node, farSide);
+            }
+        }
+
         private static void Connect(
             List<int>[] edges, List<float>[] costs,
             List<float> xs, List<float> ys,
@@ -499,6 +558,20 @@ namespace DPTDOOM
             List<float> xs, List<float> ys, List<int> sectors, List<bool> doors,
             List<int>[] pointsOfSector)
         {
+            // A point a body cannot stand on is worse than no point: the bot
+            // targets it, cannot touch it, and grinds against the wall next to it
+            // — which is exactly the "circling" that shows up in the traces as a
+            // bot pinned to one spot with "stuck" climbing.
+            //
+            // Only this sector's own walls count. Checking every wall on the map
+            // rejected most points, including doorway points, and cut the mesh
+            // apart; a doorway is precisely where a body squeezes past a wall, so
+            // those are exempt too.
+            if (!door && !IsStandable(x, y, sectorNumber))
+            {
+                return -1;
+            }
+
             // Merge with an existing point of the same sector that is close by.
             // Only that sector's list is scanned: merging across sectors would be
             // meaningless, and scanning every point made the build quadratic.
@@ -541,6 +614,57 @@ namespace DPTDOOM
             var dy = nodeY[a] - nodeY[b];
 
             return dx * dx + dy * dy;
+        }
+
+        /// <summary>
+        /// True when a player-sized body fits at this position: no wall of this
+        /// sector is closer than the body radius.
+        /// </summary>
+        private bool IsStandable(float x, float y, int sectorNumber)
+        {
+            foreach (var line in map.Sectors[sectorNumber].Lines)
+            {
+                if (line.BackSector != null)
+                {
+                    continue;
+                }
+
+                var ax = line.Vertex1.X.ToFloat();
+                var ay = line.Vertex1.Y.ToFloat();
+                var bx = line.Vertex2.X.ToFloat();
+                var by = line.Vertex2.Y.ToFloat();
+
+                if (DistanceToSegment(x, y, ax, ay, bx, by) < BodyRadius - 1F)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>Shortest distance from a point to a line segment.</summary>
+        private static float DistanceToSegment(
+            float px, float py, float ax, float ay, float bx, float by)
+        {
+            var dx = bx - ax;
+            var dy = by - ay;
+            var lengthSquared = dx * dx + dy * dy;
+
+            if (lengthSquared <= 0.0001F)
+            {
+                return (float)Math.Sqrt((px - ax) * (px - ax) + (py - ay) * (py - ay));
+            }
+
+            var t = ((px - ax) * dx + (py - ay) * dy) / lengthSquared;
+
+            if (t < 0F) t = 0F;
+            else if (t > 1F) t = 1F;
+
+            var cx = ax + dx * t;
+            var cy = ay + dy * t;
+
+            return (float)Math.Sqrt((px - cx) * (px - cx) + (py - cy) * (py - cy));
         }
 
         private bool InsideSector(float x, float y, int sectorNumber)

@@ -109,6 +109,12 @@ namespace DPTDOOM
         private float bestDistance = float.MaxValue;
 
         private int detourCount;
+
+        // Stepping stone around the corner of a concave sector. Held until it is
+        // reached or the bot leaves the sector; recomputing it every tic made the
+        // bot chase a target that slid across the room.
+        private int stoneNode = -1;
+        private bool stoneValid;
         private int blockerTics;
 
 
@@ -167,6 +173,9 @@ namespace DPTDOOM
         private float wanderX;
         private float wanderY;
         private int wanderTics;
+
+        /// <summary>How long a wander target is held before it is reconsidered.</summary>
+        private const int WanderHold = 70;
 
         // Where the bot has to stand to end the level, and the sector that
         // contains the exit line.
@@ -396,6 +405,7 @@ namespace DPTDOOM
                 if (lookahead > pathIndex)
                 {
                     pathIndex = lookahead;
+                    stoneValid = false;
 
                     // Note: noProgressTics is deliberately *not* reset here.
                     // Resetting it made the bot stand at a locked door forever:
@@ -433,22 +443,41 @@ namespace DPTDOOM
             // bot used to do in the L-shaped corridor before the exit.
             //
             // When that happens, aim at the nearer point of the same sector that
-            // is visible from here and lies in the right direction. The path is
-            // untouched: this is only the point to walk at for this tic.
+            // is visible from here. The stepping stone is **held** until the bot
+            // reaches it or leaves the sector, and that stickiness is the whole
+            // point: recomputing it every tic means "the visible node closest to
+            // the goal", which changes as the bot moves, so the target slides
+            // across the room and the bot chases it in circles.
             var hereX = mobj.X.ToFloat();
             var hereY = mobj.Y.ToFloat();
+
+            if (stoneValid &&
+                (nav.GetSector(stoneNode) != sector || DistanceTo(stoneNode, mobj) < ArrivedDistance))
+            {
+                stoneValid = false;
+            }
 
             if (nav.GetSector(path[pathIndex]) == sector &&
                 !nav.LineClear(hereX, hereY, legTargetX, legTargetY, sector))
             {
-                var step = nav.VisibleNodeTowards(sector, hereX, hereY, legTargetX, legTargetY, MinStepDistance);
-
-                if (step >= 0)
+                if (!stoneValid)
                 {
-                    legTargetX = nav.GetX(step);
-                    legTargetY = nav.GetY(step);
-                    legIsDoor = nav.IsDoor(step);
+                    stoneNode = nav.VisibleNodeTowards(
+                        sector, hereX, hereY, legTargetX, legTargetY, MinStepDistance);
+
+                    stoneValid = stoneNode >= 0;
                 }
+
+                if (stoneValid)
+                {
+                    legTargetX = nav.GetX(stoneNode);
+                    legTargetY = nav.GetY(stoneNode);
+                    legIsDoor = nav.IsDoor(stoneNode);
+                }
+            }
+            else
+            {
+                stoneValid = false;
             }
 
             var dx = legTargetX - mobj.X.ToFloat();
@@ -528,11 +557,29 @@ namespace DPTDOOM
 
                 if (other != null)
                 {
-                    // Walk directly away: reverse the bearing to the other body.
-                    var away = TurnTo(mobj.Angle, Geometry.PointToAngle(mobj.X, mobj.Y, other.X, other.Y));
+                    // Face away from the other body, then walk. Not both at once:
+                    // backing up while turning traces an arc, and in a spawn pile
+                    // that arc is a small circle — the bot rotates around its
+                    // neighbour instead of leaving. Same geometry as everywhere
+                    // else in this file.
+                    var toOther = Geometry.PointToAngle(mobj.X, mobj.Y, other.X, other.Y);
+                    var away = TurnTo(mobj.Angle, toOther);
 
-                    cmd.AngleTurn = (short)MathEx.Clamp(away, -0x1000, 0x1000);
-                    cmd.ForwardMove = -30;
+                    // Reversing the bearing: a half turn from the direction to the
+                    // other player.
+                    var awayTurn = away > 0 ? away - 0x8000 : away + 0x8000;
+
+                    cmd.AngleTurn = (short)MathEx.Clamp(awayTurn, -0x1000, 0x1000);
+
+                    if (Math.Abs(awayTurn) > 0x2000)
+                    {
+                        cmd.ForwardMove = 0;
+                    }
+                    else
+                    {
+                        cmd.ForwardMove = 30;
+                    }
+
                     cmd.SideMove = 0;
 
                     return;
@@ -570,24 +617,43 @@ namespace DPTDOOM
                 bestDistance = float.MaxValue;
 
                 nav.Penalize(path[pathIndex]);
-                pathLength = 0;
             }
 
             if (noProgressTics > MaxStuckTics)
             {
-                // Blocked on this waypoint for over a second. If it is a door,
-                // the passage is closed for the rest of the level: a door that
-                // has not opened by now is locked or already spent, and the bot
-                // would otherwise stand here until the level ran out.
-                if (legIsDoor && pathLength > 1)
+                // Blocked on this waypoint for over a second.
+                //
+                // If the waypoint is close, the bot is standing at it and simply
+                // cannot touch the exact point: a doorway node can sit nearer the
+                // wall than a body's radius, and no amount of pushing closes the
+                // last few units. Treat it as reached and move on. The trace
+                // shows this as a bot pinned to one pair of coordinates for
+                // thousands of tics with "stuck" climbing, which is exactly the
+                // grinding the eye reads as circling.
+                if (pathLength > 0 && pathIndex < pathLength &&
+                    DistanceTo(path[pathIndex], mobj) < ArrivedDistance + 12F)
                 {
-                    nav.BanPassage(
-                        path[Math.Max(0, pathIndex - 1)],
-                        path[pathIndex]);
+                    // Standing on it. Step over it and keep the route: clearing
+                    // the path here would replan to the same unreachable point.
+                    pathIndex++;
+                    stoneValid = false;
                 }
                 else
                 {
-                    nav.Penalize(path[pathIndex]);
+                    if (legIsDoor && pathLength > 1)
+                    {
+                        // A door that has not opened by now is locked or already
+                        // spent: close the passage for the rest of the level.
+                        nav.BanPassage(
+                            path[Math.Max(0, pathIndex - 1)],
+                            path[pathIndex]);
+                    }
+                    else
+                    {
+                        nav.Penalize(path[pathIndex]);
+                    }
+
+                    pathLength = 0;
                 }
 
                 noProgressTics = 0;
@@ -598,8 +664,6 @@ namespace DPTDOOM
                     detourCount = 0;
                     AbandonPath();
                 }
-
-                pathLength = 0;
             }
         }
 
@@ -680,6 +744,14 @@ namespace DPTDOOM
 
             AbandonPath();
         }
+        private float DistanceTo(int node, Mobj mobj)
+        {
+            var dx = nav.GetX(node) - mobj.X.ToFloat();
+            var dy = nav.GetY(node) - mobj.Y.ToFloat();
+
+            return (float)Math.Sqrt(dx * dx + dy * dy);
+        }
+
         private int LastNode()
         {
             return pathLength > 0 ? path[pathLength - 1] : -1;
@@ -694,6 +766,7 @@ namespace DPTDOOM
 
             pathLength = 0;
             pathIndex = 0;
+            stoneValid = false;
         }
 
         ////////////////////////////////////////////////////////////
@@ -977,6 +1050,20 @@ namespace DPTDOOM
             var hereY = mobj.Y.ToFloat();
             var sector = mobj.Subsector.Sector.Number;
 
+            // Commit to one wander target instead of picking a new one every
+            // tic.
+            //
+            // "The visible node closest to the goal" changes as the bot walks, so
+            // re-choosing each tic made it turn towards a different point every
+            // few tics and pace around a room without leaving it — 48 of these
+            // windows in a four-minute co-op run. Choosing once and holding it
+            // until it is reached or the timer runs out turns wandering into
+            // walking.
+            if (wanderActive && wanderTics < WanderHold)
+            {
+                return true;
+            }
+
             var step = nav.VisibleNodeTowards(sector, hereX, hereY, goalX, goalY, MinStepDistance);
 
             if (step >= 0)
@@ -986,10 +1073,11 @@ namespace DPTDOOM
 
                 if (Math.Abs(dx) + Math.Abs(dy) > ReachDistance)
                 {
-                    path[0] = step;
-                    pathLength = 1;
-                    pathIndex = 0;
-                    headingToExit = false;
+                    wanderActive = true;
+                    wanderX = nav.GetX(step);
+                    wanderY = nav.GetY(step);
+                    wanderTics = 0;
+
                     return true;
                 }
             }
@@ -1102,9 +1190,31 @@ namespace DPTDOOM
                     continue;
                 }
 
+                // Not the node the bot is standing on, and not one so close that
+                // reaching it proves nothing.
+                //
+                // The nearest "unvisited" point can be the bot's own node: a body
+                // near a doorway belongs to one sector while its nearest waypoint
+                // belongs to the other, so the sector can be unvisited while the
+                // node is right under the bot. The route then has length one and
+                // goes nowhere — the bot "arrives" immediately, plans the same
+                // thing again, and oscillates between two points on opposite
+                // sides of the room. That is the small loop the traces kept
+                // showing, and it is why a run could sit in the first room
+                // forever.
+                if (node == start)
+                {
+                    continue;
+                }
+
                 var dx = nav.GetX(node) - nav.GetX(start);
                 var dy = nav.GetY(node) - nav.GetY(start);
                 var distance = dx * dx + dy * dy;
+
+                if (distance < ArrivedDistance * ArrivedDistance)
+                {
+                    continue;
+                }
 
                 if (distance < bestDistance)
                 {
