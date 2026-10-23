@@ -103,6 +103,9 @@ powershell -NoProfile -File tools\test-icon.ps1       # иконка совме�
 powershell -NoProfile -File tools\test-window.ps1     # заголовок окна (нужен IWAD)
 ```
 
+Отдельно, это не тест: открыть порты в файрволе для хоста и master —
+`tools\firewall.ps1` (от администратора). См. `docs/NETWORK.md`.
+
 ## Иконка
 
 `resources/dptdoom.ico` содержит только классические DIB-кадры (16, 24, 32, 48,
