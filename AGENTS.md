@@ -41,6 +41,7 @@ powershell -NoProfile -File tools\check-standalone.ps1
 powershell -NoProfile -File tools\test-master.ps1
 powershell -NoProfile -File tools\test-relay.ps1
 powershell -NoProfile -File tools\test-net-latency.ps1
+powershell -NoProfile -File tools\test-bots.ps1
 powershell -NoProfile -File tools\test-launcher.ps1
 ```
 

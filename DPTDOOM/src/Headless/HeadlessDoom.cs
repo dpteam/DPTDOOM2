@@ -72,6 +72,8 @@ namespace DPTDOOM.Headless
                     var tics = 0;
                     var limit = args.tics.Present ? args.tics.Value : 0;
                     var faulted = false;
+                    var lastMap = 0;
+                    var levelTics = 0;
 
                     while (true)
                     {
@@ -121,6 +123,43 @@ namespace DPTDOOM.Headless
 
                             // The lockstep loop idles while waiting for peers.
                             Thread.Sleep(1);
+                        }
+
+                        // Report a level transition as it happens.
+                        //
+                        // Without this the only sign that a bot finished a map is
+                        // a second "Load map" line, and the tic it took has to be
+                        // guessed by bisecting -tics across several runs. The bot
+                        // exists to finish levels, so the one number that measures
+                        // it should be in the output.
+                        //
+                        // The elapsed count comes from World.LevelTime, which is
+                        // the tic counter of the level itself. Counting loop
+                        // iterations instead gave different answers for the same
+                        // run depending on -tics, because the wipe and the
+                        // intermission consume iterations that are not tics.
+                        if (doom.Game != null && doom.Game.World != null)
+                        {
+                            var world = doom.Game.World;
+                            var currentMap = doom.Options.Map;
+
+                            if (currentMap != lastMap)
+                            {
+                                if (lastMap > 0)
+                                {
+                                    Console.WriteLine("Level MAP" + lastMap.ToString("00") +
+                                                      " finished in " + levelTics + " tics (" +
+                                                      (levelTics / 35) + "s)");
+                                }
+
+                                lastMap = currentMap;
+                                levelTics = 0;
+                            }
+
+                            if (world.LevelTime > levelTics)
+                            {
+                                levelTics = world.LevelTime;
+                            }
                         }
                     }
 

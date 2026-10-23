@@ -125,6 +125,7 @@ powershell -NoProfile -File tools\test-icon.ps1       # иконка совме�
 powershell -NoProfile -File tools\test-window.ps1     # заголовок окна (нужен IWAD)
 powershell -NoProfile -File tools\test-relay.ps1      # игра через relay (нужен IWAD)
 powershell -NoProfile -File tools\test-net-latency.ps1 # скорость при пинге (нужен IWAD)
+powershell -NoProfile -File tools\test-bots.ps1        # боты проходят MAP01 (нужен IWAD)
 ```
 
 Отдельно, это не тест: открыть порты в файрволе для хоста и master —

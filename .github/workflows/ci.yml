@@ -103,6 +103,14 @@ jobs:
         shell: pwsh
         run: ./tools/test-net-latency.ps1
 
+      - name: Bots finish MAP01
+        # Nothing asserted the outcome before, so a bot that explored and then
+        # froze for the rest of the run passed every test. Runs the real game,
+        # because an in-process bot without a brain and a temperament does not
+        # behave the same way.
+        shell: pwsh
+        run: ./tools/test-bots.ps1
+
       - name: Window menu and tray
         shell: pwsh
         run: ./tools/test-menu.ps1
