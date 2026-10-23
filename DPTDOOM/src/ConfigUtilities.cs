@@ -25,6 +25,11 @@ namespace DPTDOOM
 {
     public static class ConfigUtilities
     {
+        /// <summary>
+        /// Set from -userdir so the launcher can keep separate profiles.
+        /// </summary>
+        public static string OverrideDataDirectory;
+
         private static readonly string[] iwadNames = new string[]
         {
             "DOOM2.WAD",
@@ -49,6 +54,16 @@ namespace DPTDOOM
         /// </summary>
         public static string GetDataDirectory()
         {
+            if (!string.IsNullOrEmpty(OverrideDataDirectory))
+            {
+                if (!Directory.Exists(OverrideDataDirectory))
+                {
+                    Directory.CreateDirectory(OverrideDataDirectory);
+                }
+
+                return OverrideDataDirectory;
+            }
+
             var exeDirectory = GetExeDirectory();
 
             var portableMarker = Path.Combine(exeDirectory, "portable.txt");

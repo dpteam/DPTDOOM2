@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net40;net9.0</TargetFrameworks>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>dptdoom-master</AssemblyName>
+    <RootNamespace>DPTDOOM.Master</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <AssemblyTitle>DPT.DOOM master server</AssemblyTitle>
+    <Product>DPT.DOOM</Product>
+    <Company>DartPower Team</Company>
+    <Copyright>Copyright (C) DartPower Team.</Copyright>
+    <Version>0.1.0</Version>
+    <InvariantGlobalization Condition="'$(TargetFramework)' == 'net9.0'">true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net40'">
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DPTDOOM.Shared\DPTDOOM.Shared.csproj" />
+  </ItemGroup>
+
+</Project>

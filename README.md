@@ -1,109 +1,125 @@
-# Managed Doom
+# DPT.DOOM
 
-![Doom II MAP01 screenshot](screenshots/doom2-map01.png)
+Свой source port Doom на C#. Основан на [Managed Doom](https://github.com/sinshu/managed-doom)
+(перевод Linux Doom на C#) и продолжает идеи первого DPT.DOOM на C/DoomGeneric.
+Цель — **полностью standalone** сборка под **.NET Framework 4.0**, включая Windows XP:
+без сторонних библиотек, без OpenGL, без WebView2.
 
-Managed Doom is a Doom source port written in C#. The entire code is manually translated from [Linux Doom](https://github.com/id-Software/DOOM) with some effort to make it natural C# code. Most functionalities necessary for single player game are implemented, and now it's in the playable state.
+![DPT.DOOM — Doom II, MAP01](docs/images/game-map01.png)
 
-## Screenshots
+## Что уже работает
 
-![Doom E1M1](screenshots/doom-e1m1.png)
+- **Программный рендерер** — BSP, текстуры стен/полов/потолков, спрайты, свет,
+  небо, fuzz, палитровые эффекты, интерполяция кадров.
+- **Игра** — физика, монстры, двери/лифты, оружие, сохранения, демо,
+  DeHackEd, automap, интермиссия, титры.
+- **Свой Win32-бэкенд** — окно через `user32` + вывод кадра через `gdi32`
+  (`StretchDIBits`), звук через `winmm` (`waveOut`, свой программный микшер),
+  музыка — MUS → MIDI через системный синтезатор. Никаких DLL рядом с EXE.
+- **Headless** — прогон без окна, с дампом кадра и хешами мира (для тестов).
+- **Кооператив по сети** — lockstep TCP-сессия host/join на 2–4 игроков.
+- **HTML-лаунчер** — интерфейс на HTML/CSS/JS внутри EXE.
+- **Master server** — нативный сервер списка сессий.
 
-![Doom II MAP11](screenshots/doom2-map11.png)
+| MAP07 | MAP11 |
+|---|---|
+| ![MAP07](docs/images/game-map07.png) | ![MAP11](docs/images/game-map11.png) |
 
-![Mr.DooM 30 MAP29](screenshots/mrdoom30-map29.png)
+Кадры сняты автоматически из кадрового буфера движка (`tools/capture-game.ps1`).
+Doom II и его графика принадлежат правообладателям, **IWAD в комплект не входит**.
 
-![Eternal Doom MAP29](screenshots/eternal-map29.png)
+## Лаунчер
 
-![Requiem MAP13](screenshots/requiem-map13.png)
+| Тёмная тема | Светлая тема |
+|---|---|
+| ![Лаунчер, тёмная тема](docs/images/launcher-dark.png) | ![Лаунчер, светлая тема](docs/images/launcher-light.png) |
 
-![Zombies TC MAP01](screenshots/zombies-map01.png)
+Интерфейс — настоящий HTML/CSS/JS, но рендерит его **MSHTML** (движок Internet
+Explorer, он же `mshtml.dll`), а не WebView2. Это осознанное решение: WebView2
+не устанавливается на Windows XP, а MSHTML есть в системе всегда и не требует
+ни рантайма, ни скачивания, ни интернета.
 
-![Batman Doom MAP27](screenshots/batman-map27.png)
+Связь страницы с C# идёт через навигацию на приватную схему `dptdoom://<verb>`:
+хост отменяет переход и забирает payload из страницы. Это работает на всех
+поддерживаемых версиях Windows и не требует COM-регистрации.
 
-## Demo video
+## Быстрый старт
 
-https://www.youtube.com/watch?v=WIdIOzQFVq0  
+Нужен .NET SDK 9+ (для сборки) и свой IWAD. Для локальной разработки положить
+Doom II в `refs/iwads/doom2.wad` — папка `refs/` в Git не попадает.
 
-[![Demo video](https://img.youtube.com/vi/WIdIOzQFVq0/0.jpg)](https://www.youtube.com/watch?v=WIdIOzQFVq0)
+```powershell
+dotnet build DPTDOOM.slnx -c Release
+.\DPTDOOM\bin\Release\net40\dptdoom.exe -iwad refs\iwads\doom2.wad
+```
 
-## Todo
+Или через лаунчер:
 
-* __Software renderering__  
-    - [x] Front-to-back rendering using BSP
-    - [x] Wall texture mapping
-    - [x] Ceiling / floor texture mapping
-    - [x] Transparent textures
-    - [x] Diminishing lighting
-    - [x] Sky rendering
-    - [x] Sprite rendering
-    - [x] High resolution rendering
-    - [x] Optimization
-    - [x] Fuzz effect
-    - [x] Palette effects
+```powershell
+.\DPTDOOM.Launcher\bin\Release\net40\dptdoom-launcher.exe
+```
 
-* __Game__
-    - [x] Collision detection
-    - [x] Player movement
-    - [x] Player attack
-    - [x] Monster AI
-    - [x] Doors and platforms
-    - [x] Animated textures
-    - [x] Demo compatibility
+## Режимы запуска
 
-* __Audio__
-    - [x] Sound
-    - [x] Music
+```powershell
+# Обычная игра
+dptdoom.exe -iwad doom2.wad -warp 1 -skill 3
 
-* __Misc__
-    - [x] Status bar
-    - [x] Automap
-    - [x] Title screen
-    - [x] Intermission screen
-    - [x] Menu screen
-    - [x] Save / load
-    - [x] Screen melt animation
-    - [x] Config
-    - [x] DeHackEd support
-    - [x] Frame interpolation
+# Хост кооператива (ждёт игрока на порту)
+dptdoom.exe -iwad doom2.wad -net host -players 2 -port 5029 -warp 1
 
-## License
+# Подключение к хосту
+dptdoom.exe -iwad doom2.wad -net join -address 192.168.1.10:5029
 
-Managed Doom is distributed under the [GPLv2 license](licenses/LICENSE_ManagedDoom.txt).  
-Managed Doom uses the following libraries:
+# Headless: 70 тиков и кадр в BMP
+dptdoom.exe -headless -iwad doom2.wad -warp 1 -tics 70 -shot frame.bmp
 
-* [Silk.NET](https://github.com/dotnet/Silk.NET) by the the Silk.NET team ([MIT License](licenses/LICENSE_SilkNET.txt))
-* [TrippyGL](https://github.com/SilkCommunity/TrippyGL) by Thomas Mizrahi ([MIT License](licenses/LICENSE_TrippyGL.txt))
-* [TimGM6mb](https://musescore.org/en/handbook/soundfonts-and-sfz-files#gm_soundfonts) by Tim Brechbill ([GPLv2 license](licenses/LICENSE_TimGM6mb.txt))
-* [DrippyAL](https://github.com/sinshu/DrippyAL) ([MIT License](licenses/LICENSE_DrippyAL.txt))
-* [MeltySynth](https://github.com/sinshu/meltysynth/) ([MIT license](licenses/LICENSE_MeltySynth.txt))
+# Бенчмарк демо
+dptdoom.exe -headless -iwad doom2.wad -timedemo demo1
 
-Silk.NET uses the following native libraries:
+# Master server
+dptdoom-master.exe --bind 0.0.0.0 --port 25135
+```
 
-* [GLFW](https://www.glfw.org/) ([zlib/libpng license](licenses/LICENSE_GLFW.txt))
-* [OpenAL Soft](https://openal-soft.org/) ([LGPL license](licenses/LICENSE_OpenALSoft.txt))
+## Структура
 
-## References
+```
+DPTDOOM/            игра (net40 + net9.0 для тестов)
+  src/Doom/         движок: мир, рендер, меню, WAD, DeHackEd
+  src/Win32/        окно, ввод, звук, музыка
+  src/Headless/     запуск без окна
+  src/Net/          lockstep-сессия
+DPTDOOM.Shared/     протокол master + клиент списка
+DPTDOOM.Master/     сервер списка сессий
+DPTDOOM.Launcher/   HTML-лаунчер (Assets/ — сама страница)
+DPTDOOMTest/        unit и compatibility тесты
+```
 
-* __The Game Engine Black Book: DOOM by Fabien Sanglard__  
-If you want to understand the big picture of the rendering process in Doom, buy this one.  
-https://fabiensanglard.net/gebbdoom/index.html
+## Тесты
 
-* __The Unofficial Doom Specs by Matthew S Fell__  
-http://www.gamers.org/dhs/helpdocs/dmsp1666.html
+```powershell
+dotnet test DPTDOOMTest\DPTDOOMTest.csproj -c Release
+powershell -NoProfile -File tools/test-master.ps1
+powershell -NoProfile -File tools/test-launcher.ps1
+```
 
-* __MUS File Format Description by Vladimir Arnost__  
-https://www.doomworld.com/idgames/docs/editing/mus_form
+Тесты совместимости требуют IWAD; без него они помечаются как пропущенные, а не
+падают. Геймплейные тесты сравнивают хеши состояния мира с эталонами Managed Doom,
+то есть проверяют, что порт остался демо-совместимым.
 
-* __Chocolate Doom by Simon Howard__  
-Chocolate Doom is used as the reference of  compatibility tests.  
-https://github.com/chocolate-doom/chocolate-doom
+## Переносимость
 
-* __Crispy Doom by Fabian Greffrath__  
-The minimal HUD is imported from Crispy Doom.  
-https://github.com/fabiangreffrath/crispy-doom
+- **net40** — то, что поставляется: работает на Windows XP SP3 и новее.
+- **net9.0** — только для запуска тестов на современном SDK.
+- `portable.txt` рядом с EXE переключает конфиг/сейвы в `user/`.
 
-* __Doom Wiki__  
-https://doomwiki.org/wiki/Entryway
+## Лицензия и происхождение
 
-* __Eternity Engine DeHackEd / BEX Reference__  
-http://eternity.mancubus.net/svn/trunk/docs/dehref.html
+GPL v2 или новее, см. [LICENSE](licenses/LICENSE_DPTDOOM.txt). Проект сохраняет
+происхождение Managed Doom (Nobuaki Tanaka), Chocolate Doom и оригинального Doom
+от id Software. Коммерческие игровые данные не включены, лицензия движка не даёт
+прав на IWAD.
+
+Подробности: [docs/ROADMAP.md](docs/ROADMAP.md), [docs/BUILDING.md](docs/BUILDING.md),
+[docs/LAUNCHER.md](docs/LAUNCHER.md), [docs/MASTER.md](docs/MASTER.md),
+[docs/NETWORK.md](docs/NETWORK.md), [PROMPT.md](PROMPT.md).

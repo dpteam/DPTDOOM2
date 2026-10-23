@@ -313,7 +313,7 @@ namespace DPTDOOM
 		{
 			gameAction = GameAction.Nothing;
 
-			var directory = ConfigUtilities.GetExeDirectory();
+			var directory = ConfigUtilities.GetDataDirectory();
 			var path = Path.Combine(directory, "doomsav" + loadGameSlotNumber + ".dsg");
 			SaveAndLoad.Load(this, path);
 		}
@@ -322,7 +322,7 @@ namespace DPTDOOM
 		{
 			gameAction = GameAction.Nothing;
 
-			var directory = ConfigUtilities.GetExeDirectory();
+			var directory = ConfigUtilities.GetDataDirectory();
 			var path = Path.Combine(directory, "doomsav" + saveGameSlotNumber + ".dsg");
 			SaveAndLoad.Save(this, saveGameDescription, path);
 			world.ConsolePlayer.SendMessage(DoomInfo.Strings.GGSAVED);

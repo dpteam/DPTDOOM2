@@ -39,6 +39,11 @@ namespace DPTDOOM
             {
                 var cmd = new CommandLineArgs(args);
 
+                if (cmd.userdir.Present)
+                {
+                    ConfigUtilities.OverrideDataDirectory = cmd.userdir.Value;
+                }
+
                 if (cmd.version.Present)
                 {
                     Console.WriteLine(ApplicationInfo.Title);

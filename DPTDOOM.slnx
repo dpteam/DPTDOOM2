@@ -1,4 +1,7 @@
-﻿<Solution>
+<Solution>
   <Project Path="DPTDOOM/DPTDOOM.csproj" />
+  <Project Path="DPTDOOM.Shared/DPTDOOM.Shared.csproj" />
+  <Project Path="DPTDOOM.Master/DPTDOOM.Master.csproj" />
+  <Project Path="DPTDOOM.Launcher/DPTDOOM.Launcher.csproj" />
   <Project Path="DPTDOOMTest/DPTDOOMTest.csproj" />
 </Solution>

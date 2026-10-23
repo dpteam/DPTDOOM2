@@ -209,10 +209,10 @@ namespace DPTDOOM.Win32
             public uint blueMask;
         }
 
-        [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true, EntryPoint = "RegisterClassExW")]
         public static extern ushort RegisterClassEx(ref WNDCLASSEX wndClass);
 
-        [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true, EntryPoint = "CreateWindowExW")]
         public static extern IntPtr CreateWindowEx(
             uint exStyle,
             string className,
@@ -227,7 +227,12 @@ namespace DPTDOOM.Win32
             IntPtr instance,
             IntPtr param);
 
-        [DllImport("user32.dll")]
+        /// <summary>
+        /// Must be the Unicode variant: DefWindowProc handles window messages
+        /// that carry strings (WM_SETTEXT, WM_GETTEXT), and the ANSI variant
+        /// would mangle them.
+        /// </summary>
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, EntryPoint = "DefWindowProcW")]
         public static extern IntPtr DefWindowProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
 
         [DllImport("user32.dll")]
@@ -242,19 +247,19 @@ namespace DPTDOOM.Win32
         [DllImport("user32.dll")]
         public static extern bool ValidateRect(IntPtr hWnd, IntPtr rect);
 
-        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, EntryPoint = "PeekMessageW")]
         public static extern bool PeekMessage(out MSG msg, IntPtr hWnd, uint filterMin, uint filterMax, uint removeMsg);
 
         [DllImport("user32.dll")]
         public static extern bool TranslateMessage(ref MSG msg);
 
-        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, EntryPoint = "DispatchMessageW")]
         public static extern IntPtr DispatchMessage(ref MSG msg);
 
         [DllImport("user32.dll")]
         public static extern void PostQuitMessage(int exitCode);
 
-        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true, EntryPoint = "GetModuleHandleW")]
         public static extern IntPtr GetModuleHandle(string moduleName);
 
         [DllImport("user32.dll")]
@@ -306,7 +311,7 @@ namespace DPTDOOM.Win32
         [DllImport("user32.dll")]
         public static extern int ReleaseDC(IntPtr hWnd, IntPtr dc);
 
-        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, EntryPoint = "SetWindowTextW")]
         public static extern bool SetWindowText(IntPtr hWnd, string text);
 
         [DllImport("user32.dll")]

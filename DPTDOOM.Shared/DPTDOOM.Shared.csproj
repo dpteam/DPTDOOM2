@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net40;net9.0</TargetFrameworks>
+    <RootNamespace>DPTDOOM.Shared</RootNamespace>
+    <AssemblyName>DPTDOOM.Shared</AssemblyName>
+    <LangVersion>latest</LangVersion>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <AssemblyTitle>DPT.DOOM shared protocol</AssemblyTitle>
+    <Product>DPT.DOOM</Product>
+    <Company>DartPower Team</Company>
+    <Copyright>Copyright (C) DartPower Team.</Copyright>
+    <Version>0.1.0</Version>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net40'">
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>

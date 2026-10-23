@@ -1,0 +1,150 @@
+<!doctype html>
+<html>
+<head>
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta charset="utf-8">
+<title>DPT.DOOM · Launcher</title>
+<style>/*__STYLE__*/</style>
+</head>
+<body>
+<div class="app">
+
+  <div class="sidebar">
+    <div class="brand">DPT<em>.</em>DOOM</div>
+    <div class="eyebrow">Source port / launcher</div>
+
+    <div class="nav">
+      <button id="playNav" class="active" type="button">&#9656; Играть</button>
+      <button id="serversNav" type="button">Серверы</button>
+    </div>
+
+    <button id="theme-toggle" class="theme-button" type="button">Тёмная тема</button>
+
+    <div class="sidebar-foot">
+      <span class="dot"></span> Локальный интерфейс<br>
+      Windows XP &rarr; 11<br>
+      <span id="version">0.1.0 · experimental</span>
+    </div>
+  </div>
+
+  <div class="main">
+
+    <div class="top">
+      <div class="top-text">
+        <div class="eyebrow">Готов к следующей карте?</div>
+        <h1>Твой DOOM. Твои правила.</h1>
+      </div>
+      <div class="profile">
+        <select id="slot" title="Профиль">
+          <option value="1">Профиль 01</option>
+          <option value="2">Профиль 02</option>
+          <option value="3">Профиль 03</option>
+        </select>
+        <button id="load" type="button">Загрузить</button>
+        <button id="save" type="button">Сохранить</button>
+      </div>
+    </div>
+
+    <div class="hero">
+      <div class="badge">CLASSIC ENGINE / NEW CONNECTIONS</div>
+      <h2>В ад — одному или с другом.</h2>
+      <p>Одиночная игра и кооператив по сети. Выбери свой IWAD, добавь моды и запускай.
+         Ресурсы игры не входят в комплект.</p>
+    </div>
+
+    <div class="panel hidden" id="serverBrowser">
+      <div class="section-head"><h2>Серверы · COOP</h2><small>Directory v1 / TCP</small></div>
+      <div class="row">
+        <label>Master · IP или домен:порт
+          <input id="masterEndpoint" type="text" value="play.dartpower.xyz:25135" spellcheck="false">
+        </label>
+        <button id="masterSave" type="button">Сохранить</button>
+      </div>
+      <button id="refreshServers" type="button">Обновить список</button>
+      <p class="hint">Объявления недоверенные: master не проверяет прямой порт и ресурсы.
+         Автоматических запросов нет — только по кнопке.</p>
+      <div id="serverList" class="server-list">Нажми «Обновить список».</div>
+    </div>
+
+    <div class="panel">
+      <div class="section-head"><h2><span class="num">01</span>Ресурсы</h2><small>Только локальные файлы</small></div>
+      <div class="row">
+        <label>Исполняемый файл
+          <input id="executable" type="text" class="path" spellcheck="false" placeholder="dptdoom.exe">
+        </label>
+        <button id="browseExe" type="button">Выбрать…</button>
+      </div>
+      <div class="row">
+        <label>Основной IWAD
+          <input id="iwad" type="text" class="path" spellcheck="false" placeholder="DOOM2.WAD / DOOM.WAD">
+        </label>
+        <button id="browseIwad" type="button">Выбрать…</button>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="panel col">
+        <div class="section-head"><h2><span class="num">02</span>Сессия</h2></div>
+        <div class="mode">
+          <button data-mode="0" class="selected" type="button">Одиночная</button>
+          <button data-mode="1" type="button">Создать COOP</button>
+          <button data-mode="2" type="button">Подключиться</button>
+        </div>
+        <label>Карта<input id="map" type="number" min="1" max="32" value="1"></label>
+        <label>Сложность
+          <select id="skill">
+            <option value="1">1 · I'm too young to die</option>
+            <option value="2">2 · Hey, not too rough</option>
+            <option value="3" selected>3 · Hurt me plenty</option>
+            <option value="4">4 · Ultra-Violence</option>
+            <option value="5">5 · Nightmare!</option>
+          </select>
+        </label>
+        <label>Имя игрока<input id="name" type="text" maxlength="31" spellcheck="false" placeholder="player"></label>
+        <div id="network" class="hidden">
+          <label>Адрес напарника<input id="address" type="text" value="127.0.0.1:5029" spellcheck="false"></label>
+          <label>TCP-порт<input id="port" type="number" min="1024" max="65535" value="5029"></label>
+          <p class="hint">Одинаковые ресурсы, карта и правила на обеих сторонах.
+             Хост ждёт игрока до 5 минут.</p>
+        </div>
+      </div>
+
+      <div class="panel col">
+        <div class="section-head"><h2><span class="num">03</span>Правила игры</h2></div>
+        <label class="check"><input id="nomonsters" type="checkbox">Без монстров</label>
+        <label class="check"><input id="fast" type="checkbox">Быстрые монстры</label>
+        <label class="check"><input id="respawn" type="checkbox">Возрождение монстров</label>
+        <label class="check"><input id="deathmatch" type="checkbox">Deathmatch</label>
+        <p class="hint">Классические правила по умолчанию. Боты и команды пока недоступны.</p>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="section-head">
+        <h2><span class="num">04</span>Моды <small id="modCount">0 из 16</small></h2>
+      </div>
+      <button id="addMod" type="button">+ Добавить PWAD</button>
+      <ol class="mods" id="mods"></ol>
+      <div class="empty" id="empty">Чистый DOOM. Или добавь .wad — порядок загрузки важен.</div>
+      <p class="hint">IWAD не добавляй в этот список. PK3 / DECORATE ещё не поддерживаются.</p>
+    </div>
+
+    <div class="panel">
+      <div class="section-head"><h2><span class="num">05</span>Аргументы запуска</h2><small>без shell</small></div>
+      <pre id="preview">—</pre>
+    </div>
+
+    <div id="fatal" class="hidden"></div>
+    <div class="storage" id="storage"></div>
+
+    <div class="bottom">
+      <button class="launch primary" id="launch" type="button" disabled>Запустить игру &nbsp;&#8599;</button>
+      <button id="log" type="button" disabled>Лог сессии</button>
+      <div id="status" class="status">Подключение к лаунчеру…</div>
+    </div>
+
+  </div>
+</div>
+<script>/*__SCRIPT__*/</script>
+</body>
+</html>

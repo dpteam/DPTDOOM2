@@ -62,6 +62,7 @@ namespace DPTDOOM
         public readonly Arg<string> address;
         public readonly Arg<string> name;
         public readonly Arg botinput;
+        public readonly Arg<string> userdir;
 
         public CommandLineArgs(string[] args)
         {
@@ -103,6 +104,7 @@ namespace DPTDOOM
             address = GetString(args, "-address");
             name = GetString(args, "-name");
             botinput = new Arg(args.Contains("-botinput"));
+            userdir = GetString(args, "-userdir");
 
             // Check for drag & drop.
             if (args.Length > 0 && args.All(arg => arg.FirstOrDefault() != '-'))

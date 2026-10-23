@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net40;net9.0-windows</TargetFrameworks>
+    <OutputType>WinExe</OutputType>
+    <AssemblyName>dptdoom-launcher</AssemblyName>
+    <RootNamespace>DPTDOOM.Launcher</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <UseWindowsForms>true</UseWindowsForms>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <AssemblyTitle>DPT.DOOM Launcher</AssemblyTitle>
+    <Product>DPT.DOOM</Product>
+    <Company>DartPower Team</Company>
+    <Copyright>Copyright (C) DartPower Team.</Copyright>
+    <Version>0.1.0</Version>
+    <ApplicationIcon>..\resources\dptdoom.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net40'">
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DPTDOOM.Shared\DPTDOOM.Shared.csproj" />
+  </ItemGroup>
+
+  <!-- The HTML interface is embedded in the EXE: no external files to ship. -->
+  <ItemGroup>
+    <EmbeddedResource Include="Assets\ui.html" />
+    <EmbeddedResource Include="Assets\theme.css" />
+    <EmbeddedResource Include="Assets\app.js" />
+  </ItemGroup>
+
+</Project>
