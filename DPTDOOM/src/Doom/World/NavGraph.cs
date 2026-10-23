@@ -1214,6 +1214,97 @@ namespace DPTDOOM
             return 0;
         }
 
+        /// <summary>
+        /// Route to the nearest node of a sector, rather than to one specific node.
+        ///
+        /// A sector can hold several clusters of points that are not mutually
+        /// visible - around a pillar, behind a step - and only one of them is
+        /// connected to the rest of the level. Routing to "the node nearest the
+        /// exit switch" therefore fails whenever that particular node happens to
+        /// sit in a detached cluster, even though the exit room itself is
+        /// reachable. That is exactly what made the bot give up and circle in the
+        /// courtyard: the exit sector was reachable, the exit *node* was not.
+        ///
+        /// The search is the same Dijkstra, stopping at the first node whose
+        /// sector matches, so it costs no more than a normal path.
+        /// </summary>
+        public int FindPathToSector(int start, int sector, int[] path)
+        {
+            if (start < 0 || start >= nodeCount || sector < 0)
+            {
+                return 0;
+            }
+
+            if (nodeSector[start] == sector)
+            {
+                path[0] = start;
+                return 1;
+            }
+
+            stamp++;
+            open.Clear();
+
+            cost[start] = 0;
+            cameFrom[start] = -1;
+            visitStamp[start] = stamp;
+            closed[start] = false;
+
+            open.Push(start, 0);
+
+            while (open.Count > 0)
+            {
+                var current = open.Pop();
+
+                if (closed[current])
+                {
+                    continue;
+                }
+
+                closed[current] = true;
+
+                if (nodeSector[current] == sector)
+                {
+                    if (cost[current] > BannedCost)
+                    {
+                        return 0;
+                    }
+
+                    return Reconstruct(current, path);
+                }
+
+                for (var e = edgeStart[current]; e < edgeStart[current + 1]; e++)
+                {
+                    var next = edgeTarget[e];
+
+                    if (visitStamp[next] != stamp)
+                    {
+                        visitStamp[next] = stamp;
+                        cost[next] = float.MaxValue;
+                        closed[next] = false;
+                        cameFrom[next] = -1;
+                    }
+
+                    if (closed[next])
+                    {
+                        continue;
+                    }
+
+                    var candidate = cost[current] + edgeCost[e] * nodePenalty[next];
+                    if (candidate >= cost[next])
+                    {
+                        continue;
+                    }
+
+                    cost[next] = candidate;
+                    cameFrom[next] = current;
+
+                    open.Push(next, candidate);
+                }
+            }
+
+            return 0;
+        }
+
         private int Reconstruct(int goal, int[] path)
         {
             var length = 0;
@@ -1285,6 +1376,33 @@ namespace DPTDOOM
 
         public int NodeCount { get { return nodeCount; } }
         public int EdgeCount { get; private set; }
+
+        /// <summary>
+        /// Outgoing edges of a node, for diagnostics and tests.
+        ///
+        /// The graph is stored as compressed sparse rows, which is the right
+        /// shape for the search but says nothing to a reader. A test that needs
+        /// to know *why* a region is unreachable has to walk the edges itself.
+        /// </summary>
+        public int EdgeCountOf(int node)
+        {
+            if (node < 0 || node >= nodeCount)
+            {
+                return 0;
+            }
+
+            return edgeStart[node + 1] - edgeStart[node];
+        }
+
+        public int EdgeTargetOf(int node, int index)
+        {
+            if (index < 0 || index >= EdgeCountOf(node))
+            {
+                return -1;
+            }
+
+            return edgeTarget[edgeStart[node] + index];
+        }
 
         /// <summary>
         /// Minimal binary min-heap. The framework has none, and a sorted list

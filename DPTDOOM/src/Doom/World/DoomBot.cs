@@ -97,8 +97,12 @@ namespace DPTDOOM
         private readonly bool[] visitedSector;
 
         // Sectors the bot failed to route to. Kept apart from visitedSector so a
-        // failed plan cannot be mistaken for progress.
+        // failed plan cannot be mistaken for progress. Cleared whenever the bot
+        // moves to another sector, because reachability is a property of where it
+        // stands, not of the level.
         private readonly bool[] triedSector;
+
+        private int lastSector = -1;
 
         private readonly BotBrain brain;
         private readonly BotStyle style;
@@ -365,6 +369,21 @@ namespace DPTDOOM
 
             var sector = mobj.Subsector.Sector.Number;
             visitedSector[sector] = true;
+
+            // Moving to another sector invalidates what the bot learned about
+            // which places are out of reach.
+            //
+            // "Tried and unreachable" is a property of where the bot was standing,
+            // not of the level: from one side of a lift or a ledge a sector is
+            // impossible, from the other it is a short walk. Marking a sector
+            // tried *permanently* meant one bad spot early in a run quietly
+            // removed half the map from the plan — including the exit — and the
+            // bot then wandered for thousands of tics with nothing left to do.
+            if (sector != lastSector)
+            {
+                lastSector = sector;
+                Array.Clear(triedSector, 0, triedSector.Length);
+            }
 
             useTic++;
 
@@ -1190,9 +1209,12 @@ namespace DPTDOOM
                                Coverage < SweeperCoverage &&
                                world.LevelTime < SweeperTimeLimit;
 
-            if (!exploreFirst && exitNode >= 0)
+            if (!exploreFirst && exitSector >= 0)
             {
-                var length = nav.FindPath(start, exitNode, path);
+                // By sector, not by node: see FindPathToSector. The nearest node
+                // to the switch is often in a cluster that nothing connects to,
+                // while the exit room itself is fine.
+                var length = nav.FindPathToSector(start, exitSector, path);
                 if (length > 0)
                 {
                     pathLength = length;
@@ -1230,9 +1252,9 @@ namespace DPTDOOM
             }
 
             // Everything has been seen, so a sweeper may now leave.
-            if (exitNode >= 0)
+            if (exitSector >= 0)
             {
-                var length = nav.FindPath(start, exitNode, path);
+                var length = nav.FindPathToSector(start, exitSector, path);
                 if (length > 0)
                 {
                     pathLength = length;
@@ -1247,6 +1269,11 @@ namespace DPTDOOM
             // groups of points that are not mutually visible, and the nearest one
             // is not always the connected one. Try the other nodes of the sector
             // before giving up: from any of them the route may exist.
+            //
+            // This used to try only the exit and only through exitNode, so when
+            // the exit node was detached the whole recovery did nothing. Now it
+            // retries both things that actually matter: unexplored sectors, and
+            // the exit sector.
             var sector = nav.GetSector(start);
 
             for (var node = 0; node < nav.NodeCount; node++)
@@ -1256,12 +1283,32 @@ namespace DPTDOOM
                     continue;
                 }
 
-                var length = nav.FindPath(node, exitNode, path);
+                var target = FindNearestUnvisitedNode(node);
+
+                if (target >= 0)
+                {
+                    var explored = nav.FindPath(node, target, path);
+
+                    if (explored > 0)
+                    {
+                        pathLength = explored;
+                        pathIndex = 0;
+                        headingToExit = false;
+                        return;
+                    }
+                }
+
+                if (exitSector < 0)
+                {
+                    continue;
+                }
+
+                var length = nav.FindPathToSector(node, exitSector, path);
                 if (length > 0)
                 {
                     pathLength = length;
                     pathIndex = 0;
-                    headingToExit = exitNode >= 0;
+                    headingToExit = true;
                     CaptureRoute();
                     return;
                 }
