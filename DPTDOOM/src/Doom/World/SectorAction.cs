@@ -814,6 +814,9 @@ namespace DPTDOOM
 		private static readonly int platformWait = 3;
 		private static readonly Fixed platformSpeed = Fixed.One;
 
+		/// <summary>Boom's ELEVATORSPEED, half a unit per tic.</summary>
+		private static readonly Fixed elevatorSpeed = Fixed.FromInt(4);
+
 		public bool DoPlatform(LineDef line, PlatformType type, int amount)
 		{
 			//	Activate all <type> plats that are in stasis.
@@ -1028,6 +1031,167 @@ namespace DPTDOOM
 		////////////////////////////////////////////////////////////
 
 		private static readonly Fixed floorSpeed = Fixed.One;
+
+		/// <summary>
+		/// Finds a neighbouring sector whose floor sits at a given height.
+		///
+		/// Boom uses this for the "numeric" change model: instead of taking the
+		/// texture from the line's own sector, it looks for a neighbour standing at
+		/// the target height and copies that one. The idea is that the map author
+		/// builds a model room showing what the result should look like, and the
+		/// engine finds it by height rather than by tag.
+		///
+		/// Returns null when no neighbour matches, which Boom treats as "no change
+		/// at all" rather than as an error.
+		/// </summary>
+		private Sector FindModelFloorSector(Sector sector, Fixed height)
+		{
+			foreach (var line in sector.Lines)
+			{
+				var other = line.FrontSector == sector ? line.BackSector : line.FrontSector;
+
+				if (other == null || other == sector)
+				{
+					continue;
+				}
+
+				if (other.FloorHeight == height)
+				{
+					return other;
+				}
+			}
+
+			return null;
+		}
+
+		/// <summary>The same, for ceilings.</summary>
+		private Sector FindModelCeilingSector(Sector sector, Fixed height)
+		{
+			foreach (var line in sector.Lines)
+			{
+				var other = line.FrontSector == sector ? line.BackSector : line.FrontSector;
+
+				if (other == null || other == sector)
+				{
+					continue;
+				}
+
+				if (other.CeilingHeight == height)
+				{
+					return other;
+				}
+			}
+
+			return null;
+		}
+
+		/// <summary>
+		/// Changes floor texture and sector type without moving anything.
+		///
+		/// This is Boom's 153/154 (trigger model) and 239/240 (numeric model). A
+		/// map uses it to open a door that looks different, or to turn a damaging
+		/// floor harmless, at the moment a switch is thrown.
+		///
+		/// <paramref name="numeric"/> selects where the new texture comes from: the
+		/// line's own sector, or a neighbour at the target height. When the numeric
+		/// search finds nothing, Boom changes nothing — deliberately, because the
+		/// map author asked for a specific look and a wrong one is worse than none.
+		/// </summary>
+		public bool DoChange(LineDef line, bool numeric)
+		{
+			var sectors = world.Map.Sectors;
+			var sectorNumber = -1;
+			var result = false;
+
+			while ((sectorNumber = FindSectorFromLineTag(line, sectorNumber)) >= 0)
+			{
+				var sector = sectors[sectorNumber];
+
+				result = true;
+
+				if (!numeric)
+				{
+					sector.FloorFlat = line.FrontSector.FloorFlat;
+					sector.Special = line.FrontSector.Special;
+					continue;
+				}
+
+				var model = FindModelFloorSector(sector, sector.FloorHeight);
+
+				if (model != null)
+				{
+					sector.FloorFlat = model.FloorFlat;
+					sector.Special = model.Special;
+				}
+			}
+
+			return result;
+		}
+
+		/// <summary>
+		/// Starts a Boom elevator: floor and ceiling moving together.
+		///
+		/// The gap between them is preserved by computing the ceiling destination
+		/// from the floor destination plus the current height difference, so a room
+		/// 128 units tall is still 128 units tall when it arrives.
+		///
+		/// The Current type reads the target from the activating line's own sector,
+		/// which is how a switch across the room calls a lift to the height the
+		/// switch is at.
+		/// </summary>
+		public bool DoElevator(LineDef line, ElevatorType type)
+		{
+			var sectors = world.Map.Sectors;
+			var sectorNumber = -1;
+			var result = false;
+
+			while ((sectorNumber = FindSectorFromLineTag(line, sectorNumber)) >= 0)
+			{
+				var sector = sectors[sectorNumber];
+
+				// Either plane moving means the sector is busy. Boom checks both,
+				// because an elevator drives both.
+				if (sector.SpecialData != null)
+				{
+					continue;
+				}
+
+				result = true;
+
+				var elevator = new Elevator(world);
+				world.Thinkers.Add(elevator);
+				sector.SpecialData = elevator;
+
+				elevator.Type = type;
+				elevator.Sector = sector;
+				elevator.Speed = elevatorSpeed;
+
+				switch (type)
+				{
+					case ElevatorType.Down:
+						elevator.Direction = -1;
+						elevator.FloorDestHeight = FindNextLowestFloor(sector, sector.FloorHeight);
+						break;
+
+					case ElevatorType.Up:
+						elevator.Direction = 1;
+						elevator.FloorDestHeight = FindNextHighestFloor(sector, sector.FloorHeight);
+						break;
+
+					default:
+						elevator.FloorDestHeight = line.FrontSector.FloorHeight;
+						elevator.Direction = elevator.FloorDestHeight > sector.FloorHeight ? 1 : -1;
+						break;
+				}
+
+				// The height difference is measured before anything moves, so the
+				// lift keeps its shape.
+				elevator.CeilingDestHeight = elevator.FloorDestHeight +
+					(sector.CeilingHeight - sector.FloorHeight);
+			}
+
+			return result;
+		}
 
 		////////////////////////////////////////////////////////////
 		// Boom generalized linedefs

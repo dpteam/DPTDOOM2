@@ -245,6 +245,21 @@ namespace DPTDOOM
 					world.ExitLevel();
 					break;
 
+				case 197:
+					// Boom: exit to the next level from a switch. Doom only had
+					// walk-over exits for the next level and switches for the secret
+					// one, which is why a switch-activated normal exit needed a new
+					// number.
+					specials.ChangeSwitchTexture(line, false);
+					world.ExitLevel();
+					break;
+
+				case 198:
+					// Boom: secret exit from a switch.
+					specials.ChangeSwitchTexture(line, false);
+					world.SecretExitLevel();
+					break;
+
 				case 14:
 					// Raise floor 32 and change texture.
 					if (sa.DoPlatform(line, PlatformType.RaiseAndChange, 32))
@@ -1188,6 +1203,59 @@ namespace DPTDOOM
 				case 257:
 					// Build stairs quickly by 16.
 					sa.BuildStairs(line, StairType.Turbo16);
+					break;
+
+				case 153:
+					// Change floor texture and sector type from the line's own
+					// sector, once.
+					if (sa.DoChange(line, false))
+					{
+						line.Special = 0;
+					}
+					break;
+
+				case 154:
+					sa.DoChange(line, false);
+					break;
+
+				case 239:
+					// The same, but the look is copied from a neighbour standing at
+					// the target height.
+					if (sa.DoChange(line, true))
+					{
+						line.Special = 0;
+					}
+					break;
+
+				case 240:
+					sa.DoChange(line, true);
+					break;
+
+				case 227:
+					// Elevator up to the next higher floor.
+					sa.DoElevator(line, ElevatorType.Up);
+					break;
+
+				case 228:
+					sa.DoElevator(line, ElevatorType.Up);
+					break;
+
+				case 231:
+					// Elevator down to the next lower floor.
+					sa.DoElevator(line, ElevatorType.Down);
+					break;
+
+				case 232:
+					sa.DoElevator(line, ElevatorType.Down);
+					break;
+
+				case 235:
+					// Elevator to the floor height of the switch's own sector.
+					sa.DoElevator(line, ElevatorType.Current);
+					break;
+
+				case 236:
+					sa.DoElevator(line, ElevatorType.Current);
 					break;
 			}
 		}
