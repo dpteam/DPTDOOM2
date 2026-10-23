@@ -42,6 +42,7 @@ powershell -NoProfile -File tools\test-master.ps1
 powershell -NoProfile -File tools\test-relay.ps1
 powershell -NoProfile -File tools\test-net-latency.ps1
 powershell -NoProfile -File tools\test-bots.ps1
+powershell -NoProfile -File tools\test-net-bots.ps1
 powershell -NoProfile -File tools\test-launcher.ps1
 ```
 
@@ -86,6 +87,10 @@ powershell -NoProfile -File tools\test-launcher.ps1
 - Боты: навигация — граф **секторов**, не субсекторов (см. `docs/BOTS.md`).
   Рёбра направленные и фильтруются по высоте шага и просвету. Маршрут
   продвигается только по факту входа в следующий сектор.
+- Боты в сети: водит **только хост**, команды уходят обычными tic-кадрами.
+  Гость не должен запускать свою копию — две копии разойдутся. Боты занимают
+  последние слоты, чтобы гость не попал на слот бота. Мир строится первым
+  `game.Update`, поэтому ждать тик бота до загрузки уровня нельзя — это дедлок.
 - Крупные апдейты — ZIP через `tools/package-build.ps1`.
 - CI: `.github/workflows/ci.yml`, описание — `docs/CI.md`.
 

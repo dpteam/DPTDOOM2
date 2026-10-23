@@ -89,6 +89,7 @@ var DPT = (function () {
         parts.push($('relaySession').value);
         parts.push($('relay').checked ? '1' : '0');
         parts.push(String(parseInt($('players').value, 10) || 2));
+        parts.push(String(parseInt($('hostbots').value, 10) || 0));
 
         return parts.join('\n');
     }
@@ -142,6 +143,11 @@ var DPT = (function () {
             $('players').value = String(players);
         }
 
+        var hostBots = parseInt(parts[FIELDS.length + 9], 10);
+        if (hostBots >= 0 && hostBots <= 3) {
+            $('hostbots').value = String(hostBots);
+        }
+
         syncMode();
         renderMods();
         requestPreview();
@@ -167,6 +173,7 @@ var DPT = (function () {
         $('relay').disabled = mode !== 1;
         $('relaySession').disabled = mode !== 2;
         $('players').disabled = mode !== 1;
+        $('hostbots').disabled = mode !== 1;
     }
 
     function renderMods() {
@@ -406,6 +413,16 @@ var DPT = (function () {
 
         for (i = 0; i < COOP_CHECKS.length; i++) {
             $(COOP_CHECKS[i]).onclick = changed;
+        }
+
+        // These are not in FIELDS (they are launcher-only, not session fields),
+        // so they need wiring by hand: without it editing them changes nothing,
+        // because no preview is requested.
+        var extras = ['players', 'hostbots'];
+
+        for (i = 0; i < extras.length; i++) {
+            $(extras[i]).onchange = changed;
+            $(extras[i]).onkeyup = changed;
         }
 
         var buttons = document.querySelectorAll('[data-mode]');

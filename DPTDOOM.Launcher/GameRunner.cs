@@ -125,6 +125,21 @@ namespace DPTDOOM.Launcher
                 Append(builder, "-players", state.Players.ToString());
                 Append(builder, "-port", state.Port.ToString());
 
+                // Bots take the last slots, so the host must leave at least one
+                // for a guest: a session of bots and nobody else is what local
+                // co-op is for, and a network host waiting for a player who
+                // cannot join would just sit there.
+                var bots = state.HostBots;
+
+                if (bots < 0) bots = 0;
+                else if (bots > 3) bots = 3;
+                else if (bots >= state.Players) bots = state.Players - 1;
+
+                if (bots > 0)
+                {
+                    Append(builder, "-coopbots", bots.ToString());
+                }
+
                 if (state.Relay && !string.IsNullOrEmpty(state.Master))
                 {
                     // The host registers itself, so the field does not need a

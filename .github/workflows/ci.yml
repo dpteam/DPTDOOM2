@@ -111,6 +111,10 @@ jobs:
         shell: pwsh
         run: ./tools/test-bots.ps1
 
+      - name: Bots over the network
+        shell: pwsh
+        run: ./tools/test-net-bots.ps1
+
       - name: Window menu and tray
         shell: pwsh
         run: ./tools/test-menu.ps1

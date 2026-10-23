@@ -133,7 +133,7 @@ namespace DPTDOOM.Net
         private readonly object sync = new object();
 
         private readonly bool isHost;
-        private readonly int expectedPlayers;
+        private int expectedPlayers;
         private readonly string localName;
 
         private readonly List<Peer> peers = new List<Peer>();
@@ -157,6 +157,8 @@ namespace DPTDOOM.Net
         private int localPlayer;
         private int connectedPlayers;
         private SessionSettings settings;
+
+        private int botCount;
 
         private int delay;
         private readonly int delayOverride;
@@ -690,6 +692,15 @@ namespace DPTDOOM.Net
             {
                 localPlayer = payloadReader.ReadByte();
                 var playerCount = payloadReader.ReadByte();
+
+                // The session size comes from the host, not from what the guest
+                // assumed. A guest used to be created with two players hardcoded,
+                // so in a three- or four-player game it silently simulated only
+                // the first two: it waited for a tic that no one would ever send,
+                // or advanced without the others. The welcome is the only place
+                // that knows how many slots the session really has.
+                expectedPlayers = MathEx.Clamp(playerCount, 2, NetProtocol.MaxPlayers);
+
                 settings = SessionSettings.Deserialize(payloadReader);
 
                 // The host measured the round trip and decided how far ahead to
@@ -1306,6 +1317,24 @@ namespace DPTDOOM.Net
         }
 
         public int ExpectedPlayers => expectedPlayers;
+
+        /// <summary>
+        /// Slots filled by bots rather than by people.
+        ///
+        /// A bot is driven by the host and its command is sent like any other
+        /// player's, so the guests neither run bot logic nor need to: they just
+        /// receive the tics. That is why a guest does not need to know anything
+        /// about the bot except that the slot will not be taken by a human.
+        /// </summary>
+        public int BotCount => botCount;
+
+        /// <summary>Slots that have to be filled by a real connection.</summary>
+        public int HumansNeeded => expectedPlayers - botCount;
+
+        public void AttachBots(int count)
+        {
+            botCount = MathEx.Clamp(count, 0, expectedPlayers - 1);
+        }
         public SessionSettings Settings => settings;
 
         /// <summary>

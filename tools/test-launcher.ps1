@@ -189,6 +189,19 @@ Pump 500
 $playersPreview = Invoke-Page "document.getElementById('preview').innerHTML"
 Assert-True ($playersPreview -like "*-players 4*") "the player count reaches the command line"
 
+# 13. Bots on the host: allowed, and never more than the slots that exist.
+Invoke-Page "document.getElementById('hostbots').value='2';document.getElementById('hostbots').onchange();" | Out-Null
+Pump 500
+
+$botsPreview = Invoke-Page "document.getElementById('preview').innerHTML"
+Assert-True ($botsPreview -like "*-coopbots 2*") "bots on the host reach the command line"
+
+Invoke-Page "document.getElementById('players').value='2';document.getElementById('players').onchange();document.getElementById('hostbots').value='3';document.getElementById('hostbots').onchange();" | Out-Null
+Pump 500
+
+$clampedPreview = Invoke-Page "document.getElementById('preview').innerHTML"
+Assert-True ($clampedPreview -like "*-coopbots 1*") "bots are clamped so a guest slot always remains"
+
 # Reset, so a leftover rule cannot leak into the next check.
 Invoke-Page "document.getElementById('noblock').checked=false;document.getElementById('noblock').onclick();document.getElementById('coopweapons').checked=false;document.getElementById('coopweapons').onclick();document.getElementById('nosharedkeys').checked=false;document.getElementById('nosharedkeys').onclick();" | Out-Null
 Pump 400

@@ -119,11 +119,12 @@ namespace DPTDOOM
             {
                 coopBotCount = MathEx.Clamp(args.coopbots.Value, 1, Player.MaxPlayerCount - 1);
 
-                if (netDriver != null)
+                if (netDriver != null && netDriver.LocalPlayer != 0)
                 {
-                    // Networked bots would have to be driven by the host and
-                    // sent as tic commands; that is not implemented.
-                    throw new Exception("-coopbots cannot be combined with a network game.");
+                    // A guest cannot drive bots: they would run here and on the
+                    // host both, and the two would disagree the moment anything
+                    // random or timing-dependent happened. Only the host owns them.
+                    throw new Exception("-coopbots can only be started by the host.");
                 }
 
                 if (botMode)
@@ -824,19 +825,38 @@ namespace DPTDOOM
 
                         coopBots = new DoomBot[Player.MaxPlayerCount];
 
+                        // In a network game the bots take the **last** slots, so
+                        // that guests fill the ones before them in join order.
+                        // A guest always becomes the next free player after the
+                        // host, and putting a bot there would make the first guest
+                        // take a slot a bot already drives.
+                        var slots = netDriver != null ? netDriver.ExpectedPlayers : Player.MaxPlayerCount;
+
                         for (var i = 1; i <= coopBotCount; i++)
                         {
-                            var player = options.Players[i];
+                            var index = netDriver != null ? slots - i : i;
+
+                            if (index < 1 || index >= Player.MaxPlayerCount)
+                            {
+                                continue;
+                            }
+
+                            var player = options.Players[index];
                             if (player.InGame)
                             {
                                 // Different seeds, so the bots do not all pick
                                 // the same style and the run tests more than one
                                 // idea at a time.
-                                coopBots[i] = new DoomBot(
-                                    game.World, player, nav, brain, ChooseBotStyle(i),
-                                    BotTemperament.FromSeed(BotTemperament.SeedFor(CurrentMapKey(), i)),
+                                coopBots[index] = new DoomBot(
+                                    game.World, player, nav, brain, ChooseBotStyle(index),
+                                    BotTemperament.FromSeed(BotTemperament.SeedFor(CurrentMapKey(), index)),
                                     LoadDanger(game.World.Map.Sectors.Length));
                             }
+                        }
+
+                        if (netDriver != null && netDriver.IsHost)
+                        {
+                            netDriver.AttachBots(coopBots);
                         }
 
                         Console.WriteLine("Co-op bots: " + coopBotCount + " joined. Brain: " + brain.Describe());
@@ -902,6 +922,36 @@ namespace DPTDOOM
                             {
                                 Quit("The other player left the game.");
                                 break;
+                            }
+
+                            // The world is built by the first game.Update, and the
+                            // bots cannot produce a command before the world
+                            // exists - so waiting for a bot tic here would wait
+                            // forever. Load the level first, then start the
+                            // lockstep. Commands are irrelevant on this call:
+                            // game.Update only performs the level load.
+                            if (game.World == null)
+                            {
+                                var firstResult = game.Update(cmds);
+
+                                if (firstResult == UpdateResult.NeedWipe)
+                                {
+                                    StartWipe();
+                                }
+
+                                break;
+                            }
+
+                            if (netDriver.IsHost && coopBots != null)
+                            {
+                                // Attached every tic rather than once at
+                                // construction: the bot array is rebuilt on every
+                                // level, and a stale attach would leave the driver
+                                // holding bots that belong to a world that no
+                                // longer exists - or holding nothing at all while
+                                // the session waits for a bot slot that no one
+                                // fills.
+                                netDriver.AttachBots(coopBots);
                             }
 
                             if (!netDriver.TryAdvance(cmds, userInput, ref sendPause))

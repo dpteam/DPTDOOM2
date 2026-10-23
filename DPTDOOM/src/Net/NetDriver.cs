@@ -42,12 +42,24 @@ namespace DPTDOOM.Net
         string FaultReason { get; }
         bool Finished { get; }
         int LocalPlayer { get; }
+
+        /// <summary>Total slots in the session, bots included.</summary>
+        int ExpectedPlayers { get; }
+
+        /// <summary>True on the machine that drives the bots.</summary>
+        bool IsHost { get; }
+
+        /// <summary>Hands the host's bots to the lockstep loop.</summary>
+        void AttachBots(DoomBot[] bots);
     }
 
     public sealed class NetDriver : INetDriver
     {
         private readonly NetSession session;
         private readonly Dictionary<int, NetTic> localCommands = new Dictionary<int, NetTic>();
+
+        private DoomBot[] bots;
+        private bool botsSentForTic;
 
         private int tic;
         private int sendTic;
@@ -87,6 +99,52 @@ namespace DPTDOOM.Net
             }
         }
 
+        /// <summary>
+        /// Bots that fill the last slots of the session.
+        ///
+        /// The array is indexed by player number, with nulls for the human slots.
+        /// Only the host ever has one: a guest receives the bot commands over the
+        /// wire like any other player's, which is what keeps the two ends from
+        /// running two copies of the same bot and drifting apart.
+        /// </summary>
+        public void AttachBots(DoomBot[] value)
+        {
+            bots = value;
+        }
+
+        /// <summary>
+        /// Generates a command for every bot and sends it as that player's tic.
+        ///
+        /// Runs once per simulated tic, not once per frame: TryAdvance is called
+        /// repeatedly while waiting for a slow peer, and sampling the same bot
+        /// again would put several frames into one tic.
+        /// </summary>
+        private void SendBotTics()
+        {
+            if (bots == null || botsSentForTic || !session.IsHost)
+            {
+                return;
+            }
+
+            botsSentForTic = true;
+
+            for (var player = 0; player < bots.Length; player++)
+            {
+                if (bots[player] == null)
+                {
+                    continue;
+                }
+
+                var command = new TicCmd();
+                bots[player].BuildTicCmd(command);
+
+                var netTic = NetTic.From(command);
+                netTic.Number = tic;
+
+                session.SendTic(player, netTic);
+            }
+        }
+
         public bool TryAdvance(TicCmd[] cmds, IUserInput input, ref bool pause)
         {
             if (session.Faulted)
@@ -122,6 +180,11 @@ namespace DPTDOOM.Net
                 // which happens inside "GET READY" and is not visible.
                 return false;
             }
+
+            // Bots are local to the host, but their commands travel the same path
+            // as a human's: stored for this tic and broadcast. The guest therefore
+            // never runs bot logic and cannot disagree about what a bot did.
+            SendBotTics();
 
             var count = session.ExpectedPlayers;
 
@@ -218,6 +281,7 @@ namespace DPTDOOM.Net
                 localCommands.Remove(tic);
             }
 
+            botsSentForTic = false;
             tic++;
         }
 
@@ -227,6 +291,12 @@ namespace DPTDOOM.Net
         }
 
         public string Status => session.IsHost ? "hosting" : "connected";
+
+        /// <summary>Total slots in the session, bots included.</summary>
+        public int ExpectedPlayers => session.ExpectedPlayers;
+
+        /// <summary>True on the machine that drives the bots.</summary>
+        public bool IsHost => session.IsHost;
         public bool Faulted => session.Faulted;
         public string FaultReason => session.FaultReason;
         public bool Finished => session.Finished;

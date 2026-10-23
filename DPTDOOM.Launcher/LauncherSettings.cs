@@ -76,6 +76,13 @@ namespace DPTDOOM.Launcher
         /// </summary>
         public int Players = 2;
 
+        /// <summary>
+        /// Slots filled by bots when hosting. They take the last slots, so guests
+        /// join the ones before them; the host drives them and their commands
+        /// travel over the wire like any player's.
+        /// </summary>
+        public int HostBots;
+
         public string Encode()
         {
             var flags = 0;
@@ -104,7 +111,8 @@ namespace DPTDOOM.Launcher
                 Master,
                 RelaySession,
                 Relay ? "1" : "0",
-                Players.ToString(CultureInfo.InvariantCulture)
+                Players.ToString(CultureInfo.InvariantCulture),
+                HostBots.ToString(CultureInfo.InvariantCulture)
             });
         }
 
@@ -156,6 +164,7 @@ namespace DPTDOOM.Launcher
             state.RelaySession = Field(fields, 13).Trim();
             state.Relay = Field(fields, 14).Trim() == "1";
             state.Players = ParseInt(Field(fields, 15), 2, 4, 2);
+            state.HostBots = ParseInt(Field(fields, 16), 0, 3, 0);
 
             return state;
         }

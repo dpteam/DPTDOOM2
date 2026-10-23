@@ -52,6 +52,18 @@ namespace DPTDOOM.Net
             var players = args.players.Present ? args.players.Value : 2;
             var settings = BuildSettings(args, content);
 
+            // Bots fill the last slots, so a guest joining first lands on the
+            // player right after the host rather than on a slot a bot drives.
+            var bots = args.coopbots.Present
+                ? MathEx.Clamp(args.coopbots.Value, 0, Player.MaxPlayerCount - 1)
+                : 0;
+
+            if (bots >= players)
+            {
+                throw new Exception("-coopbots " + bots + " leaves no slot for a guest with -players " +
+                                    players + ". Raise -players.");
+            }
+
             // Four or more players in co-op: let them pass through each other by
             // default. With two people blocking is the game; with four in a
             // corridor it is a jam, and the player at the back gets pushed out of
@@ -130,12 +142,17 @@ namespace DPTDOOM.Net
                 lines.Add("RELAY ON");
             }
 
+            if (bots > 0)
+            {
+                lines.Add(bots + " BOT" + (bots == 1 ? "" : "S"));
+            }
+
             if (delayOverride >= 0)
             {
                 lines.Add("INPUT DELAY " + delayOverride + " TICS");
             }
 
-            lines.Add("WAITING FOR PLAYER 1/" + (players - 1));
+            lines.Add("WAITING FOR PLAYER 1/" + (players - bots - 1));
 
             status("HOSTING", lines.ToArray());
 
@@ -146,6 +163,11 @@ namespace DPTDOOM.Net
                 session.AttachPresence(presence);
             }
 
+            // Told before the wait, because the wait counts humans only: a bot
+            // slot never connects, and waiting for it would hold the host at
+            // "WAITING FOR PLAYER" for the full five minutes.
+            session.AttachBots(bots);
+
             if (relay)
             {
                 session.StartRelayHost(masterHost, masterPort, presence.Auth);
@@ -153,7 +175,7 @@ namespace DPTDOOM.Net
 
             var deadline = DateTime.Now.AddSeconds(300);
 
-            while (session.PlayerCount < session.ExpectedPlayers)
+            while (session.PlayerCount < session.HumansNeeded)
             {
                 if (session.Faulted)
                 {
@@ -169,14 +191,18 @@ namespace DPTDOOM.Net
 
                 var waiting = new System.Collections.Generic.List<string>(lines);
                 waiting[waiting.Count - 1] = "WAITING FOR PLAYER " + session.PlayerCount + "/" +
-                                             (session.ExpectedPlayers - 1);
+                                             (session.HumansNeeded - 1);
 
                 status("HOSTING", waiting.ToArray());
 
                 Thread.Sleep(100);
             }
 
-            status("STARTING", new[] { session.PlayerCount + " PLAYERS", "GET READY" });
+            status("STARTING", new[]
+            {
+                session.PlayerCount + " PLAYERS" + (bots > 0 ? " + " + bots + " BOTS" : ""),
+                "GET READY"
+            });
 
             return session;
         }
