@@ -17,6 +17,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.IO;
 using DPTDOOM.Audio;
 using DPTDOOM.Net;
 using DPTDOOM.Video;
@@ -63,6 +64,9 @@ namespace DPTDOOM
 
         private INetDriver netDriver;
 
+        private DemoRecorder recorder;
+        private string recordPath;
+
         public Doom(CommandLineArgs args, Config config, GameContent content, IVideo video, ISound sound, IMusic music, IUserInput userInput)
             : this(args, config, content, video, sound, music, userInput, null)
         {
@@ -91,6 +95,19 @@ namespace DPTDOOM
             this.music = music;
             this.userInput = userInput;
             this.netDriver = netDriver;
+
+            if (args.record.Present)
+            {
+                // A demo is a deterministic record of tic commands; a networked
+                // game has no single authoritative command stream, so recording
+                // it would produce something that does not replay.
+                if (netDriver != null)
+                {
+                    throw new Exception("-record cannot be used in a network game.");
+                }
+
+                recordPath = ResolveRecordPath(args.record.Value);
+            }
 
             events = new List<DoomEvent>();
 
@@ -400,6 +417,15 @@ namespace DPTDOOM
                     }
 
                     currentState = nextState;
+
+                    if (currentState == DoomState.Game && recordPath != null && recorder == null)
+                    {
+                        // Created here rather than in the constructor because
+                        // the options are only final once the game actually
+                        // starts (skill, episode and map come from the command
+                        // line or from a loaded save).
+                        recorder = new DemoRecorder(options);
+                    }
                 }
 
                 if (quit)
@@ -476,8 +502,21 @@ namespace DPTDOOM
                             sendPause = false;
                             cmds[options.ConsolePlayer].Buttons |= (byte)(TicCmdButtons.Special | TicCmdButtons.Pause);
                         }
-                        if (game.Update(cmds) == UpdateResult.NeedWipe)
+
+                        var gameResult = game.Update(cmds);
+
+                        if (recorder != null)
                         {
+                            // Record what the game actually consumed, after the
+                            // pause flag was folded into the commands.
+                            recorder.WriteCmd(cmds);
+                        }
+
+                        if (gameResult == UpdateResult.NeedWipe)
+                        {
+                            // A demo covers one level; the next one starts a new
+                            // recording rather than concatenating levels.
+                            StopRecording();
                             StartWipe();
                         }
                         break;
@@ -570,10 +609,21 @@ namespace DPTDOOM
                 game.SaveGame(slotNumber, description);
                 return true;
             }
-            else
+
+            // Attract demo: the moment being shown can be saved as an ordinary
+            // single-player save. The demo keeps playing, and loading that slot
+            // hands control to the player, because a save is a plain level
+            // snapshot with no demo state in it.
+            if (currentState == DoomState.Opening &&
+                opening.State == OpeningSequenceState.Demo &&
+                opening.DemoGame != null &&
+                opening.DemoGame.State == GameState.Level)
             {
-                return false;
+                opening.DemoGame.SaveGame(slotNumber, description);
+                return true;
             }
+
+            return false;
         }
 
         public void LoadGame(int slotNumber)
@@ -584,7 +634,53 @@ namespace DPTDOOM
 
         public void Quit()
         {
+            StopRecording();
             quit = true;
+        }
+
+        /// <summary>
+        /// Finishes and writes the current demo recording, if any.
+        /// </summary>
+        private void StopRecording()
+        {
+            if (recorder == null)
+            {
+                return;
+            }
+
+            try
+            {
+                recorder.Save(recordPath);
+                Console.WriteLine("Demo recorded: " + recordPath + " (" + recorder.TicCount + " tics)");
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine("Could not write the demo: " + e.Message);
+            }
+
+            recorder = null;
+        }
+
+        private static string ResolveRecordPath(string name)
+        {
+            var path = name ?? "";
+
+            if (path.Length == 0)
+            {
+                path = "demo";
+            }
+
+            if (Path.GetExtension(path).Length == 0)
+            {
+                path = path + ".lmp";
+            }
+
+            if (!Path.IsPathRooted(path))
+            {
+                path = Path.Combine(ConfigUtilities.GetDataDirectory(), path);
+            }
+
+            return path;
         }
 
         public void Quit(string message)

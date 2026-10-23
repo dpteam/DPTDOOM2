@@ -58,6 +58,10 @@ namespace DPTDOOM.Win32
         public const int SW_SHOWNORMAL = 1;
         public const int SW_SHOW = 5;
 
+        public const uint SWP_NOSIZE = 0x0001;
+        public const uint SWP_NOMOVE = 0x0002;
+        public const uint SWP_NOZORDER = 0x0004;
+
         public const int SM_CXSCREEN = 0;
         public const int SM_CYSCREEN = 1;
 
@@ -244,8 +248,6 @@ namespace DPTDOOM.Win32
         [DllImport("user32.dll")]
         public static extern bool UpdateWindow(IntPtr hWnd);
 
-        [DllImport("user32.dll")]
-        public static extern bool ValidateRect(IntPtr hWnd, IntPtr rect);
 
         [DllImport("user32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, EntryPoint = "PeekMessageW")]
         public static extern bool PeekMessage(out MSG msg, IntPtr hWnd, uint filterMin, uint filterMax, uint removeMsg);
@@ -310,6 +312,65 @@ namespace DPTDOOM.Win32
 
         [DllImport("user32.dll")]
         public static extern int ReleaseDC(IntPtr hWnd, IntPtr dc);
+
+        [DllImport("user32.dll")]
+        public static extern bool ValidateRect(IntPtr hWnd, IntPtr rect);
+
+        [DllImport("user32.dll")]
+        public static extern bool InvalidateRect(IntPtr hWnd, IntPtr rect, bool erase);
+
+        [DllImport("gdi32.dll")]
+        public static extern IntPtr CreateCompatibleDC(IntPtr dc);
+
+        [DllImport("gdi32.dll")]
+        public static extern bool DeleteDC(IntPtr dc);
+
+        [DllImport("gdi32.dll")]
+        public static extern IntPtr CreateDIBSection(
+            IntPtr dc,
+            ref BITMAPINFO bitmapInfo,
+            uint usage,
+            out IntPtr bits,
+            IntPtr section,
+            uint offset);
+
+        [DllImport("gdi32.dll")]
+        public static extern IntPtr SelectObject(IntPtr dc, IntPtr obj);
+
+        [DllImport("gdi32.dll")]
+        public static extern bool DeleteObject(IntPtr obj);
+
+        [DllImport("gdi32.dll")]
+        public static extern bool BitBlt(
+            IntPtr destDc,
+            int x,
+            int y,
+            int width,
+            int height,
+            IntPtr sourceDc,
+            int sourceX,
+            int sourceY,
+            int rasterOperation);
+
+        [DllImport("gdi32.dll")]
+        public static extern bool StretchBlt(
+            IntPtr destDc,
+            int destX,
+            int destY,
+            int destWidth,
+            int destHeight,
+            IntPtr sourceDc,
+            int sourceX,
+            int sourceY,
+            int sourceWidth,
+            int sourceHeight,
+            int rasterOperation);
+
+        [DllImport("gdi32.dll")]
+        public static extern int SetStretchBltMode(IntPtr dc, int mode);
+
+        public const int COLORONCOLOR = 3;
+        public const int HALFTONE = 4;
 
         [DllImport("user32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, EntryPoint = "SetWindowTextW")]
         public static extern bool SetWindowText(IntPtr hWnd, string text);

@@ -65,6 +65,8 @@ namespace DPTDOOM
         public readonly Arg<string> userdir;
         public readonly Arg<string> soundtest;
         public readonly Arg<string> sfx;
+        public readonly Arg<string> fpslog;
+        public readonly Arg<string> record;
 
         public CommandLineArgs(string[] args)
         {
@@ -109,6 +111,8 @@ namespace DPTDOOM
             userdir = GetString(args, "-userdir");
             soundtest = GetString(args, "-soundtest");
             sfx = GetString(args, "-sfx");
+            fpslog = GetString(args, "-fpslog");
+            record = GetString(args, "-record");
 
             // Check for drag & drop.
             if (args.Length > 0 && args.All(arg => arg.FirstOrDefault() != '-'))

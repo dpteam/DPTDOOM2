@@ -53,9 +53,30 @@ namespace DPTDOOM.Win32
 
         public void Render(Doom doom, Fixed frameFrac)
         {
+            var start = System.Diagnostics.Stopwatch.GetTimestamp();
+
             renderer.Render(doom, pixels, frameFrac);
+
+            var drawn = System.Diagnostics.Stopwatch.GetTimestamp();
+
             window.Present(pixelsPointer, renderer.Width, renderer.Height);
+
+            var presented = System.Diagnostics.Stopwatch.GetTimestamp();
+
+            if (Profiling)
+            {
+                var frequency = System.Diagnostics.Stopwatch.Frequency;
+                LastRenderMs = (drawn - start) * 1000.0 / frequency;
+                LastPresentMs = (presented - drawn) * 1000.0 / frequency;
+            }
         }
+
+        /// <summary>Enables the per-frame render/present split in the fps log.</summary>
+        public bool Profiling { get; set; }
+
+        public double LastRenderMs { get; private set; }
+
+        public double LastPresentMs { get; private set; }
 
         public void InitializeWipe()
         {

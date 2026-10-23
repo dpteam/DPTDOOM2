@@ -53,6 +53,7 @@ dotnet build DPTDOOM\DPTDOOM.csproj -f net40 -c Release
 | `-deathmatch`, `-altdeath` | режимы deathmatch |
 | `-fast`, `-respawn`, `-nomonsters` | правила |
 | `-playdemo <lmp>`, `-timedemo <lmp>` | проигрывание демо |
+| `-record <file.lmp>` | запись демо |
 | `-loadgame <0..5>` | загрузка сохранения |
 | `-nomouse`, `-nosound`, `-nosfx`, `-nomusic` | отключение подсистем |
 | `-headless` | без окна (для тестов) |
@@ -60,6 +61,7 @@ dotnet build DPTDOOM\DPTDOOM.csproj -f net40 -c Release
 | `-shot <file.bmp>` | сохранить кадр в BMP |
 | `-soundtest <file.wav>` | отрендерить звуки в WAV (нужен `-headless`) |
 | `-sfx <NAME,...>` | какие звуки рендерить (`PISTOL,SHOTGN`); по умолчанию набор |
+| `-fpslog <file.tsv>` | лог тайминга каждого кадра |
 | `-net host\|join` | сетевая сессия |
 | `-players <2..4>` | размер сессии (хост) |
 | `-port <n>` | TCP-порт сессии |
@@ -134,6 +136,31 @@ dptdoom.exe -headless -iwad doom2.wad -soundtest sfx.wav
 Отдельно проверяются юнит-тестами: `SoundMixerTest` (перегруз, ресемплинг,
 громкость, детерминизм) и `SoundPanTest` (сторона источника, constant-power
 панорама, затухание по расстоянию).
+
+## Проверка плавности
+
+Подёргивание картинки нельзя оценить на глаз, поэтому есть лог тайминга:
+
+```powershell
+dptdoom.exe -iwad doom2.wad -fpslog fps.tsv
+```
+
+Одна строка на кадр:
+
+```
+frame  nominal_ms  interval_ms  render_ms  present_ms  wait_ms  update  frac
+```
+
+- `interval_ms` — реальный интервал между кадрами; при 70 fps цель 14.286 мс.
+- `render_ms` — софтверный рендер.
+- `present_ms` — вывод кадра в окно через GDI.
+- `wait_ms` — сколько цикл простоял, ожидая следующий кадр.
+- `update` — обновлялся ли мир на этом кадре.
+- `frac` — доля интерполяции, должна расти внутри тика.
+
+Здоровый прогон: `interval` около цели, `frac` монотонно растёт (`0.500 → 1.000`)
+и сбрасывается только на кадре с `update=1`. Если `present_ms` большой — узкое
+место в выводе, а не в движке.
 
 ## Ограничения
 

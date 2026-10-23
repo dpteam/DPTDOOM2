@@ -18,6 +18,7 @@ using System.Threading;
 using DPTDOOM.Audio;
 using DPTDOOM.Net;
 using DPTDOOM.UserInput;
+using DPTDOOM.Video;
 
 namespace DPTDOOM.Win32
 {
@@ -138,61 +139,62 @@ namespace DPTDOOM.Win32
         public void Run()
         {
             var fpsScale = args.timedemo.Present ? 1 : MathEx.Clamp(config.video_fpsscale, 1, 100);
-            var targetFps = 35.0 * fpsScale;
-            var frameTime = 1.0 / targetFps;
 
-            var stopwatch = Stopwatch.StartNew();
-            var nextFrame = 0.0;
-            var frameCount = 0;
+            var pacer = new FramePacer(fpsScale);
 
-            NativeMethods.timeBeginPeriod(1);
-
-            try
+            using (var clock = new FrameClock(pacer.TargetFps))
             {
-                while (true)
+                if (args.fpslog.Present)
                 {
-                    video.Window.PumpMessages();
+                    clock.OpenLog(args.fpslog.Value);
+                    video.Profiling = true;
+                }
 
-                    if (video.Window.Closed)
-                    {
-                        break;
-                    }
+                NativeMethods.timeBeginPeriod(1);
 
-                    if (frameCount % fpsScale == 0)
+                try
+                {
+                    while (true)
                     {
-                        if (doom.Update() == UpdateResult.Completed)
+                        video.Window.PumpMessages();
+
+                        if (video.Window.Closed)
                         {
                             break;
                         }
-                    }
 
-                    frameCount++;
+                        clock.WaitForNextFrame();
 
-                    if (args.timedemo.Present)
-                    {
-                        // Benchmark mode: run as fast as possible, no drawing.
-                        continue;
-                    }
+                        var step = pacer.Advance();
 
-                    var frameFrac = Fixed.FromInt(frameCount % fpsScale + 1) / fpsScale;
-                    video.Render(doom, frameFrac);
+                        if (step.Update)
+                        {
+                            if (doom.Update() == UpdateResult.Completed)
+                            {
+                                break;
+                            }
+                        }
 
-                    nextFrame += frameTime;
-                    var wait = nextFrame - stopwatch.Elapsed.TotalSeconds;
-                    if (wait > 0)
-                    {
-                        Thread.Sleep((int)(wait * 1000));
-                    }
-                    else
-                    {
-                        // We are behind; do not accumulate a sleep debt.
-                        nextFrame = stopwatch.Elapsed.TotalSeconds;
+                        if (args.timedemo.Present)
+                        {
+                            // Benchmark mode: run as fast as possible, no drawing.
+                            clock.EndFrame(step, 0, 0, clock.LastWaitMs);
+                            continue;
+                        }
+
+                        video.Render(doom, step.Fraction);
+                        clock.EndFrame(step, video.LastRenderMs, video.LastPresentMs, clock.LastWaitMs);
                     }
                 }
-            }
-            finally
-            {
-                NativeMethods.timeEndPeriod(1);
+                finally
+                {
+                    NativeMethods.timeEndPeriod(1);
+                }
+
+                if (args.fpslog.Present)
+                {
+                    clock.WriteSummary(Console.Out);
+                }
             }
         }
 

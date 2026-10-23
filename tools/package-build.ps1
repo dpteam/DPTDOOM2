@@ -32,6 +32,15 @@ try {
         foreach ($file in $files) {
             $path = Join-Path $source $file
             if (-not (Test-Path $path)) { throw "Missing file: $path" }
+
+            # Only the files named above are copied, so game data, configs,
+            # saves and logs that happen to sit next to the build can never end
+            # up in a package. This assertion documents that and catches a
+            # mistake in the list above.
+            if ($file -match '\.(wad|dsg|cfg|log)$') {
+                throw "Refusing to package game or user data: $file"
+            }
+
             Copy-Item $path $destination
         }
     }
