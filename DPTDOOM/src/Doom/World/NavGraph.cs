@@ -64,6 +64,13 @@ namespace DPTDOOM
         /// </summary>
         private const float MaxEdgeLength = 384F;
 
+        /// <summary>
+        /// Cost above which a route is treated as non-existent rather than
+        /// merely expensive. A banned passage costs about 8.5e37, so anything
+        /// past this must be going through one.
+        /// </summary>
+        private const float BannedCost = 1e18F;
+
         /// <summary>Sampling step used to test whether a line stays in a sector.</summary>
         private const float VisibilityStep = 8F;
 
@@ -710,11 +717,20 @@ namespace DPTDOOM
         ///
         /// The limits are the engine's own: a 24-unit step up, and 56 units of
         /// head room. Doors and lifts are exempt because they move out of the
-        /// way once used.
+        /// way once used — but a **locked** door is not: it stays shut until the
+        /// key is in hand, and a route through it is a route the bot cannot
+        /// walk. Key doors are therefore left out of the graph.
         /// </summary>
         private static bool CanWalk(LineDef line, Sector from, Sector to)
         {
-            if (IsDoorSpecial((int)line.Special))
+            var special = (int)line.Special;
+
+            if (IsKeyDoor(special))
+            {
+                return false;
+            }
+
+            if (IsDoorSpecial(special))
             {
                 return true;
             }
@@ -729,6 +745,26 @@ namespace DPTDOOM
             var floor = Math.Max(from.FloorHeight.ToFloat(), to.FloorHeight.ToFloat());
 
             return ceiling - floor >= 56F;
+        }
+
+        /// <summary>
+        /// Doors that need a key: blue, yellow and red, in both the repeatable and
+        /// the one-shot variants.
+        /// </summary>
+        private static bool IsKeyDoor(int special)
+        {
+            switch (special)
+            {
+                case 26:
+                case 27:
+                case 28:
+                case 32:
+                case 33:
+                case 34:
+                    return true;
+            }
+
+            return false;
         }
 
         ////////////////////////////////////////////////////////////
@@ -801,15 +837,33 @@ namespace DPTDOOM
         /// <summary>
         /// Node of a sector that is visible from a position and closest to a
         /// goal, used as a stepping stone around a corner.
+        ///
+        /// Nodes closer than <paramref name="minDistance"/> are ignored. That
+        /// guard is what stopped the bot from spinning on the spot: a stepping
+        /// stone a few units away changes bearing by tens of degrees for every
+        /// unit of movement, so the bot turned at full rate, the target rotated
+        /// with it, and the heading never settled. The trace showed exactly that:
+        /// turn = 2048 every single tic, angle rising 11.25 degrees per tic, the
+        /// body tracing a circle of radius 25.
         /// </summary>
-        public int VisibleNodeTowards(int sector, float fromX, float fromY, float goalX, float goalY)
+        public int VisibleNodeTowards(
+            int sector, float fromX, float fromY, float goalX, float goalY, float minDistance)
         {
             var best = -1;
             var bestDistance = float.MaxValue;
+            var minSquared = minDistance * minDistance;
 
             for (var i = 0; i < nodeCount; i++)
             {
                 if (nodeSector[i] != sector)
+                {
+                    continue;
+                }
+
+                var fromX2 = nodeX[i] - fromX;
+                var fromY2 = nodeY[i] - fromY;
+
+                if (fromX2 * fromX2 + fromY2 * fromY2 < minSquared)
                 {
                     continue;
                 }
@@ -853,6 +907,41 @@ namespace DPTDOOM
             var value = nodePenalty[node] * 4F;
 
             nodePenalty[node] = value > 64F ? 64F : value;
+        }
+
+        /// <summary>
+        /// Closes a passage for the rest of the level.
+        ///
+        /// Used when the bot has stood at a door for seconds without it opening.
+        /// A door like that is either locked for good or a one-shot that has
+        /// already been used, and no amount of pressing will change it. A cost
+        /// penalty is not enough here: the bot would keep choosing the same
+        /// doorway, because it is the shortest way through. The edge is removed
+        /// outright, so the search has to find another route or admit there is
+        /// none.
+        /// </summary>
+        public void BanPassage(int from, int to)
+        {
+            if (from < 0 || to < 0 || from >= nodeCount || to >= nodeCount)
+            {
+                return;
+            }
+
+            for (var i = edgeStart[from]; i < edgeStart[from + 1]; i++)
+            {
+                if (edgeTarget[i] == to)
+                {
+                    edgeCost[i] = float.MaxValue / 4;
+                }
+            }
+
+            for (var i = edgeStart[to]; i < edgeStart[to + 1]; i++)
+            {
+                if (edgeTarget[i] == from)
+                {
+                    edgeCost[i] = float.MaxValue / 4;
+                }
+            }
         }
 
         /// <summary>Closest node to a world position, or -1.</summary>
@@ -920,6 +1009,15 @@ namespace DPTDOOM
 
                 if (current == goal)
                 {
+                    // A route that only exists through passages the bot has
+                    // already found closed is not a route. Without this check a
+                    // ban only makes the path more expensive, and the search
+                    // happily returns the same impossible route forever.
+                    if (cost[goal] > BannedCost)
+                    {
+                        return 0;
+                    }
+
                     return Reconstruct(goal, path);
                 }
 

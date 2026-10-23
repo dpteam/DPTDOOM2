@@ -41,6 +41,26 @@ namespace DPTDOOM
         private const int ReachDistance = 32;
         private const int MaxStuckTics = 35;
 
+        /// <summary>
+        /// Closest stepping stone worth aiming at. Below this the bearing swings
+        /// wildly for every unit of movement and the bot turns in place instead
+        /// of walking.
+        /// </summary>
+        private const float MinStepDistance = 64F;
+
+        /// <summary>
+        /// A waypoint this close counts as reached. The engine moves a body in
+        /// steps of several units, so a tighter test can never be satisfied.
+        /// </summary>
+        private const float ArrivedDistance = 24F;
+
+        /// <summary>
+        /// Distance at which the bot starts slowing down. Must be comfortably
+        /// larger than the turning radius at full speed, or it orbits instead of
+        /// arriving.
+        /// </summary>
+        private const float ApproachDistance = 160F;
+
         /// <summary>How close the bot has to be to press an exit switch.</summary>
         private const int ExitReachDistance = 96;
 
@@ -56,7 +76,7 @@ namespace DPTDOOM
         /// corner of some far room should still leave the level instead of
         /// clearing the same three rooms until the tic counter runs out.
         /// </summary>
-        private const int SweeperTimeLimit = 35 * 90;
+        private const int SweeperTimeLimit = 35 * 45;
 
         /// <summary>Below this health a cautious bot backs off instead of advancing.</summary>
         private const int CautiousRetreatHealth = 70;
@@ -89,6 +109,20 @@ namespace DPTDOOM
         private float bestDistance = float.MaxValue;
 
         private int detourCount;
+        private int blockerTics;
+
+
+        // Watchdog for standing in one place: sector, anchor position, tics.
+        private int pocketSector = -1;
+        private float pocketX;
+        private float pocketY;
+        private int pocketTics;
+
+        /// <summary>Tics in one spot before every way out is closed.</summary>
+        private const int PocketLimit = 5 * 35;
+
+        /// <summary>Why the last command was built the way it was, for tracing.</summary>
+        private string decision = "";
 
         // A target that will not die is a target worth ignoring for a while: a
         // hunter can otherwise stand in front of a window shooting at something
@@ -97,6 +131,11 @@ namespace DPTDOOM
         private int engagedTics;
         private Mobj ignoredTarget;
         private int ignoreUntil;
+
+        // Tics spent standing and shooting, and a window during which shooting
+        // is suppressed so the bot walks instead of firing at nothing.
+        private int shootTics;
+        private int suppressShootingUntil;
 
         /// <summary>Tics before an unkillable target is dropped for a while.</summary>
         private const int GiveUpTics = 175;
@@ -179,22 +218,45 @@ namespace DPTDOOM
             FinishedTics = -1;
 
             FindExit();
-            PlanExplore();
+            PlanExplore(-1);
         }
 
         public BotStyle Style { get { return style; } }
 
+        /// <summary>Why the last command was built as it was, for tracing.</summary>
+        public string Decision { get { return decision; } }
+
         /// <summary>Health of the bot's own player, for reporting a run.</summary>
         public int Health { get { return player.Health; } }
+
 
         /// <summary>Fills the command for one tic.</summary>
         public void BuildTicCmd(TicCmd cmd)
         {
             cmd.Clear();
+            decision = "start";
 
             var mobj = player.Mobj;
-            if (mobj == null || player.Health <= 0)
+            if (mobj == null)
             {
+                decision = "no-body";
+                return;
+            }
+
+            if (player.Health <= 0)
+            {
+                // Dead. Doom waits for the player to press Use before rebuilding
+                // the body, so a bot that just gives up here leaves the game
+                // standing at a corpse for the rest of the level — which is
+                // exactly what a Cautious run did: health 0, nothing moving,
+                // eight thousand tics of nothing.
+                //
+                // Pressed every tic rather than pulsed: the engine only looks at
+                // the button while the death animation is over, and the bot has
+                // nothing else to do meanwhile.
+                cmd.Buttons |= TicCmdButtons.Use;
+
+                decision = "dead-use";
                 return;
             }
 
@@ -220,7 +282,7 @@ namespace DPTDOOM
                 if (threat != null && HasRoomToRetreat(mobj, threat))
                 {
                     var toThreat = Geometry.PointToAngle(mobj.X, mobj.Y, threat.X, threat.Y);
-                    var facing = (toThreat - mobj.Angle).Data >> 16;
+                    var facing = TurnTo(mobj.Angle, toThreat);
 
                     cmd.AngleTurn = (short)MathEx.Clamp(facing, -0x1000, 0x1000);
                     cmd.ForwardMove = -25;
@@ -231,9 +293,14 @@ namespace DPTDOOM
                 }
             }
 
-            if (Shoot(cmd, mobj))
+            // Where to look. A visible monster takes priority, but it does not
+            // stop the bot from walking: the aim only changes the facing, and
+            // movement is expressed relative to it below.
+            var aim = Shoot(mobj);
+
+            if (aim.HasValue && FacingWithin(mobj.Angle, aim.Value, 0x0400))
             {
-                return;
+                cmd.Buttons |= TicCmdButtons.Attack;
             }
 
             if (wanderActive)
@@ -241,7 +308,7 @@ namespace DPTDOOM
                 // No route exists from here. Walk at the goal for a moment and
                 // let the ordinary steering slide along whatever it meets; often
                 // one waypoint is enough for a plan to exist again.
-                Steer(cmd, mobj, wanderX, wanderY);
+                Steer(cmd, mobj, wanderX, wanderY, aim);
 
                 if (++wanderTics > 70)
                 {
@@ -259,7 +326,7 @@ namespace DPTDOOM
             // of it. The bot used to reach the exit room, see no more nodes to
             // visit and just stand there.
             if (headingToExit && exitSector >= 0 && sector == exitSector &&
-                PressExit(cmd, mobj))
+                PressExit(cmd, mobj, aim))
             {
                 return;
             }
@@ -280,26 +347,67 @@ namespace DPTDOOM
                 }
             }
 
-            // Advance along the path. A nav node is a point, so the honest test
-            // is reaching that point, not entering some sector.
-            while (pathLength > 0 && pathIndex < pathLength)
+            // Advance along the path, and aim past the near waypoints.
+            //
+            // The mesh is dense: points sit 30 to 50 units apart. A bot that
+            // stops at each one cannot stop in time — Doom keeps the body's
+            // momentum and applies friction — so it overshoots, finds the next
+            // waypoint behind it, turns around, overshoots again. The trace shows
+            // this clearly: waypoint at 384,1587, body carried to 422,1581, then
+            // a full turn back towards 371,1536.
+            //
+            // So the bot looks ahead and walks at the farthest waypoint it can
+            // reach in a straight line. Near waypoints are skipped, not visited.
+            // This is the usual string-pulling on a path, and it is what makes
+            // the movement look like a person walking rather than a metronome.
+            if (pathLength > 0)
             {
-                var nx = nav.GetX(path[pathIndex]) - mobj.X.ToFloat();
-                var ny = nav.GetY(path[pathIndex]) - mobj.Y.ToFloat();
+                var lookX = mobj.X.ToFloat();
+                var lookY = mobj.Y.ToFloat();
 
-                if (Math.Abs(nx) + Math.Abs(ny) > ReachDistance)
+                var lookahead = pathIndex;
+
+                for (var i = pathIndex; i < pathLength; i++)
                 {
-                    break;
+                    if (nav.GetSector(path[i]) != sector)
+                    {
+                        // Crossing into another sector means leaving the line of
+                        // sight anyway; stop at the last point that was still in
+                        // this one.
+                        break;
+                    }
+
+                    if (!nav.LineClear(lookX, lookY, nav.GetX(path[i]), nav.GetY(path[i]), sector))
+                    {
+                        break;
+                    }
+
+                    lookahead = i;
+
+                    // Do not reach so far ahead that a doorway gets skipped: a
+                    // door has to be opened from its own side, so the point in
+                    // front of it is kept.
+                    if (nav.IsDoor(path[i]))
+                    {
+                        break;
+                    }
                 }
 
-                pathIndex++;
-                noProgressTics = 0;
-                bestDistance = float.MaxValue;
+                if (lookahead > pathIndex)
+                {
+                    pathIndex = lookahead;
+
+                    // Note: noProgressTics is deliberately *not* reset here.
+                    // Resetting it made the bot stand at a locked door forever:
+                    // the lookahead kept re-selecting the same point, which
+                    // looked like progress, so the stuck handler never fired and
+                    // nothing was ever replanned.
+                }
             }
 
             if (pathLength == 0 || pathIndex >= pathLength)
             {
-                PlanExplore();
+                PlanExplore(LastNode());
 
                 if (pathLength == 0 || pathIndex >= pathLength)
                 {
@@ -333,7 +441,7 @@ namespace DPTDOOM
             if (nav.GetSector(path[pathIndex]) == sector &&
                 !nav.LineClear(hereX, hereY, legTargetX, legTargetY, sector))
             {
-                var step = nav.VisibleNodeTowards(sector, hereX, hereY, legTargetX, legTargetY);
+                var step = nav.VisibleNodeTowards(sector, hereX, hereY, legTargetX, legTargetY, MinStepDistance);
 
                 if (step >= 0)
                 {
@@ -346,6 +454,36 @@ namespace DPTDOOM
             var dx = legTargetX - mobj.X.ToFloat();
             var dy = legTargetY - mobj.Y.ToFloat();
             var distance = Math.Abs(dx) + Math.Abs(dy);
+
+            // End of the route: the last waypoint is reached.
+            //
+            // There used to be an extra "arrived" test here that advanced the
+            // route whenever the bot was within 24 units of a waypoint. It was
+            // harmful: a waypoint 20 units away then counted as reached, the
+            // route moved on, the next plan handed the same waypoint back, and
+            // the bot stood still forever, "arriving" every tic. The trace shows
+            // it as a run of thousands of tics at one pair of coordinates with
+            // stuck = 0 — which is why the stuck handler never fired.
+            //
+            // Skipping waypoints is the lookahead's job, and it does it by line
+            // of sight rather than by distance, which is the honest test.
+            if (pathIndex >= pathLength - 1 && distance < ReachDistance)
+            {
+                PlanExplore(path[pathIndex]);
+
+                if (pathLength == 0 || pathIndex >= pathLength)
+                {
+                    return;
+                }
+
+                legTargetX = nav.GetX(path[pathIndex]);
+                legTargetY = nav.GetY(path[pathIndex]);
+                legIsDoor = nav.IsDoor(path[pathIndex]);
+
+                dx = legTargetX - mobj.X.ToFloat();
+                dy = legTargetY - mobj.Y.ToFloat();
+                distance = Math.Abs(dx) + Math.Abs(dy);
+            }
 
             if (legIsDoor)
             {
@@ -372,7 +510,7 @@ namespace DPTDOOM
                 noProgressTics++;
             }
 
-            Steer(cmd, mobj, legTargetX, legTargetY);
+            Steer(cmd, mobj, legTargetX, legTargetY, aim);
 
             // Something is in the way and the bot is not moving. If it is a
             // monster, shoot it: standing against a demon and pushing is how the
@@ -380,14 +518,34 @@ namespace DPTDOOM
             // above only fires at targets already in front of the bot, and a
             // monster that wandered into its path from the side never qualifies,
             // so the bot pushed at it for the rest of the level.
-            if (noProgressTics > 8 && noProgressTics <= MaxStuckTics)
+            if (noProgressTics > 8 && blockerTics <= GiveUpTics)
             {
+                // Another player in the way. Co-op players all spawn on the same
+                // spot and collide, so a bot that only pushes forward can stand
+                // in a pile for the whole level. Step away from whoever is
+                // closest and try again.
+                var other = NearestPlayer(mobj, BlockerRange);
+
+                if (other != null)
+                {
+                    // Walk directly away: reverse the bearing to the other body.
+                    var away = TurnTo(mobj.Angle, Geometry.PointToAngle(mobj.X, mobj.Y, other.X, other.Y));
+
+                    cmd.AngleTurn = (short)MathEx.Clamp(away, -0x1000, 0x1000);
+                    cmd.ForwardMove = -30;
+                    cmd.SideMove = 0;
+
+                    return;
+                }
+
                 var blocker = NearestVisibleThreat(mobj, BlockerRange);
 
                 if (blocker != null)
                 {
+                    blockerTics++;
+
                     var toBlocker = Geometry.PointToAngle(mobj.X, mobj.Y, blocker.X, blocker.Y);
-                    var facing = (toBlocker - mobj.Angle).Data >> 16;
+                    var facing = TurnTo(mobj.Angle, toBlocker);
 
                     cmd.AngleTurn = (short)MathEx.Clamp(facing, -0x1000, 0x1000);
                     cmd.ForwardMove = 0;
@@ -401,16 +559,36 @@ namespace DPTDOOM
                     return;
                 }
             }
+            else if (blockerTics > GiveUpTics)
+            {
+                // Stood here shooting at something for two seconds without
+                // progress. Either it is out of reach or it cannot die; either
+                // way, standing still is not a plan. Give up on this waypoint and
+                // let the search route around it.
+                blockerTics = 0;
+                noProgressTics = 0;
+                bestDistance = float.MaxValue;
+
+                nav.Penalize(path[pathIndex]);
+                pathLength = 0;
+            }
 
             if (noProgressTics > MaxStuckTics)
             {
-                // Blocked on this waypoint for over a second. Rather than
-                // reversing and strafing — which is what turned a briefly stuck
-                // bot into one tracing circles around the same corner — make the
-                // waypoint expensive and plan again. The new route goes around
-                // it if there is any way around, and still through it if there
-                // is not.
-                nav.Penalize(path[pathIndex]);
+                // Blocked on this waypoint for over a second. If it is a door,
+                // the passage is closed for the rest of the level: a door that
+                // has not opened by now is locked or already spent, and the bot
+                // would otherwise stand here until the level ran out.
+                if (legIsDoor && pathLength > 1)
+                {
+                    nav.BanPassage(
+                        path[Math.Max(0, pathIndex - 1)],
+                        path[pathIndex]);
+                }
+                else
+                {
+                    nav.Penalize(path[pathIndex]);
+                }
 
                 noProgressTics = 0;
                 bestDistance = float.MaxValue;
@@ -429,7 +607,7 @@ namespace DPTDOOM
         /// Uses the exit switch if the bot is standing in front of it. Returns
         /// true when the bot stopped to press it.
         /// </summary>
-        private bool PressExit(TicCmd cmd, Mobj mobj)
+        private bool PressExit(TicCmd cmd, Mobj mobj, Angle? aim)
         {
             var dx = exitX - mobj.X.ToFloat();
             var dy = exitY - mobj.Y.ToFloat();
@@ -439,7 +617,9 @@ namespace DPTDOOM
                 return false;
             }
 
-            Steer(cmd, mobj, exitX, exitY);
+            // At the exit the switch is the only thing that matters, so the bot
+            // looks at it rather than at a monster.
+            Steer(cmd, mobj, exitX, exitY, null);
 
             // Press every tic while in reach. A switch only works from the front
             // and only once the engine has registered the player as touching it,
@@ -458,6 +638,53 @@ namespace DPTDOOM
             return true;
         }
 
+        /// <summary>
+        /// Last-resort watchdog: if the bot has stayed in one sector without
+        /// moving for several seconds, every passage out of its current waypoint
+        /// is closed and the route is dropped.
+        ///
+        /// This exists because a graph can be wrong in a way no amount of
+        /// replanning fixes: a pocket that looks connected and is not. The trace
+        /// showed a bot standing in the same two square metres for four thousand
+        /// tics while the route kept handing back the same doorway. Closing the
+        /// passages forces the search somewhere else; if there really is nowhere
+        /// else, the bot explores or wanders, but it does not stand still.
+        /// </summary>
+        private void CheckPocket(int sector, Mobj mobj)
+        {
+            var x = mobj.X.ToFloat();
+            var y = mobj.Y.ToFloat();
+
+            if (sector != pocketSector ||
+                Math.Abs(x - pocketX) + Math.Abs(y - pocketY) > 48F)
+            {
+                pocketSector = sector;
+                pocketX = x;
+                pocketY = y;
+                pocketTics = 0;
+                return;
+            }
+
+            if (++pocketTics < PocketLimit)
+            {
+                return;
+            }
+
+            pocketTics = 0;
+
+            if (pathLength > 0 && pathIndex < pathLength)
+            {
+                var node = path[pathIndex];
+                nav.BanPassage(node, path[pathIndex > 0 ? pathIndex - 1 : pathIndex]);
+            }
+
+            AbandonPath();
+        }
+        private int LastNode()
+        {
+            return pathLength > 0 ? path[pathLength - 1] : -1;
+        }
+
         private void AbandonPath()
         {
             if (pathLength > 0 && !headingToExit)
@@ -470,63 +697,116 @@ namespace DPTDOOM
         }
 
         ////////////////////////////////////////////////////////////
+        // Angles
+        ////////////////////////////////////////////////////////////
+
+        /// <summary>
+        /// Signed turn from one heading to another, in TicCmd units (1/65536 of
+        /// a turn): negative means turn clockwise, positive counter-clockwise.
+        ///
+        /// This must go through an <c>int</c>. <see cref="Angle.Data"/> is
+        /// <c>uint</c>, and angle subtraction wraps in unsigned arithmetic, so
+        /// <c>(to - from).Data &gt;&gt; 16</c> is a **logical** shift: a target
+        /// slightly to the right of the bot comes out as about 65500 instead of
+        /// about -300. The bot then clamps to the turn limit and rotates away
+        /// from the target — the same direction every tic, forever.
+        ///
+        /// That is the "constant angle" that was reported: not a frozen angle,
+        /// but a heading rotating at full rate that never arrives, because every
+        /// small correction was read as a large one in the wrong direction.
+        /// </summary>
+        private static int TurnTo(Angle from, Angle to)
+        {
+            return (int)(to - from).Data >> 16;
+        }
+
+        /// <summary>
+        /// Whether one heading is within the given tolerance of another, in
+        /// TicCmd units. Uses the same signed difference, so it does not suffer
+        /// the wrap above.
+        /// </summary>
+        private static bool FacingWithin(Angle from, Angle to, int tolerance)
+        {
+            return Math.Abs(TurnTo(from, to)) <= tolerance;
+        }
+
+        ////////////////////////////////////////////////////////////
         // Steering
         ////////////////////////////////////////////////////////////
 
-        private void Steer(TicCmd cmd, Mobj mobj, float targetX, float targetY)
+        /// <summary>
+        /// Walks toward a point, optionally while looking somewhere else.
+        ///
+        /// <paramref name="aimAngle"/> is where the bot wants to face — at a
+        /// monster, usually. Movement is then expressed relative to that facing,
+        /// so the bot strafes toward its waypoint with its eyes on the enemy,
+        /// exactly as a person does. Without this the bot either walked or
+        /// fought, never both, and spent most of the level standing still.
+        /// </summary>
+        private void Steer(TicCmd cmd, Mobj mobj, float targetX, float targetY, Angle? aimAngle)
         {
-            var angle = Geometry.PointToAngle(
+            var toTarget = Geometry.PointToAngle(
                 mobj.X, mobj.Y,
                 Fixed.FromDouble(targetX), Fixed.FromDouble(targetY));
 
+            var facing = aimAngle.HasValue ? aimAngle.Value : toTarget;
+
             // Angle counts 1/2^32 of a turn; TicCmd.AngleTurn counts 1/65536.
-            // Comparing the two without converting is what made the first
-            // version of this bot rotate forever.
-            var relative = (angle - mobj.Angle).Data >> 16;
+            var turn = TurnTo(mobj.Angle, facing);
 
             var limit = noProgressTics > 6 ? 0x1000 : 0x0800;
 
-            if (relative > limit)
+            if (turn > limit)
             {
                 cmd.AngleTurn = (short)limit;
             }
-            else if (relative < -limit)
+            else if (turn < -limit)
             {
                 cmd.AngleTurn = (short)-limit;
             }
             else
             {
-                cmd.AngleTurn = (short)relative;
+                cmd.AngleTurn = (short)turn;
             }
 
-            // Move toward the target regardless of where the bot is looking.
-            //
-            // The earlier version only walked when the heading was within about
-            // 34 degrees of the target, and otherwise stood still and turned.
-            // Waypoints are close together, so the heading changed constantly
-            // and the bot spent most of the level pivoting on the spot — which
-            // is exactly what "the bots spin in circles" looks like from
-            // outside.
-            //
-            // A player does not do that: they hold forward and strafe. Splitting
-            // the direction into forward and sideways components gives the same
-            // motion without stopping, and the turn still happens in parallel so
-            // the bot ends up facing where it walks.
+            // The way we want to move, expressed in the frame we are facing.
             //
             // The engine thrusts forward along the body angle and sideways along
-            // angle - 90 (see PlayerBehavior), so:
-            //   forward = cos(relative),  side = -sin(relative)
-            // with the side axis flipped because a positive SideMove is right and
-            // a right-hand target has a negative relative angle.
+            // angle - 90 (see PlayerBehavior), so a direction that lies
+            // <c>relative</c> counter-clockwise from the facing is:
+            //   forward = cos(relative), side = -sin(relative)
+            // The side axis is flipped because a positive SideMove is to the
+            // right, and a target on the right has a negative relative angle.
+            var relative = TurnTo(facing, toTarget);
             var radians = relative * (Math.PI * 2.0 / 65536.0);
 
-            var forward = (int)Math.Round(Math.Cos(radians) * 50.0);
-            var side = (int)Math.Round(-Math.Sin(radians) * 40.0);
+            // Slow down on approach. A body that moves while it turns follows an
+            // arc, and the radius of that arc is speed divided by turn rate. At
+            // full walking speed and the normal turn limit the radius is about
+            // twenty units — the same size as the distance to a waypoint — so
+            // the bot circles the point instead of reaching it.
+            var dx = targetX - mobj.X.ToFloat();
+            var dy = targetY - mobj.Y.ToFloat();
+            var distance = (float)Math.Sqrt(dx * dx + dy * dy);
 
-            // Target well behind: turn and strafe, do not walk backwards. Moving
-            // in reverse is legal but reads as a bug, and it is slower than
-            // turning. Past a quarter turn the forward component is dropped and
-            // the side component does the work while the heading comes round.
+            var speed = 50.0;
+
+            if (distance < ApproachDistance)
+            {
+                speed = 50.0 * (distance / ApproachDistance);
+
+                if (speed < 14.0)
+                {
+                    speed = 14.0;
+                }
+            }
+
+            var forward = (int)Math.Round(Math.Cos(radians) * speed);
+            var side = (int)Math.Round(-Math.Sin(radians) * speed * 0.8);
+
+            // Moving backwards is not a thing this bot does. If the waypoint is
+            // behind, it turns; the strafe component carries it sideways in the
+            // meantime, and that is enough.
             if (Math.Abs(relative) > 0x4000)
             {
                 forward = 0;
@@ -547,6 +827,8 @@ namespace DPTDOOM
                     cmd.Buttons |= TicCmdButtons.Use;
                 }
 
+                // Straight ahead, no side component: a sideways slide while
+                // turning is an arc, and an arc is a circle.
                 cmd.ForwardMove = 30;
                 cmd.SideMove = 0;
             }
@@ -559,8 +841,16 @@ namespace DPTDOOM
         /// <summary>
         /// Picks the next route: the remembered one, the exit, or unexplored
         /// ground — depending on the style.
+        ///
+        /// <paramref name="continueFrom"/> is the node the bot has just reached,
+        /// if any. Planning from there rather than from the nearest node is what
+        /// stops the ping-pong: two mesh points can stand 28 units apart, and
+        /// "nearest node" then names the one just left, so the route immediately
+        /// pointed backwards and the bot turned around and walked back. Over and
+        /// over, which is a circle with a 14-unit radius and a heading that never
+        /// settles.
         /// </summary>
-        private void PlanExplore()
+        private void PlanExplore(int continueFrom)
         {
             pathLength = 0;
             pathIndex = 0;
@@ -572,7 +862,26 @@ namespace DPTDOOM
                 return;
             }
 
-            var start = nav.NodeAt(mobj.X, mobj.Y);
+            var start = continueFrom;
+
+            if (start < 0 || start >= nav.NodeCount)
+            {
+                start = nav.NodeAt(mobj.X, mobj.Y);
+            }
+            else
+            {
+                // The node we just reached is only a valid starting point while
+                // the bot is still standing on it. If it has drifted away, the
+                // nearest node is the honest answer.
+                var dx = nav.GetX(start) - mobj.X.ToFloat();
+                var dy = nav.GetY(start) - mobj.Y.ToFloat();
+
+                if (Math.Abs(dx) + Math.Abs(dy) > 96F)
+                {
+                    start = nav.NodeAt(mobj.X, mobj.Y);
+                }
+            }
+
             if (start < 0)
             {
                 return;
@@ -668,7 +977,7 @@ namespace DPTDOOM
             var hereY = mobj.Y.ToFloat();
             var sector = mobj.Subsector.Sector.Number;
 
-            var step = nav.VisibleNodeTowards(sector, hereX, hereY, goalX, goalY);
+            var step = nav.VisibleNodeTowards(sector, hereX, hereY, goalX, goalY, MinStepDistance);
 
             if (step >= 0)
             {
@@ -1041,6 +1350,39 @@ namespace DPTDOOM
             return best;
         }
 
+        /// <summary>Closest other player within range, or null.</summary>
+        private Mobj NearestPlayer(Mobj self, int range)
+        {
+            var best = (Mobj)null;
+            var bestDistance = range;
+
+            foreach (var thinker in world.Thinkers)
+            {
+                var mobj = thinker as Mobj;
+
+                // Only real players. Anything else that is not shootable is an
+                // item, and backing away from a health pack would be a strange
+                // way to spend a level — which is exactly what the first version
+                // of this did.
+                if (mobj == null || mobj == self || mobj.Health <= 0 || mobj.Player == null)
+                {
+                    continue;
+                }
+
+                var dx = mobj.X - self.X;
+                var dy = mobj.Y - self.Y;
+                var distance = (int)(Math.Abs(dx.ToFloat()) + Math.Abs(dy.ToFloat()));
+
+                if (distance < bestDistance)
+                {
+                    bestDistance = distance;
+                    best = mobj;
+                }
+            }
+
+            return best;
+        }
+
         /// <summary>Closest living monster within range, visible or not.</summary>
         private Mobj NearestThreat(Mobj self, int range)
         {
@@ -1128,22 +1470,28 @@ namespace DPTDOOM
         }
 
         /// <summary>
-        /// Shoots the closest monster that is visible, in front, and affordable.
+        /// Picks something to shoot at and returns the bearing to it, or null.
+        ///
+        /// The caller faces that bearing and moves toward its waypoint at the
+        /// same time, and presses Attack once the aim is close enough. Shooting
+        /// used to return a bool and stop all movement, which is why the bot
+        /// stood in one spot for most of a level: a monster anywhere in sight
+        /// took priority over going anywhere.
         /// </summary>
-        private bool Shoot(TicCmd cmd, Mobj self)
+        private Angle? Shoot(Mobj self)
         {
             var weapon = player.ReadyWeapon;
 
             if (weapon == WeaponType.Fist || weapon == WeaponType.Chainsaw)
             {
-                return ShootMelee(cmd, self);
+                return MeleeTarget(self);
             }
 
             var info = DoomInfo.WeaponInfos[(int)weapon];
             if (info.Ammo != AmmoType.NoAmmo && player.Ammo[(int)info.Ammo] <= 0)
             {
                 // Out of ammo: walk instead of standing there clicking.
-                return false;
+                return null;
             }
 
             var best = (Mobj)null;
@@ -1177,12 +1525,6 @@ namespace DPTDOOM
                     continue;
                 }
 
-                var angle = Geometry.PointToAngle(self.X, self.Y, mobj.X, mobj.Y);
-                if (Math.Abs((angle - self.Angle).Data) > 0x10000000)
-                {
-                    continue;
-                }
-
                 if (!world.VisibilityCheck.CheckSight(self, mobj))
                 {
                     continue;
@@ -1196,12 +1538,33 @@ namespace DPTDOOM
             {
                 engagedTarget = null;
                 engagedTics = 0;
-                return false;
+                shootTics = 0;
+                return null;
             }
 
-            // Track how long the same target has been engaged. If it survives
-            // this long it is probably out of reach, and standing there aiming
-            // at it forever is not a plan.
+            // Track how long this bot has been shooting at all.
+            //
+            // Counting tics per target is not enough: if two monsters are both
+            // in sight, the chosen one can alternate between them and the
+            // per-target counter resets every tic. The bot then fires at
+            // something it can never kill for the rest of the level — the trace
+            // showed decision "shoot" with zero movement, for hundreds of tics.
+            //
+            // The counter is on the bot, so swapping targets cannot reset it.
+            if (world.LevelTime < suppressShootingUntil)
+            {
+                return null;
+            }
+
+            if (++shootTics > GiveUpTics)
+            {
+                suppressShootingUntil = world.LevelTime + 3 * 35;
+                shootTics = 0;
+                engagedTics = 0;
+                engagedTarget = null;
+                return null;
+            }
+
             if (ReferenceEquals(best, engagedTarget))
             {
                 engagedTics++;
@@ -1218,25 +1581,14 @@ namespace DPTDOOM
                 ignoreUntil = world.LevelTime + 3 * 35;
                 engagedTarget = null;
                 engagedTics = 0;
-                return false;
+                return null;
             }
 
-            // Aim before firing: shooting straight ahead only works when the
-            // target happens to be exactly on the current heading.
-            var toTarget = Geometry.PointToAngle(self.X, self.Y, best.X, best.Y);
-            var error = (toTarget - self.Angle).Data >> 16;
-
-            if (Math.Abs(error) > 0x0400)
-            {
-                cmd.AngleTurn = (short)MathEx.Clamp(error, -0x1000, 0x1000);
-                return true;
-            }
-
-            cmd.Buttons |= TicCmdButtons.Attack;
-            return true;
+            return Geometry.PointToAngle(self.X, self.Y, best.X, best.Y);
         }
 
-        private bool ShootMelee(TicCmd cmd, Mobj self)
+        /// <summary>Bearing to a monster close enough to punch, or null.</summary>
+        private Angle? MeleeTarget(Mobj self)
         {
             foreach (var thinker in world.Thinkers)
             {
@@ -1260,12 +1612,12 @@ namespace DPTDOOM
                     continue;
                 }
 
-                cmd.Buttons |= TicCmdButtons.Attack;
-                return true;
+                return Geometry.PointToAngle(self.X, self.Y, mobj.X, mobj.Y);
             }
 
-            return false;
+            return null;
         }
+
 
         ////////////////////////////////////////////////////////////
         // Level knowledge
@@ -1374,6 +1726,39 @@ namespace DPTDOOM
 
         /// <summary>True when this bot ended the level itself.</summary>
         public bool Finished { get { return FinishedTics >= 0; } }
+
+        /// <summary>
+        /// True when the bot is standing at the exit.
+        ///
+        /// A walkover exit (W1) ends the level without any button being pressed,
+        /// so "did this bot finish" cannot rely on the Use button alone. If the
+        /// level ended while the bot was alive at the exit, it finished.
+        /// </summary>
+        public bool AtExit
+        {
+            get
+            {
+                var mobj = player.Mobj;
+
+                if (mobj == null || exitSector < 0 || player.Health <= 0)
+                {
+                    return false;
+                }
+
+                if (mobj.Subsector.Sector.Number != exitSector)
+                {
+                    return false;
+                }
+
+                var dx = exitX - mobj.X.ToFloat();
+                var dy = exitY - mobj.Y.ToFloat();
+
+                return Math.Abs(dx) + Math.Abs(dy) <= ExitReachDistance * 2;
+            }
+        }
+
+        /// <summary>Tics elapsed in the level, for reporting a run.</summary>
+        public int LevelTime { get { return world.LevelTime; } }
 
         /// <summary>One line describing what the bot is doing, for diagnostics.</summary>
         public string Status

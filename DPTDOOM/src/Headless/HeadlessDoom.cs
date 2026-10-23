@@ -103,6 +103,8 @@ namespace DPTDOOM.Headless
                         Console.WriteLine("Wrote frame: " + args.shot.Value);
                     }
 
+                    doom.FlushBotTrace();
+
                     Console.WriteLine("Tics: " + (driver != null ? driver.CurrentTic : tics));
 
                     if (doom.Game != null && doom.Game.World != null)

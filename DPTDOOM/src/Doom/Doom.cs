@@ -80,6 +80,10 @@ namespace DPTDOOM
         private BotBrain botBrain;
         private string botBrainKey;
 
+        // Optional per-tic record of where the bots went, for -botdump.
+        private BotTrace botTrace;
+        private int botTraceIndex;
+
         public Doom(CommandLineArgs args, Config config, GameContent content, IVideo video, ISound sound, IMusic music, IUserInput userInput)
             : this(args, config, content, video, sound, music, userInput, null)
         {
@@ -270,6 +274,14 @@ namespace DPTDOOM
 
         private BotStyle ChooseBotStyle(int index)
         {
+            // -botstyle forces one style. Used for comparing the styles against
+            // each other and for traces, where a run that changes its mind
+            // halfway through is hard to read.
+            if (args.botstyle.Present)
+            {
+                return (BotStyle)MathEx.Clamp(args.botstyle.Value, 0, BotBrain.StyleCount - 1);
+            }
+
             return GetBotBrain().ChooseStyle(index * 7919 + 1);
         }
 
@@ -321,37 +333,43 @@ namespace DPTDOOM
                 return;
             }
 
+            // A level that goes back to Level after the wipe was restarted, not
+            // finished: in single player that only happens when the player died
+            // and pressed Use. A real exit moves the game to the intermission.
+            var completed = game.State != GameState.Level;
+
             if (coopBots != null)
             {
                 for (var i = 1; i < coopBots.Length; i++)
                 {
-                    RecordBotRun(brain, coopBots[i]);
+                    RecordBotRun(brain, coopBots[i], completed);
                 }
             }
 
             if (bot != null)
             {
-                RecordBotRun(brain, bot);
+                RecordBotRun(brain, bot, completed);
             }
         }
 
-        private static void RecordBotRun(BotBrain brain, DoomBot runner)
+        private static void RecordBotRun(BotBrain brain, DoomBot runner, bool completed)
         {
             if (runner == null)
             {
                 return;
             }
 
-            var finished = runner.Finished;
-            var tics = finished ? runner.FinishedTics : 0;
+            // A walkover exit ends the level without any button being pressed, so
+            // a bot standing at the exit when it ended has finished too.
+            var finished = completed && (runner.Finished || runner.AtExit);
+            var tics = runner.Finished ? runner.FinishedTics : (finished ? runner.LevelTime : 0);
 
-            if (!finished && runner.Health > 0)
+            if (!finished && completed && runner.Health > 0)
             {
-                // The level ended under the bot's feet: somebody else got to the
-                // exit first, either the human player or a faster bot. The bot
-                // was alive and still playing, so its time says nothing about
-                // how good its style is. Scoring it would teach the brain a
-                // false lesson, which is exactly what the owner asked to avoid.
+                // The level was completed, but not by this bot: the human player
+                // or a faster bot reached the exit first. Its time says nothing
+                // about how good its style is, so the run is skipped rather than
+                // scored - the rule the owner asked for.
                 Console.WriteLine(
                     "Bot: " + runner.Style + " run not counted (level ended before it finished)");
 
@@ -364,8 +382,46 @@ namespace DPTDOOM
 
             Console.WriteLine(
                 "Bot: " + runner.Style + " " +
-                (finished ? "reached the exit in " + BotBrain.FormatTime(tics) : "died") +
+                (finished ? "reached the exit in " + BotBrain.FormatTime(tics) : "did not finish (died)") +
                 " | best " + brain.Describe());
+        }
+        /// <summary>
+        /// Writes the bot trace if one is being recorded and has not been written
+        /// yet. Called when a level ends, and by the headless runner when the tic
+        /// budget runs out first — otherwise a run that never finishes would
+        /// leave no trace, which is exactly the run worth looking at.
+        /// </summary>
+        public void FlushBotTrace()
+        {
+            if (botTrace == null)
+            {
+                return;
+            }
+
+            // Each level gets its own file. A trace that spans levels would mix
+            // two different maps into one picture, and the interesting level is
+            // usually the one the bot struggled with, not the last one.
+            var target = args.botdump.Value;
+
+            if (botTraceIndex > 0)
+            {
+                var directory = Path.GetDirectoryName(target);
+                var name = Path.GetFileNameWithoutExtension(target);
+                var extension = Path.GetExtension(target);
+
+                var numbered = name + ".level" + (botTraceIndex + 1) + extension;
+
+                target = string.IsNullOrEmpty(directory)
+                    ? numbered
+                    : Path.Combine(directory, numbered);
+            }
+
+            botTraceIndex++;
+
+            botTrace.Write(target);
+            Console.WriteLine("Bot trace: " + target);
+
+            botTrace = null;
         }
 
         private void CheckGameArgs()
@@ -678,19 +734,15 @@ namespace DPTDOOM
                         // line or from a loaded save).
                         recorder = new DemoRecorder(options);
                     }
-
-                    if (currentState == DoomState.Game && botMode && game.World != null)
-                    {
-                        // A new level invalidates the bot's map knowledge.
-                        bot = new DoomBot(game.World, game.World.ConsolePlayer, null, GetBotBrain(), ChooseBotStyle(0));
-                    }
                 }
 
                 // Bots are created here rather than at the state change above:
                 // the world does not exist yet when the state flips, it is built
                 // by the first Update of the level. Doing it at the transition
-                // left coopBots null and the bots simply never moved.
-                if (coopBotCount > 0 && currentState == DoomState.Game)
+                // left coopBots null and the bots simply never moved — and the
+                // same mistake left -bots with no bot at all, so the player
+                // stood still while the flag claimed it was being played.
+                if (currentState == DoomState.Game && (coopBotCount > 0 || botMode))
                 {
                     if (!ReferenceEquals(game.World, botWorld))
                     {
@@ -698,9 +750,18 @@ namespace DPTDOOM
                         // the old one are stale. Rebuild them for the new map.
                         botWorld = game.World;
                         coopBots = null;
+                        bot = null;
                     }
 
-                    if (game.World != null && coopBots == null)
+                    if (game.World != null && botMode && bot == null)
+                    {
+                        // A new level invalidates the bot's map knowledge.
+                        bot = new DoomBot(
+                            game.World, game.World.ConsolePlayer, null,
+                            GetBotBrain(), ChooseBotStyle(0));
+                    }
+
+                    if (game.World != null && coopBots == null && coopBotCount > 0)
                     {
                         // One graph for the level, shared by every bot: it
                         // depends only on the map.
@@ -727,6 +788,17 @@ namespace DPTDOOM
                         }
 
                         Console.WriteLine("Co-op bots: " + coopBotCount + " joined. Brain: " + brain.Describe());
+                    }
+                }
+
+                if (game.World != null && botTrace == null && args.botdump.Present && currentState == DoomState.Game)
+                {
+                    botTrace = new BotTrace(args.botdump.Value, game.World);
+
+                    if (!botTrace.Active)
+                    {
+                        // No bots in this game: nothing to trace.
+                        botTrace = null;
                     }
                 }
 
@@ -828,6 +900,14 @@ namespace DPTDOOM
 
                         var gameResult = game.Update(cmds);
 
+                        if (botTrace != null)
+                        {
+                            // Sampled after the update, so the position is where
+                            // the bot actually ended up and the command is the
+                            // one that moved it there.
+                            botTrace.Sample(cmds, bot, coopBots);
+                        }
+
                         if (recorder != null)
                         {
                             // Record what the game actually consumed, after the
@@ -840,6 +920,8 @@ namespace DPTDOOM
                             // The level is over. Let the bots learn from it
                             // before the world is thrown away.
                             RecordBotRuns();
+
+                            FlushBotTrace();
 
                             // A demo covers one level; the next one starts a new
                             // recording rather than concatenating levels.

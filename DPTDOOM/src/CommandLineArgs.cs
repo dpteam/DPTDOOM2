@@ -72,6 +72,8 @@ namespace DPTDOOM
         public readonly Arg maponly;
         public readonly Arg bots;
         public readonly Arg<int> coopbots;
+        public readonly Arg<string> botdump;
+        public readonly Arg<int> botstyle;
 
         public CommandLineArgs(string[] args)
         {
@@ -123,6 +125,8 @@ namespace DPTDOOM
             maponly = new Arg(args.Contains("-maponly"));
             bots = new Arg(args.Contains("-bots"));
             coopbots = GetInt(args, "-coopbots");
+            botdump = GetString(args, "-botdump");
+            botstyle = GetInt(args, "-botstyle");
 
             // Check for drag & drop.
             if (args.Length > 0 && args.All(arg => arg.FirstOrDefault() != '-'))
