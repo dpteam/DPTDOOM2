@@ -74,6 +74,7 @@ namespace DPTDOOM
         // DoomBot, so one person can test a co-op session alone.
         private DoomBot[] coopBots;
         private int coopBotCount;
+        private World botWorld;
 
         public Doom(CommandLineArgs args, Config config, GameContent content, IVideo video, ISound sound, IMusic music, IUserInput userInput)
             : this(args, config, content, video, sound, music, userInput, null)
@@ -488,11 +489,26 @@ namespace DPTDOOM
                         // A new level invalidates the bot's map knowledge.
                         bot = new DoomBot(game.World, game.World.ConsolePlayer);
                     }
+                }
 
-                    if (currentState == DoomState.Game && coopBotCount > 0 && game.World != null)
+                // Bots are created here rather than at the state change above:
+                // the world does not exist yet when the state flips, it is built
+                // by the first Update of the level. Doing it at the transition
+                // left coopBots null and the bots simply never moved.
+                if (coopBotCount > 0 && currentState == DoomState.Game)
+                {
+                    if (!ReferenceEquals(game.World, botWorld))
                     {
-                        // One graph for the level, shared by every bot: it depends
-                        // only on the map.
+                        // A new level builds a new World, so bots that point at
+                        // the old one are stale. Rebuild them for the new map.
+                        botWorld = game.World;
+                        coopBots = null;
+                    }
+
+                    if (game.World != null && coopBots == null)
+                    {
+                        // One graph for the level, shared by every bot: it
+                        // depends only on the map.
                         var nav = new NavGraph(game.World.Map);
 
                         coopBots = new DoomBot[Player.MaxPlayerCount];
@@ -505,6 +521,8 @@ namespace DPTDOOM
                                 coopBots[i] = new DoomBot(game.World, player, nav);
                             }
                         }
+
+                        Console.WriteLine("Co-op bots: " + coopBotCount + " joined.");
                     }
                 }
 

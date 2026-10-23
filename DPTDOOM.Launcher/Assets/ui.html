@@ -89,6 +89,7 @@
           <button data-mode="0" class="selected" type="button">Одиночная</button>
           <button data-mode="1" type="button">Создать COOP</button>
           <button data-mode="2" type="button">Подключиться</button>
+          <button data-mode="3" type="button">С ботами</button>
         </div>
         <label>Карта<input id="map" type="number" min="1" max="32" value="1"></label>
         <label>Сложность
@@ -106,6 +107,17 @@
           <label>TCP-порт<input id="port" type="number" min="1024" max="65535" value="5029"></label>
           <p class="hint">Одинаковые ресурсы, карта и правила на обеих сторонах.
              Хост ждёт игрока до 5 минут.</p>
+        </div>
+        <div id="botOptions" class="hidden">
+          <label>Ботов-напарников
+            <select id="coopbots">
+              <option value="1">1</option>
+              <option value="2">2</option>
+              <option value="3" selected>3</option>
+            </select>
+          </label>
+          <p class="hint">Локальная игра: ты и боты в одном мире, без сети.
+             Боты воюют и идут к выходу, но карту до конца пока не проходят.</p>
         </div>
       </div>
 

@@ -55,6 +55,11 @@ namespace DPTDOOM
         private int turnDirection = 1;
         private int detourCount;
 
+        // Target of the current leg, fixed until the bot enters the next sector.
+        private float legTargetX;
+        private float legTargetY;
+        private bool legIsDoor;
+
 
         private bool headingToExit;
         private readonly int exitNode;
@@ -102,53 +107,53 @@ namespace DPTDOOM
                 return;
             }
 
-            // Keep the route in step with reality. A path is a list of sectors,
-            // so the only honest way to advance is to actually enter the next
-            // one. Advancing when merely close to the portal let the bot skip
-            // through doorways it had not crossed, after which it aimed at a
-            // point behind a wall and thrashed.
-            if (pathLength > 0)
+            // Advance along the path. A nav node is a point, so the honest test
+            // is reaching that point, not entering some sector.
+            while (pathLength > 0 && pathIndex < pathLength)
             {
-                if (pathIndex + 1 < pathLength && nav.GetSector(path[pathIndex + 1]) == sector)
+                var nx = nav.GetX(path[pathIndex]) - mobj.X.ToFloat();
+                var ny = nav.GetY(path[pathIndex]) - mobj.Y.ToFloat();
+
+                if (Math.Abs(nx) + Math.Abs(ny) > ReachDistance)
                 {
-                    pathIndex++;
-                    noProgressTics = 0;
-                    bestDistance = float.MaxValue;
+                    break;
                 }
-                else if (nav.GetSector(path[pathIndex]) != sector)
-                {
-                    // Somewhere the route did not expect: start over.
-                    pathLength = 0;
-                }
+
+                pathIndex++;
+                noProgressTics = 0;
+                bestDistance = float.MaxValue;
             }
 
-            if (pathLength == 0 || pathIndex + 1 >= pathLength)
+            if (pathLength == 0 || pathIndex >= pathLength)
             {
                 PlanExplore();
-                if (pathLength == 0 || pathIndex + 1 >= pathLength)
+
+                if (pathLength == 0 || pathIndex >= pathLength)
                 {
                     return;
                 }
             }
 
-            float targetX;
-            float targetY;
-            LineDef portal;
+            legTargetX = nav.GetX(path[pathIndex]);
+            legTargetY = nav.GetY(path[pathIndex]);
+            legIsDoor = nav.IsDoor(path[pathIndex]);
 
-            if (!nav.FindPortal(
-                path[pathIndex], path[pathIndex + 1],
-                mobj.X.ToFloat(), mobj.Y.ToFloat(),
-                out targetX, out targetY, out portal))
+            var dx = legTargetX - mobj.X.ToFloat();
+            var dy = legTargetY - mobj.Y.ToFloat();
+            var distance = Math.Abs(dx) + Math.Abs(dy);
+
+            // Exit switch: walk up to it and press it.
+            //
+            // Finding the exit sector is not enough. The exit is a *switch* line
+            // (or a walkover), and a switch has to be used from the front side
+            // while standing in front of it. The bot used to reach the exit room,
+            // see no more nodes to visit and stand there.
+            if (headingToExit && PressExitIfClose(cmd, mobj))
             {
-                pathLength = 0;
                 return;
             }
 
-            var dx = targetX - mobj.X.ToFloat();
-            var dy = targetY - mobj.Y.ToFloat();
-            var distance = Math.Abs(dx) + Math.Abs(dy);
-
-            if (portal != null && IsDoor(portal))
+            if (legIsDoor)
             {
                 // Doors open on Use from the side you face. Press it every tic
                 // while walking in: one press can be wasted on the frame before
@@ -170,23 +175,67 @@ namespace DPTDOOM
                 noProgressTics++;
             }
 
-            Steer(cmd, mobj, targetX, targetY);
+            Steer(cmd, mobj, legTargetX, legTargetY);
 
             if (noProgressTics > MaxStuckTics)
             {
-                // Blocked for over a second on the way to a portal. Rather than
-                // abandoning the whole route (which made the bot repath to the
-                // same place and repeat), nudge it sideways to get around
-                // whatever it is snagged on.
+                // Blocked on this node. Back off and try again before giving up
+                // on the route; the usual cause is a corner the straight line
+                // clips, and a short retreat is enough to clear it.
                 noProgressTics = 0;
                 bestDistance = float.MaxValue;
 
-                if (++detourCount > 3)
+                if (++detourCount > 8)
                 {
                     detourCount = 0;
                     AbandonPath();
                 }
             }
+        }
+
+        /// <summary>
+        /// <summary>
+        /// Uses the exit switch if one is within reach. Returns true when the
+        /// bot stopped to press it.
+        /// </summary>
+        private bool PressExitIfClose(TicCmd cmd, Mobj mobj)
+        {
+            foreach (var line in mobj.Subsector.Sector.Lines)
+            {
+                if (!IsExit(line))
+                {
+                    continue;
+                }
+
+                var midX = (line.Vertex1.X.ToFloat() + line.Vertex2.X.ToFloat()) * 0.5F;
+                var midY = (line.Vertex1.Y.ToFloat() + line.Vertex2.Y.ToFloat()) * 0.5F;
+
+                var dx = midX - mobj.X.ToFloat();
+                var dy = midY - mobj.Y.ToFloat();
+
+                if (Math.Abs(dx) + Math.Abs(dy) > 80F)
+                {
+                    continue;
+                }
+
+                // Face it, then press. A switch only works from the front.
+                var angle = Geometry.PointToAngle(
+                    mobj.X, mobj.Y,
+                    Fixed.FromDouble(midX), Fixed.FromDouble(midY));
+
+                var delta = (angle - mobj.Angle).Data >> 16;
+                cmd.AngleTurn = (short)MathEx.Clamp(delta, -0x1000, 0x1000);
+
+                if (Math.Abs(delta) < 0x1000)
+                {
+                    cmd.ForwardMove = 20;
+                    cmd.Buttons |= TicCmdButtons.Use;
+                }
+
+                return true;
+            }
+
+            return false;
         }
 
         private void AbandonPath()
@@ -234,19 +283,30 @@ namespace DPTDOOM
             {
                 cmd.ForwardMove = 50;
             }
-
-            if (noProgressTics > 6)
+            else if (Math.Abs(delta) < 0x1800)
             {
-                // Slide along the obstacle; alternating direction every tic
-                // would only shake in place, so a direction is held for a while.
-                cmd.SideMove = (sbyte)(turnDirection * 40);
-                cmd.ForwardMove = 40;
-                cmd.Buttons |= TicCmdButtons.Use;
+                // Walk while still turning out a corner. Stopping dead until the
+                // heading is exact made the movement look jerky and robotic.
+                cmd.ForwardMove = 30;
+            }
 
-                if (noProgressTics > MaxStuckTics - 8)
-                {
-                    turnDirection = -turnDirection;
-                }
+            // Unstick in two stages. The first version started strafing after
+            // only six tics without progress, which is exactly how the bot ended
+            // up walking circles: a brief slowdown was enough to trigger a
+            // sideways slide, which changed the heading, which slowed it again.
+            if (noProgressTics > 8)
+            {
+                // Stage one: keep pressing forward and use. Doors need contact
+                // to open, and a doorway is the usual reason for being blocked.
+                cmd.Buttons |= TicCmdButtons.Use;
+                cmd.ForwardMove = 30;
+            }
+
+            if (noProgressTics > 20)
+            {
+                // Stage two: back out of the corner before trying again.
+                cmd.ForwardMove = -25;
+                cmd.SideMove = (sbyte)(turnDirection * 25);
             }
         }
 
@@ -626,28 +686,21 @@ namespace DPTDOOM
                     return "idle";
                 }
 
-                if (pathIndex >= pathLength)
+                if (pathIndex + 1 >= pathLength)
                 {
                     return "arrived";
                 }
 
-                var sector = nav.GetSector(path[pathIndex]);
-
-                if (pathIndex + 1 < pathLength)
-                {
-                    float x;
-                    float y;
-                    LineDef line;
-                    nav.FindPortal(path[pathIndex], path[pathIndex + 1], 0, 0, out x, out y, out line);
-
-                    var special = line == null ? 0 : (int)line.Special;
-                    return "to node " + path[pathIndex + 1] + " sector " + sector +
-                           " via special " + special + " at " + x.ToString("0") + "," + y.ToString("0") +
-                           (headingToExit ? " (exit)" : "");
-                }
-
-                return "to node " + path[pathIndex] + " sector " + sector;
+                return "leg " + path[pathIndex] + "->" + path[pathIndex + 1] +
+                       " target " + legTargetX.ToString("0") + "," + legTargetY.ToString("0") +
+                       (legIsDoor ? " (door)" : "") +
+                       (headingToExit ? " (exit)" : "") +
+                       " stuck " + noProgressTics;
             }
         }
+
+        public float TargetX { get { return legTargetX; } }
+        public float TargetY { get { return legTargetY; } }
+        public int StuckTics { get { return noProgressTics; } }
     }
 }

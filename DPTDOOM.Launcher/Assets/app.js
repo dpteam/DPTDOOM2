@@ -72,6 +72,7 @@ var DPT = (function () {
         parts.push(String(mode));
         parts.push(mods.join(LIST_SEPARATOR));
         parts.push(String(slot));
+        parts.push(String(parseInt($('coopbots').value, 10) || 3));
 
         return parts.join('\n');
     }
@@ -104,6 +105,9 @@ var DPT = (function () {
         slot = newSlot;
         $('slot').value = String(newSlot);
 
+        var bots = parseInt(parts[FIELDS.length + 4], 10) || 3;
+        $('coopbots').value = String(bots);
+
         syncMode();
         renderMods();
         requestPreview();
@@ -123,7 +127,8 @@ var DPT = (function () {
             buttons[i].setAttribute('aria-pressed', value === mode ? 'true' : 'false');
         }
 
-        $('network').className = mode === 0 ? 'hidden' : '';
+        $('network').className = (mode === 1 || mode === 2) ? '' : 'hidden';
+        $('botOptions').className = mode === 3 ? '' : 'hidden';
         $('address').disabled = mode !== 2;
     }
 

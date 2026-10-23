@@ -95,6 +95,15 @@ Assert-True ($preview -like "*-skill 4*") "preview contains the chosen skill"
 $mods = Invoke-Page "document.getElementById('mods').children.length"
 Assert-True ($mods -eq 0) "mod list starts empty"
 
+# 7. Bots mode builds the right arguments.
+Invoke-Page "var b=document.querySelectorAll('[data-mode]');b[3].onclick();" | Out-Null
+Pump 400
+$botOptions = Invoke-Page "document.getElementById('botOptions').className"
+Assert-True ($botOptions -notlike "*hidden*") "bots mode shows the bot count"
+
+$botsPreview = Invoke-Page "document.getElementById('preview').innerHTML"
+Assert-True ($botsPreview -like "*-coopbots*") "bots mode passes -coopbots"
+
 $form.Close()
 
 if ($failures -gt 0) {

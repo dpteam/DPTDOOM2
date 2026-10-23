@@ -48,6 +48,9 @@ namespace DPTDOOM.Launcher
 
         public int Slot = 1;
 
+        /// <summary>How many local co-op bots join when Mode is 3.</summary>
+        public int CoopBots = 3;
+
         public string Encode()
         {
             var flags = 0;
@@ -68,7 +71,8 @@ namespace DPTDOOM.Launcher
                 flags.ToString(CultureInfo.InvariantCulture),
                 Mode.ToString(CultureInfo.InvariantCulture),
                 string.Join(ListSeparator.ToString(), Pwads.ToArray()),
-                Slot.ToString(CultureInfo.InvariantCulture)
+                Slot.ToString(CultureInfo.InvariantCulture),
+                CoopBots.ToString(CultureInfo.InvariantCulture)
             });
         }
 
@@ -97,7 +101,7 @@ namespace DPTDOOM.Launcher
             state.Respawn = (flags & 4) != 0;
             state.Deathmatch = (flags & 8) != 0;
 
-            state.Mode = ParseInt(Field(fields, 8), 0, 2, 0);
+            state.Mode = ParseInt(Field(fields, 8), 0, 3, 0);
 
             var list = Field(fields, 9);
             if (list.Length > 0)
@@ -112,6 +116,7 @@ namespace DPTDOOM.Launcher
             }
 
             state.Slot = ParseInt(Field(fields, 10), 1, 3, 1);
+            state.CoopBots = ParseInt(Field(fields, 11), 1, 3, 3);
 
             return state;
         }

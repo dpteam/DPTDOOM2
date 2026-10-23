@@ -107,6 +107,20 @@ namespace DPTDOOM.Headless
 
                     if (doom.Game != null && doom.Game.World != null)
                     {
+                        for (var i = 0; i < Player.MaxPlayerCount; i++)
+                        {
+                            var p = doom.Game.World.Options.Players[i];
+                            if (p.InGame && p.Mobj != null)
+                            {
+                                Console.WriteLine("  player " + (i + 1) +
+                                    " pos=" + p.Mobj.X.ToFloat().ToString("0") + "," + p.Mobj.Y.ToFloat().ToString("0") +
+                                    " health=" + p.Health);
+                            }
+                        }
+                    }
+
+                    if (doom.Game != null && doom.Game.World != null)
+                    {
                         Console.WriteLine(
                             "State: mobj=" + DoomDebug.GetMobjHash(doom.Game.World).ToString("x8") +
                             " sector=" + DoomDebug.GetSectorHash(doom.Game.World).ToString("x8"));

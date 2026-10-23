@@ -115,6 +115,15 @@ namespace DPTDOOM.Launcher
                 builder.Append("-net join ");
                 Append(builder, "-address", JoinAddress(state));
             }
+            else if (state.Mode == 3)
+            {
+                // Local co-op: the human plus bots in the same world.
+                var bots = state.CoopBots;
+                if (bots < 1) bots = 1;
+                else if (bots > 3) bots = 3;
+
+                Append(builder, "-coopbots", bots.ToString());
+            }
 
             return builder.ToString().TrimEnd();
         }
