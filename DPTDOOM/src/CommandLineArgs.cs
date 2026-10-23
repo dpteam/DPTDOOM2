@@ -63,6 +63,8 @@ namespace DPTDOOM
         public readonly Arg<string> name;
         public readonly Arg botinput;
         public readonly Arg<string> userdir;
+        public readonly Arg<string> soundtest;
+        public readonly Arg<string> sfx;
 
         public CommandLineArgs(string[] args)
         {
@@ -105,6 +107,8 @@ namespace DPTDOOM
             name = GetString(args, "-name");
             botinput = new Arg(args.Contains("-botinput"));
             userdir = GetString(args, "-userdir");
+            soundtest = GetString(args, "-soundtest");
+            sfx = GetString(args, "-sfx");
 
             // Check for drag & drop.
             if (args.Length > 0 && args.All(arg => arg.FirstOrDefault() != '-'))

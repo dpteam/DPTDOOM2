@@ -52,6 +52,18 @@ namespace DPTDOOM
 
                 if (cmd.headless.Present)
                 {
+                    if (cmd.soundtest.Present)
+                    {
+                        using (var content = new GameContent(cmd))
+                        {
+                            var requested = cmd.sfx.Present
+                                ? cmd.sfx.Value.Split(',')
+                                : null;
+
+                            return SoundTest.Run(content.Wad, cmd.soundtest.Value, requested);
+                        }
+                    }
+
                     return HeadlessDoom.Run(cmd);
                 }
 

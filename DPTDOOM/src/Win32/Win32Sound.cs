@@ -22,18 +22,23 @@ using WAVEFORMATEX = DPTDOOM.Win32.NativeMethodsWave.WAVEFORMATEX;
 namespace DPTDOOM.Win32
 {
     /// <summary>
-    /// Standalone sound effects through winmm.dll. A small software mixer
-    /// resamples the 8-bit DMX lumps, applies distance attenuation and stereo
-    /// panning, and feeds waveOut. This replaces DrippyAL/OpenAL and works on
-    /// Windows XP without any extra DLLs.
+    /// Sound effects through winmm.dll. Channel selection, priorities and
+    /// attenuation follow the original Doom rules; the actual signal path is
+    /// <see cref="SoundMixer"/>, which is also used by the offline -soundtest
+    /// renderer so what you hear is what the tests measure.
     /// </summary>
     internal sealed class Win32Sound : ISound, IDisposable
     {
         private const int ChannelCount = 8;
+        private const int UiChannel = ChannelCount;
+
         private const int OutputRate = 44100;
         private const int OutputChannels = 2;
-        private const int BufferFrames = 1024;
-        private const int BufferCount = 4;
+
+        // 512 frames at 44.1 kHz is ~11.6 ms per buffer. Four of them give a
+        // comfortable safety margin without audible latency.
+        private const int BufferFrames = 512;
+        private const int BufferCount = 6;
 
         private const float FastDecay = 0.7071F;  // half-life ~5 tics at 35 Hz
         private const float SlowDecay = 0.9805F;  // half-life ~35 tics
@@ -42,15 +47,14 @@ namespace DPTDOOM.Win32
         private const float Attenuator = ClipDist - CloseDist;
 
         private readonly Config config;
-        private readonly Sample[] samples;
+        private readonly SoundSample[] samples;
         private readonly float[] amplitudes;
         private readonly DoomRandom random;
 
         private readonly ChannelInfo[] infos;
-        private readonly Voice[] voices;
-        private readonly Voice uiVoice;
-
+        private readonly SoundMixer mixer;
         private readonly object mixerLock = new object();
+
         private readonly Thread mixerThread;
         private volatile bool running;
         private volatile bool paused;
@@ -73,13 +77,15 @@ namespace DPTDOOM.Win32
 
             config.audio_soundvolume = MathEx.Clamp(config.audio_soundvolume, 0, MaxVolume);
 
-            samples = new Sample[DoomInfo.SfxNames.Length];
+            samples = new SoundSample[DoomInfo.SfxNames.Length];
             amplitudes = new float[DoomInfo.SfxNames.Length];
 
             if (config.audio_randompitch)
             {
                 random = new DoomRandom();
             }
+
+            var loaded = 0;
 
             for (var i = 0; i < DoomInfo.SfxNames.Length; i++)
             {
@@ -89,26 +95,29 @@ namespace DPTDOOM.Win32
                     continue;
                 }
 
-                var sample = ReadSample(content.Wad.ReadLump(name));
+                var sample = SoundSample.Parse(content.Wad.ReadLump(name));
                 if (sample != null)
                 {
                     samples[i] = sample;
-                    amplitudes[i] = GetAmplitude(sample);
+                    amplitudes[i] = sample.GetAmplitude();
+                    loaded++;
                 }
             }
 
+            Console.WriteLine("Sound effects: " + loaded + " loaded.");
+
             infos = new ChannelInfo[ChannelCount];
-            voices = new Voice[ChannelCount];
             for (var i = 0; i < ChannelCount; i++)
             {
                 infos[i] = new ChannelInfo();
-                voices[i] = new Voice();
             }
 
-            uiVoice = new Voice();
-            uiReserved = Sfx.NONE;
+            mixer = new SoundMixer(ChannelCount + 1, OutputRate, OutputChannels);
 
+            uiReserved = Sfx.NONE;
             masterVolumeDecay = (float)config.audio_soundvolume / MaxVolume;
+            mixer.MasterVolume = masterVolumeDecay;
+
             lastUpdate = DateTime.MinValue;
 
             running = true;
@@ -117,80 +126,9 @@ namespace DPTDOOM.Win32
             mixerThread.Name = "DPTDOOM sound mixer";
         }
 
-        private static Sample ReadSample(byte[] data)
-        {
-            if (data.Length < 8)
-            {
-                return null;
-            }
-
-            var sampleRate = BitConverter.ToUInt16(data, 2);
-            var sampleCount = BitConverter.ToInt32(data, 4);
-
-            var offset = 8;
-            if (ContainsDmxPadding(data))
-            {
-                offset += 16;
-                sampleCount -= 32;
-            }
-
-            if (sampleCount <= 0 || offset + sampleCount > data.Length)
-            {
-                return null;
-            }
-
-            return new Sample(data, offset, sampleCount, sampleRate);
-        }
-
-        private static bool ContainsDmxPadding(byte[] data)
-        {
-            var sampleCount = BitConverter.ToInt32(data, 4);
-            if (sampleCount < 32)
-            {
-                return false;
-            }
-
-            var first = data[8];
-            for (var i = 1; i < 16; i++)
-            {
-                if (data[8 + i] != first)
-                {
-                    return false;
-                }
-            }
-
-            var last = data[8 + sampleCount - 1];
-            for (var i = 1; i < 16; i++)
-            {
-                if (data[8 + sampleCount - i - 1] != last)
-                {
-                    return false;
-                }
-            }
-
-            return true;
-        }
-
-        private static float GetAmplitude(Sample sample)
-        {
-            var max = 0;
-            var count = Math.Min(sample.SampleRate / 5, sample.Count);
-            for (var t = 0; t < count; t++)
-            {
-                var a = sample.Data[sample.Offset + t] - 128;
-                if (a < 0)
-                {
-                    a = -a;
-                }
-
-                if (a > max)
-                {
-                    max = a;
-                }
-            }
-
-            return max / 128F;
-        }
+        ////////////////////////////////////////////////////////////
+        // Game-facing API
+        ////////////////////////////////////////////////////////////
 
         public void SetListener(Mobj listener)
         {
@@ -210,11 +148,10 @@ namespace DPTDOOM.Win32
             for (var i = 0; i < infos.Length; i++)
             {
                 var info = infos[i];
-                var voice = voices[i];
 
                 if (info.Playing != Sfx.NONE)
                 {
-                    if (voice.Playing)
+                    if (mixer.IsPlaying(i))
                     {
                         if (info.Type == SfxType.Diffuse)
                         {
@@ -225,7 +162,7 @@ namespace DPTDOOM.Win32
                             info.Priority *= FastDecay;
                         }
 
-                        SetParam(voice, info);
+                        ApplyPan(i, info);
                     }
                     else
                     {
@@ -242,7 +179,7 @@ namespace DPTDOOM.Win32
                     var sample = samples[(int)info.Reserved];
                     if (sample != null)
                     {
-                        StartVoice(voice, info, sample);
+                        StartVoice(i, info, sample);
                         info.Playing = info.Reserved;
                     }
 
@@ -262,28 +199,29 @@ namespace DPTDOOM.Win32
             }
         }
 
-        private void StartVoice(Voice voice, ChannelInfo info, Sample sample)
+        private void StartVoice(int channel, ChannelInfo info, SoundSample sample)
         {
             lock (mixerLock)
             {
-                voice.Sample = sample;
-                voice.Position = 0;
-                voice.Step = (double)sample.SampleRate / OutputRate * GetPitch(info.Type, info.Playing);
-                voice.Playing = true;
-                SetParam(voice, info);
+                mixer.Play(
+                    channel,
+                    sample,
+                    0F,
+                    0F,
+                    GetPitch(info.Type, info.Playing != Sfx.NONE ? info.Playing : info.Reserved));
+
+                ApplyPan(channel, info);
             }
         }
 
-        private void StartUiVoice(Sample sample)
+        private void StartUiVoice(SoundSample sample)
         {
             lock (mixerLock)
             {
-                uiVoice.Sample = sample;
-                uiVoice.Position = 0;
-                uiVoice.Step = (double)sample.SampleRate / OutputRate;
-                uiVoice.LeftGain = 0.7071F * masterVolumeDecay;
-                uiVoice.RightGain = 0.7071F * masterVolumeDecay;
-                uiVoice.Playing = true;
+                // UI sounds are centred and are not attenuated: they are the
+                // player's own weapon, menu clicks and pickups.
+                var gain = 0.7071F;
+                mixer.Play(UiChannel, sample, gain, gain, 1F);
             }
         }
 
@@ -323,6 +261,7 @@ namespace DPTDOOM.Win32
                 priority = amplitudes[(int)sfx] * GetDistanceDecay(dist) * volume;
             }
 
+            // A sound already playing from this object replaces itself.
             for (var i = 0; i < infos.Length; i++)
             {
                 var info = infos[i];
@@ -335,6 +274,7 @@ namespace DPTDOOM.Win32
                 }
             }
 
+            // Then a free channel.
             for (var i = 0; i < infos.Length; i++)
             {
                 var info = infos[i];
@@ -349,8 +289,11 @@ namespace DPTDOOM.Win32
                 }
             }
 
+            // Otherwise steal the least important one, but only if this sound
+            // is at least as important.
             var minPriority = float.MaxValue;
             var minChannel = -1;
+
             for (var i = 0; i < infos.Length; i++)
             {
                 var info = infos[i];
@@ -396,15 +339,12 @@ namespace DPTDOOM.Win32
 
             lock (mixerLock)
             {
+                mixer.StopAll();
+
                 for (var i = 0; i < infos.Length; i++)
                 {
-                    voices[i].Playing = false;
-                    voices[i].Sample = null;
                     infos[i].Clear();
                 }
-
-                uiVoice.Playing = false;
-                uiVoice.Sample = null;
             }
 
             listener = null;
@@ -420,17 +360,22 @@ namespace DPTDOOM.Win32
             paused = false;
         }
 
-        private void SetParam(Voice voice, ChannelInfo info)
+        ////////////////////////////////////////////////////////////
+        // Panning and attenuation
+        ////////////////////////////////////////////////////////////
+
+        private void ApplyPan(int channel, ChannelInfo info)
         {
             if (info.Type == SfxType.Diffuse || listener == null)
             {
-                voice.LeftGain = 0.7071F * masterVolumeDecay * 0.01F * info.Volume;
-                voice.RightGain = voice.LeftGain;
+                var gain = 0.7071F * 0.01F * info.Volume;
+                mixer.SetGains(channel, gain, gain);
                 return;
             }
 
             Fixed sourceX;
             Fixed sourceY;
+
             if (info.Source == null)
             {
                 sourceX = info.LastX;
@@ -447,30 +392,25 @@ namespace DPTDOOM.Win32
 
             if (Math.Abs(x) < 16 && Math.Abs(y) < 16)
             {
-                voice.LeftGain = 0.7071F * masterVolumeDecay * 0.01F * info.Volume;
-                voice.RightGain = voice.LeftGain;
+                var gain = 0.7071F * 0.01F * info.Volume;
+                mixer.SetGains(channel, gain, gain);
+                return;
             }
-            else
-            {
-                var dist = MathF.Sqrt(x * x + y * y);
-                var angle = MathF.Atan2(y, x) - (float)listener.Angle.ToRadian();
-                var pan = (MathF.Sin(angle) + 1F) * 0.5F;
 
-                var gain = masterVolumeDecay * 0.01F * GetDistanceDecay(dist) * info.Volume;
-                voice.LeftGain = (float)Math.Sqrt(1.0 - pan) * gain;
-                voice.RightGain = (float)Math.Sqrt(pan) * gain;
-            }
+            var dist = MathF.Sqrt(x * x + y * y);
+            var angle = MathF.Atan2(y, x) - (float)listener.Angle.ToRadian();
+
+            float left;
+            float right;
+            SoundPan.FromRelativeAngle(angle, out left, out right);
+
+            var attenuation = 0.01F * SoundPan.DistanceDecay(dist, CloseDist, ClipDist) * info.Volume;
+            mixer.SetGains(channel, left * attenuation, right * attenuation);
         }
 
         private static float GetDistanceDecay(float dist)
         {
-            if (dist < CloseDist)
-            {
-                return 1F;
-            }
-
-            var decay = (ClipDist - dist) / Attenuator;
-            return decay > 0F ? decay : 0F;
+            return SoundPan.DistanceDecay(dist, CloseDist, ClipDist);
         }
 
         private float GetPitch(SfxType type, Sfx sfx)
@@ -493,117 +433,89 @@ namespace DPTDOOM.Win32
             return 1F + 0.025F * (random.Next() - 128) / 128;
         }
 
+        ////////////////////////////////////////////////////////////
+        // waveOut
+        ////////////////////////////////////////////////////////////
+
         private void MixerLoop()
         {
             if (!OpenWaveOut())
             {
+                Console.WriteLine("Sound unavailable: continuing without audio.");
                 return;
             }
 
-            var silent = new short[BufferFrames * OutputChannels];
-            var written = 0;
+            mixBuffer = new short[BufferFrames * OutputChannels];
+
+            // Fill every buffer before the device starts asking for more, so
+            // playback begins with real audio instead of an underrun.
+            for (var i = 0; i < BufferCount; i++)
+            {
+                if (!Submit(i))
+                {
+                    break;
+                }
+            }
 
             while (running)
             {
-                var idle = true;
+                var wrote = false;
 
                 for (var i = 0; i < BufferCount && running; i++)
                 {
-                    var header = headers[i];
-                    var done = (header.dwFlags & NativeMethodsWave.WHDR_DONE) != 0;
-                    if (!done && written >= BufferCount)
+                    if ((headers[i].dwFlags & NativeMethodsWave.WHDR_DONE) == 0)
                     {
                         continue;
                     }
 
-                    idle = false;
-
-                    if (paused)
+                    if (!Submit(i))
                     {
-                        Array.Clear(silent, 0, silent.Length);
-                        Marshal.Copy(silent, 0, buffers[i], silent.Length);
-                    }
-                    else
-                    {
-                        Mix(mixBuffer);
-                        Marshal.Copy(mixBuffer, 0, buffers[i], mixBuffer.Length);
+                        continue;
                     }
 
-                    headers[i].dwFlags &= ~NativeMethodsWave.WHDR_DONE;
-                    headers[i].dwBufferLength = (uint)(BufferFrames * OutputChannels * 2);
-                    headers[i].dwBytesRecorded = 0;
-                    NativeMethodsWave.waveOutWrite(waveOut, ref headers[i], (uint)Marshal.SizeOf(typeof(WAVEHDR)));
-                    written++;
+                    wrote = true;
                 }
 
-                if (idle)
+                if (!wrote)
                 {
-                    Thread.Sleep(5);
+                    // Nothing is free yet; 2 ms keeps the latency low without
+                    // spinning a core.
+                    Thread.Sleep(2);
                 }
             }
 
             CloseWaveOut();
         }
 
-        private void Mix(short[] destination)
+        private bool Submit(int index)
         {
-            Array.Clear(destination, 0, destination.Length);
-
-            lock (mixerLock)
+            if (paused)
             {
-                for (var v = -1; v < voices.Length; v++)
+                Array.Clear(mixBuffer, 0, mixBuffer.Length);
+            }
+            else
+            {
+                lock (mixerLock)
                 {
-                    var voice = v < 0 ? uiVoice : voices[v];
-                    if (!voice.Playing || voice.Sample == null)
-                    {
-                        continue;
-                    }
-
-                    var sample = voice.Sample;
-                    var position = voice.Position;
-                    var step = voice.Step;
-                    var left = voice.LeftGain;
-                    var right = voice.RightGain;
-
-                    for (var i = 0; i < BufferFrames; i++)
-                    {
-                        var index = (int)position;
-                        if (index >= sample.Count - 1)
-                        {
-                            voice.Playing = false;
-                            break;
-                        }
-
-                        var frac = (float)(position - index);
-                        var s0 = (sample.Data[sample.Offset + index] - 128) / 128F;
-                        var s1 = (sample.Data[sample.Offset + index + 1] - 128) / 128F;
-                        var value = s0 + (s1 - s0) * frac;
-
-                        var dst = i * 2;
-                        destination[dst] = Clamp(destination[dst] + value * left);
-                        destination[dst + 1] = Clamp(destination[dst + 1] + value * right);
-
-                        position += step;
-                    }
-
-                    voice.Position = position;
+                    mixer.Mix(mixBuffer, BufferFrames);
                 }
             }
-        }
 
-        private static short Clamp(float value)
-        {
-            if (value > 1F)
-            {
-                return short.MaxValue;
-            }
+            Marshal.Copy(mixBuffer, 0, buffers[index], mixBuffer.Length);
 
-            if (value < -1F)
-            {
-                return short.MinValue;
-            }
+            // Pass the array element by ref so the driver writes WHDR_DONE
+            // into the very struct we poll. Copying it into a local and back
+            // would drop whatever the driver sets in the meantime.
+            headers[index].dwFlags &= ~NativeMethodsWave.WHDR_DONE;
+            headers[index].dwBufferLength = (uint)(mixBuffer.Length * 2);
+            headers[index].dwBytesRecorded = 0;
 
-            return (short)(value * 32767F);
+            var result = NativeMethodsWave.waveOutWrite(
+                waveOut,
+                ref headers[index],
+                (uint)Marshal.SizeOf(typeof(WAVEHDR)));
+
+            return result == 0;
         }
 
         private bool OpenWaveOut()
@@ -629,12 +541,11 @@ namespace DPTDOOM.Win32
 
                 if (result != 0)
                 {
-                    Console.WriteLine("Sound unavailable (waveOutOpen error " + result + ").");
+                    Console.WriteLine("waveOutOpen failed with error " + result + ".");
                     waveOut = IntPtr.Zero;
                     return false;
                 }
 
-                mixBuffer = new short[BufferFrames * OutputChannels];
                 headers = new WAVEHDR[BufferCount];
                 buffers = new IntPtr[BufferCount];
 
@@ -647,7 +558,17 @@ namespace DPTDOOM.Win32
                     headers[i] = new WAVEHDR();
                     headers[i].lpData = buffers[i];
                     headers[i].dwBufferLength = (uint)byteCount;
-                    NativeMethodsWave.waveOutPrepareHeader(waveOut, ref headers[i], (uint)headerSize);
+                    headers[i].dwFlags = NativeMethodsWave.WHDR_DONE;
+
+                    var prepare = NativeMethodsWave.waveOutPrepareHeader(
+                        waveOut, ref headers[i], (uint)headerSize);
+
+                    if (prepare != 0)
+                    {
+                        Console.WriteLine("waveOutPrepareHeader failed with error " + prepare + ".");
+                        CloseWaveOut();
+                        return false;
+                    }
                 }
 
                 mixerStarted = true;
@@ -662,6 +583,7 @@ namespace DPTDOOM.Win32
 
         private void CloseWaveOut()
         {
+
             if (waveOut == IntPtr.Zero)
             {
                 return;
@@ -672,6 +594,7 @@ namespace DPTDOOM.Win32
             if (headers != null)
             {
                 var headerSize = Marshal.SizeOf(typeof(WAVEHDR));
+
                 for (var i = 0; i < headers.Length; i++)
                 {
                     if (headers[i].lpData != IntPtr.Zero)
@@ -701,46 +624,21 @@ namespace DPTDOOM.Win32
 
             if (mixerThread.IsAlive)
             {
-                mixerThread.Join(500);
+                mixerThread.Join(1000);
             }
         }
 
-        public int MaxVolume => 15;
+        public int MaxVolume { get { return 15; } }
 
         public int Volume
         {
-            get => config.audio_soundvolume;
+            get { return config.audio_soundvolume; }
             set
             {
                 config.audio_soundvolume = value;
                 masterVolumeDecay = (float)config.audio_soundvolume / MaxVolume;
+                mixer.MasterVolume = masterVolumeDecay;
             }
-        }
-
-        private sealed class Sample
-        {
-            public readonly byte[] Data;
-            public readonly int Offset;
-            public readonly int Count;
-            public readonly int SampleRate;
-
-            public Sample(byte[] data, int offset, int count, int sampleRate)
-            {
-                Data = data;
-                Offset = offset;
-                Count = count;
-                SampleRate = sampleRate;
-            }
-        }
-
-        private sealed class Voice
-        {
-            public Sample Sample;
-            public double Position;
-            public double Step;
-            public float LeftGain;
-            public float RightGain;
-            public bool Playing;
         }
 
         private sealed class ChannelInfo
