@@ -13,7 +13,9 @@
 param(
     [Parameter(Mandatory = $true)][int]$Listen,
     [Parameter(Mandatory = $true)][string]$Target,
-    [int]$DelayMs = 50
+    [int]$DelayMs = 50,
+    [int]$JitterMs = 0,
+    [int]$LossPercent = 0
 )
 
 $ErrorActionPreference = "Stop"
@@ -33,12 +35,16 @@ public sealed class DelayProxy : IDisposable {
     private readonly string targetHost;
     private readonly int targetPort;
     private readonly int delayMs;
+    private readonly int jitterMs;
+    private readonly int lossPercent;
     private volatile bool stopping;
 
-    public DelayProxy(int listenPort, string host, int port, int delay) {
+    public DelayProxy(int listenPort, string host, int port, int delay, int jitter, int loss) {
         targetHost = host;
         targetPort = port;
         delayMs = delay;
+        jitterMs = jitter;
+        lossPercent = loss;
         listener = new TcpListener(IPAddress.Loopback, listenPort);
     }
 
@@ -83,6 +89,7 @@ public sealed class DelayProxy : IDisposable {
 
     private void Pump(TcpClient from, TcpClient to) {
         var buffer = new byte[4096];
+        var random = new Random(Environment.TickCount);
         try {
             var input = from.GetStream();
             var output = to.GetStream();
@@ -91,9 +98,22 @@ public sealed class DelayProxy : IDisposable {
                 var read = input.Read(buffer, 0, buffer.Length);
                 if (read <= 0) { break; }
 
+                if (lossPercent > 0 && random.Next(100) < lossPercent) {
+                    // Dropping bytes here would corrupt the stream rather than
+                    // emulate loss: TCP already acknowledged them to the sender.
+                    // What packet loss looks like to an application is a stall of
+                    // roughly one retransmission timeout, so that is what is
+                    // emulated.
+                    var stall = delayMs * 2 + random.Next(50);
+                    if (stall > 0) { Thread.Sleep(stall); }
+                }
+
                 // Delay before forwarding, which is what a long path does: the
-                // bytes spend time in flight.
-                if (delayMs > 0) { Thread.Sleep(delayMs); }
+                // bytes spend time in flight. Jitter varies it per chunk, the
+                // way a real path does.
+                var delay = delayMs;
+                if (jitterMs > 0) { delay += random.Next(jitterMs + 1); }
+                if (delay > 0) { Thread.Sleep(delay); }
 
                 output.Write(buffer, 0, read);
                 output.Flush();
@@ -113,10 +133,10 @@ public sealed class DelayProxy : IDisposable {
 }
 "@
 
-$proxy = New-Object DelayProxy $Listen, $targetHost, $targetPort, $DelayMs
+$proxy = New-Object DelayProxy $Listen, $targetHost, $targetPort, $DelayMs, $JitterMs, $LossPercent
 $proxy.Start()
 
-Write-Host "Latency proxy: 127.0.0.1:$Listen -> ${targetHost}:${targetPort}, ${DelayMs}ms one way"
+Write-Host "Latency proxy: 127.0.0.1:$Listen -> ${targetHost}:${targetPort}, ${DelayMs}ms +- ${JitterMs}ms one way, ${LossPercent}% loss"
 
 try {
     Write-Host "Press Ctrl+C to stop."

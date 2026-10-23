@@ -48,6 +48,25 @@ namespace DPTDOOM.Master
         public int RelayIdleSeconds = 120;
         public int RelayLifetimeSeconds = 21600;
 
+        /// <summary>
+        /// Guest tunnels one session may hold open at once.
+        ///
+        /// The relay exists for people who cannot forward a port, and it is paid
+        /// for by one operator. A co-op session is 2-4 players, so three guest
+        /// tunnels is the whole of it; more than that is either a mistake or
+        /// somebody using the master as free hosting.
+        /// </summary>
+        public int RelayGuestsPerSession = 3;
+
+        /// <summary>
+        /// Relay-enabled sessions one source address may hold at once.
+        ///
+        /// Two, not one: a household with two machines behind the same router is
+        /// a real case, and NAT hairpin is exactly why such a household needs the
+        /// relay. More than two from one address is not two people playing.
+        /// </summary>
+        public int RelaySessionsPerSource = 2;
+
         public static MasterConfig Load(string path, List<string> warnings)
         {
             var config = new MasterConfig();
@@ -172,6 +191,14 @@ namespace DPTDOOM.Master
 
                     case "relay-lifetime-seconds":
                         config.RelayLifetimeSeconds = ParseInt(value, 60, 86400, "relay-lifetime-seconds");
+                        break;
+
+                    case "relay-guests-per-session":
+                        config.RelayGuestsPerSession = ParseInt(value, 1, 16, "relay-guests-per-session");
+                        break;
+
+                    case "relay-sessions-per-source":
+                        config.RelaySessionsPerSource = ParseInt(value, 1, 16, "relay-sessions-per-source");
                         break;
 
                     default:

@@ -31,6 +31,10 @@ param(
     [int]$Tics = 350,
     [int]$HostPort = 5074,
     [int]$ProxyPort = 5075,
+    # Real internet paths are not clean delays: the extra spread is what made
+    # the first fix feel only slightly better.
+    [int]$JitterMs = 0,
+    [int]$LossPercent = 0,
     # The game asks for 35 tics/s. The bar is a little below that, because a
     # headless run is unthrottled and the point is only to prove the session is
     # no longer capped by the round trip: the old ceiling at 50 ms was 17.5.
@@ -86,11 +90,14 @@ foreach ($oneWay in $DelayMs) {
         Start-Sleep -Seconds 5
 
         if ($oneWay -gt 0) {
+            $proxyArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass',
+                           '-File', 'tools\latency-proxy.ps1',
+                           '-Listen', "$ProxyPort", '-Target', "127.0.0.1:$HostPort",
+                           '-DelayMs', "$oneWay", '-JitterMs', "$JitterMs",
+                           '-LossPercent', "$LossPercent")
+
             $proxy = Start-Process -FilePath "powershell.exe" -PassThru -WindowStyle Hidden `
-                -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass',
-                                '-File', 'tools\latency-proxy.ps1',
-                                '-Listen', "$ProxyPort", '-Target', "127.0.0.1:$HostPort",
-                                '-DelayMs', "$oneWay")
+                -ArgumentList $proxyArgs
             Start-Sleep -Seconds 4
         }
 

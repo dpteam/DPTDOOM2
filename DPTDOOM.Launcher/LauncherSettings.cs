@@ -42,6 +42,15 @@ namespace DPTDOOM.Launcher
         public bool Respawn;
         public bool Deathmatch;
 
+        /// <summary>Players pass through each other instead of blocking.</summary>
+        public bool NoBlock;
+
+        /// <summary>Spawn the duplicate weapons deathmatch maps scatter.</summary>
+        public bool CoopWeapons;
+
+        /// <summary>Each player has to find keys for themselves.</summary>
+        public bool NoSharedKeys;
+
         public int Mode; // 0 = single, 1 = host, 2 = join
 
         public List<string> Pwads = new List<string>();
@@ -60,6 +69,13 @@ namespace DPTDOOM.Launcher
         /// <summary>Host through the master's relay instead of a port forward.</summary>
         public bool Relay;
 
+        /// <summary>
+        /// Players in the session, host included. The engine is fixed at four:
+        /// Player arrays, the demo format and the intermission all have four
+        /// slots, so a larger number here would not be a bigger game.
+        /// </summary>
+        public int Players = 2;
+
         public string Encode()
         {
             var flags = 0;
@@ -67,6 +83,9 @@ namespace DPTDOOM.Launcher
             if (Fast) flags |= 2;
             if (Respawn) flags |= 4;
             if (Deathmatch) flags |= 8;
+            if (NoBlock) flags |= 16;
+            if (CoopWeapons) flags |= 32;
+            if (NoSharedKeys) flags |= 64;
 
             return string.Join("\n", new[]
             {
@@ -84,7 +103,8 @@ namespace DPTDOOM.Launcher
                 CoopBots.ToString(CultureInfo.InvariantCulture),
                 Master,
                 RelaySession,
-                Relay ? "1" : "0"
+                Relay ? "1" : "0",
+                Players.ToString(CultureInfo.InvariantCulture)
             });
         }
 
@@ -107,11 +127,14 @@ namespace DPTDOOM.Launcher
             state.Port = ParseInt(Field(fields, 5), 1024, 65535, 5029);
             state.Name = Field(fields, 6);
 
-            var flags = ParseInt(Field(fields, 7), 0, 15, 0);
+            var flags = ParseInt(Field(fields, 7), 0, 127, 0);
             state.NoMonsters = (flags & 1) != 0;
             state.Fast = (flags & 2) != 0;
             state.Respawn = (flags & 4) != 0;
             state.Deathmatch = (flags & 8) != 0;
+            state.NoBlock = (flags & 16) != 0;
+            state.CoopWeapons = (flags & 32) != 0;
+            state.NoSharedKeys = (flags & 64) != 0;
 
             state.Mode = ParseInt(Field(fields, 8), 0, 3, 0);
 
@@ -132,6 +155,7 @@ namespace DPTDOOM.Launcher
             state.Master = Field(fields, 12).Trim();
             state.RelaySession = Field(fields, 13).Trim();
             state.Relay = Field(fields, 14).Trim() == "1";
+            state.Players = ParseInt(Field(fields, 15), 2, 4, 2);
 
             return state;
         }

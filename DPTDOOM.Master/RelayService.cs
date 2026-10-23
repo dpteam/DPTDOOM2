@@ -93,6 +93,8 @@ namespace DPTDOOM.Master
 
             log.Info("relay listening on " + bind + ":" + port +
                      " sessions=" + config.RelaySessions +
+                     " guests/session=" + config.RelayGuestsPerSession +
+                     " sessions/source=" + config.RelaySessionsPerSource +
                      " per-source=" + config.RelayPerSource +
                      " rate=" + config.RelayRate + "B/s" +
                      " idle=" + config.RelayIdleSeconds + "s" +
@@ -238,9 +240,20 @@ namespace DPTDOOM.Master
                 WaitingHost existing;
                 if (waiting.TryGetValue(key, out existing))
                 {
-                    log.Event(Describe(host, remote) + " relay host rejected: already waiting");
-                    Reply(stream, MasterProtocol.OpRelayHost, new byte[0], MasterProtocol.StatusConflict);
-                    return false;
+                    // A host that reconnects before maintenance noticed the old
+                    // socket died should just take the slot. Answering Conflict
+                    // would make the player wait a second for no reason.
+                    if (IsDisconnected(existing.Client))
+                    {
+                        Close(existing.Client);
+                        waiting.Remove(key);
+                    }
+                    else
+                    {
+                        log.Event(Describe(host, remote) + " relay host rejected: already waiting");
+                        Reply(stream, MasterProtocol.OpRelayHost, new byte[0], MasterProtocol.StatusConflict);
+                        return false;
+                    }
                 }
 
                 if (waiting.Count + pairs.Count >= config.RelaySessions)
@@ -253,6 +266,28 @@ namespace DPTDOOM.Master
                 if (CountForSource(remote) >= config.RelayPerSource)
                 {
                     log.Event(Describe(host, remote) + " relay host rejected: too many from this address");
+                    Reply(stream, MasterProtocol.OpRelayHost, new byte[0], MasterProtocol.StatusCapacity);
+                    return false;
+                }
+
+                if (CountGuestsForKey(key) >= config.RelayGuestsPerSession)
+                {
+                    // The session already has all the guest tunnels it is allowed;
+                    // parking another waiting channel would hold a socket open for
+                    // a guest that could never be admitted.
+                    log.Event("relay " + key + ": host channel not needed, " +
+                              config.RelayGuestsPerSession + " guest tunnels already active");
+                    Reply(stream, MasterProtocol.OpRelayHost, new byte[0], MasterProtocol.StatusCapacity);
+                    return false;
+                }
+
+                if (CountSessionsForSource(remote) >= config.RelaySessionsPerSource)
+                {
+                    // The relay is a shared resource and costs the operator both
+                    // bandwidth and CPU. Two sessions per address covers a
+                    // household with two machines, which is the case NAT hairpin
+                    // creates; more than that is not two people playing.
+                    log.Event(Describe(host, remote) + " relay host rejected: too many sessions from this address");
                     Reply(stream, MasterProtocol.OpRelayHost, new byte[0], MasterProtocol.StatusCapacity);
                     return false;
                 }
@@ -292,7 +327,19 @@ namespace DPTDOOM.Master
                 }
                 else
                 {
-                    waiting.Remove(key);
+                    // Guests are limited per session, not per address: the relay
+                    // is meant for a co-op group of up to four, and the host
+                    // itself is one of them.
+                    if (CountGuestsForKey(key) >= config.RelayGuestsPerSession)
+                    {
+                        log.Event("relay " + key + ": guest rejected from " + Describe(host, remote) +
+                                  ": already " + config.RelayGuestsPerSession + " guest tunnels");
+                        waitingHost = null;
+                    }
+                    else
+                    {
+                        waiting.Remove(key);
+                    }
                 }
             }
 
@@ -482,6 +529,55 @@ namespace DPTDOOM.Master
             return count;
         }
 
+        /// <summary>
+        /// How many distinct sessions this address is currently relaying.
+        ///
+        /// A session counts once no matter how many guest tunnels it holds: three
+        /// guests joining one host is one session, not three.
+        /// </summary>
+        private int CountSessionsForSource(IPEndPoint source)
+        {
+            if (source == null)
+            {
+                return 0;
+            }
+
+            var keys = new Dictionary<string, bool>();
+
+            foreach (var slot in waiting.Values)
+            {
+                if (SameAddress(slot.Source, source))
+                {
+                    keys[slot.Key] = true;
+                }
+            }
+
+            foreach (var pair in pairs)
+            {
+                if (SameAddress(pair.HostSource, source))
+                {
+                    keys[pair.Key] = true;
+                }
+            }
+
+            return keys.Count;
+        }
+
+        private int CountGuestsForKey(string key)
+        {
+            var count = 0;
+
+            foreach (var pair in pairs)
+            {
+                if (pair.Key == key)
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+
         private static bool SameAddress(IPEndPoint left, IPEndPoint right)
         {
             if (left == null || right == null)
@@ -514,6 +610,16 @@ namespace DPTDOOM.Master
                             if (!directory.IsActive(slot.Id))
                             {
                                 expired.Add(slot);
+                                continue;
+                            }
+
+                            // A host that died while waiting must lose its slot
+                            // at once, not when the lease runs out. Otherwise a
+                            // crashed host keeps holding its per-address budget
+                            // for up to a minute and its owner cannot re-host.
+                            if (IsDisconnected(slot.Client))
+                            {
+                                expired.Add(slot);
                             }
                         }
 
@@ -525,7 +631,11 @@ namespace DPTDOOM.Master
 
                     foreach (var slot in expired)
                     {
-                        log.Event("relay " + slot.Key + ": waiting channel expired with its listing");
+                        var reason = directory.IsActive(slot.Id)
+                            ? "host disconnected while waiting"
+                            : "waiting channel expired with its listing";
+
+                        log.Event("relay " + slot.Key + ": " + reason);
                         Close(slot.Client);
                     }
                 }
@@ -533,6 +643,34 @@ namespace DPTDOOM.Master
                 {
                     log.Warn("relay maintenance: " + e.Message);
                 }
+            }
+        }
+
+        /// <summary>
+        /// True when the peer has closed or reset the connection.
+        ///
+        /// A waiting channel is idle by design, so any readable state means the
+        /// connection is finished rather than "data pending": the host sends
+        /// nothing until it is paired. Poll(0) is the only way to notice without
+        /// consuming bytes, and consuming them would corrupt the game stream once
+        /// the channel is paired.
+        /// </summary>
+        private static bool IsDisconnected(TcpClient client)
+        {
+            try
+            {
+                var socket = client.Client;
+
+                if (socket == null || !socket.Connected)
+                {
+                    return true;
+                }
+
+                return socket.Poll(0, SelectMode.SelectRead) && socket.Available == 0;
+            }
+            catch (Exception)
+            {
+                return true;
             }
         }
 

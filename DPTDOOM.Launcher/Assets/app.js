@@ -22,6 +22,12 @@ var DPT = (function () {
 
     var FIELDS = ['executable', 'iwad', 'map', 'skill', 'address', 'port', 'name'];
     var CHECKS = ['nomonsters', 'fast', 'respawn', 'deathmatch'];
+
+    // These three are inverted on purpose: the checkbox says "проходят сквозь
+    // друга", and the absence of that is the Doom default. Stored as bits 16, 32
+    // and 64 of the same flags field, leaving the classic four bits untouched so
+    // an older settings file still decodes to the same game.
+    var COOP_CHECKS = ['noblock', 'coopweapons', 'nosharedkeys'];
     var LIST_SEPARATOR = '\u001f';
     var MAX_MODS = 16;
 
@@ -68,6 +74,12 @@ var DPT = (function () {
             }
         }
 
+        for (i = 0; i < COOP_CHECKS.length; i++) {
+            if ($(COOP_CHECKS[i]).checked) {
+                flags |= (16 << i);
+            }
+        }
+
         parts.push(String(flags));
         parts.push(String(mode));
         parts.push(mods.join(LIST_SEPARATOR));
@@ -76,6 +88,7 @@ var DPT = (function () {
         parts.push($('masterEndpoint').value);
         parts.push($('relaySession').value);
         parts.push($('relay').checked ? '1' : '0');
+        parts.push(String(parseInt($('players').value, 10) || 2));
 
         return parts.join('\n');
     }
@@ -99,6 +112,10 @@ var DPT = (function () {
             $(CHECKS[i]).checked = (flags & (1 << i)) !== 0;
         }
 
+        for (i = 0; i < COOP_CHECKS.length; i++) {
+            $(COOP_CHECKS[i]).checked = (flags & (16 << i)) !== 0;
+        }
+
         mode = parseInt(parts[FIELDS.length + 1], 10) || 0;
 
         var list = parts[FIELDS.length + 2] || '';
@@ -119,6 +136,11 @@ var DPT = (function () {
 
         $('relaySession').value = parts[FIELDS.length + 6] || '';
         $('relay').checked = (parts[FIELDS.length + 7] || '0') === '1';
+
+        var players = parseInt(parts[FIELDS.length + 8], 10);
+        if (players >= 2 && players <= 4) {
+            $('players').value = String(players);
+        }
 
         syncMode();
         renderMods();
@@ -144,6 +166,7 @@ var DPT = (function () {
         $('address').disabled = mode !== 2;
         $('relay').disabled = mode !== 1;
         $('relaySession').disabled = mode !== 2;
+        $('players').disabled = mode !== 1;
     }
 
     function renderMods() {
@@ -379,6 +402,10 @@ var DPT = (function () {
 
         for (i = 0; i < CHECKS.length; i++) {
             $(CHECKS[i]).onclick = changed;
+        }
+
+        for (i = 0; i < COOP_CHECKS.length; i++) {
+            $(COOP_CHECKS[i]).onclick = changed;
         }
 
         var buttons = document.querySelectorAll('[data-mode]');

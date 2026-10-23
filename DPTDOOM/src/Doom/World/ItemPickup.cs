@@ -278,8 +278,52 @@ namespace DPTDOOM
 
             player.BonusCount = bonusAdd;
             player.Cards[(int)card] = true;
+
+            // Shared keys: the whole team gets it.
+            //
+            // Vanilla Doom already leaves the keycard on its spot in a network
+            // game, so the other player can walk over and pick it up too. That
+            // works when the second player is nearby and fails the moment one
+            // player takes the key through a door and the other is on the far
+            // side of the map. Handing it to the team removes the deadlock
+            // without changing anything about the key itself: it still stays on
+            // the floor and is still picked up individually in single player.
+            if (world.Options.SharedKeys && world.Options.NetGame)
+            {
+                var count = world.Options.Players.Length;
+
+                for (var i = 0; i < count; i++)
+                {
+                    var other = world.Options.Players[i];
+
+                    if (other == null || other == player || !other.InGame)
+                    {
+                        continue;
+                    }
+
+                    if (!other.Cards[(int)card])
+                    {
+                        other.Cards[(int)card] = true;
+                        other.BonusCount = bonusAdd;
+                        other.SendMessage(CardMessage(card));
+                    }
+                }
+            }
         }
 
+
+        private static DoomString CardMessage(CardType card)
+        {
+            switch (card)
+            {
+                case CardType.BlueCard: return DoomInfo.Strings.GOTBLUECARD;
+                case CardType.YellowCard: return DoomInfo.Strings.GOTYELWCARD;
+                case CardType.RedCard: return DoomInfo.Strings.GOTREDCARD;
+                case CardType.BlueSkull: return DoomInfo.Strings.GOTBLUESKUL;
+                case CardType.YellowSkull: return DoomInfo.Strings.GOTYELWSKUL;
+                default: return DoomInfo.Strings.GOTREDSKULL;
+            }
+        }
 
         /// <summary>
         /// Give the power up to the player.

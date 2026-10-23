@@ -16,6 +16,7 @@
 
 
 using System;
+using System.Collections.Generic;
 
 namespace DPTDOOM
 {
@@ -195,6 +196,8 @@ namespace DPTDOOM
 
         private void LoadThings()
         {
+            var weaponSpots = CollectWeaponSpots();
+
             for (var i = 0; i < map.Things.Length; i++)
             {
                 var mt = map.Things[i];
@@ -226,8 +229,103 @@ namespace DPTDOOM
                     break;
                 }
 
+                if (weaponSpots != null && IsExtraWeaponCopy(weaponSpots, mt.Type))
+                {
+                    break;
+                }
+
                 thingAllocation.SpawnMapThing(mt);
             }
+        }
+
+        /// <summary>
+        /// DoomEdNum of every weapon pickup in the map data.
+        ///
+        /// The WAD cannot say "this plasma rifle is here for deathmatch respawns".
+        /// What it can say is that the same weapon is placed several times, and
+        /// that is exactly what those duplicates are: on a map built for
+        /// deathmatch the same gun sits in four places so it is never far away.
+        /// In co-op only one of them is the pickup; the rest are decoration that
+        /// also makes the level easier than it was designed to be.
+        /// </summary>
+        private const int WeaponShotgun = 2001;
+        private const int WeaponChaingun = 2002;
+        private const int WeaponLauncher = 2003;
+        private const int WeaponPlasma = 2004;
+        private const int WeaponChainsaw = 2005;
+        private const int WeaponBfg = 2006;
+        private const int WeaponSuperShotgun = 82;
+
+        /// <summary>
+        /// Decides which weapon spots to spawn, or returns null when the rule is
+        /// off and every spot spawns as usual.
+        ///
+        /// Only the first occurrence of each weapon is kept, in map order, so the
+        /// result is deterministic and identical on every machine - which it has
+        /// to be, because this runs during world load and the two ends must build
+        /// the same world.
+        /// </summary>
+        private HashSet<int> CollectWeaponSpots()
+        {
+            if (options.Deathmatch != 0 || options.CoopDeathmatchWeapons || !options.NetGame)
+            {
+                // Single player keeps every pickup: that is what "как в сингле"
+                // means, and changing it there would alter existing saves and
+                // demos for no reason.
+                return null;
+            }
+
+            var seen = new HashSet<int>();
+
+            foreach (var mt in map.Things)
+            {
+                if (IsWeapon(mt.Type))
+                {
+                    seen.Add(mt.Type);
+                }
+            }
+
+            return seen;
+        }
+
+        private static bool IsWeapon(int type)
+        {
+            switch (type)
+            {
+                case WeaponShotgun:
+                case WeaponChaingun:
+                case WeaponLauncher:
+                case WeaponPlasma:
+                case WeaponChainsaw:
+                case WeaponBfg:
+                case WeaponSuperShotgun:
+                    return true;
+
+                default:
+                    return false;
+            }
+        }
+
+        /// <summary>
+        /// True when this weapon spot is a duplicate that should stay on the map.
+        ///
+        /// The set returned by <see cref="CollectWeaponSpots"/> is emptied as the
+        /// first copy of each weapon is reached, so the first one always spawns.
+        /// </summary>
+        private static bool IsExtraWeaponCopy(HashSet<int> pending, int type)
+        {
+            if (!IsWeapon(type))
+            {
+                return false;
+            }
+
+            if (pending.Contains(type))
+            {
+                pending.Remove(type);
+                return false;
+            }
+
+            return true;
         }
 
         public void ExitLevel()

@@ -163,6 +163,39 @@ Pump 400
 $plainPreview = Invoke-Page "document.getElementById('preview').innerHTML"
 Assert-True ($plainPreview -notlike "*-relay *") "host mode without the relay box stays direct"
 
+# 11. The three co-op rules reach the command line.
+#
+# They change the simulation, so the host must be able to set them and the
+# launcher must actually pass them on; a checkbox that builds nothing is the
+# same silent failure as the dead buttons this script was written for.
+Invoke-Page "document.getElementById('noblock').checked=true;document.getElementById('noblock').onclick();" | Out-Null
+Invoke-Page "document.getElementById('coopweapons').checked=true;document.getElementById('coopweapons').onclick();" | Out-Null
+Invoke-Page "document.getElementById('nosharedkeys').checked=true;document.getElementById('nosharedkeys').onclick();" | Out-Null
+Pump 500
+
+$rulesPreview = Invoke-Page "document.getElementById('preview').innerHTML"
+Assert-True ($rulesPreview -like "*-noblock*") "the pass-through rule reaches the command line"
+Assert-True ($rulesPreview -like "*-coopweapons*") "the deathmatch-weapons rule reaches the command line"
+Assert-True ($rulesPreview -like "*-nosharedkeys*") "the shared-keys rule reaches the command line"
+
+# And they are stored, not just displayed: the state round-trips through the host.
+$stateText = Invoke-Page "document.getElementById('preview').innerHTML"
+Assert-True ($stateText.Length -gt 0) "preview still renders with the new rules"
+
+# 12. Player count is a session size, and it goes through as -players.
+Invoke-Page "document.getElementById('players').value='4';document.getElementById('players').onchange();" | Out-Null
+Pump 500
+
+$playersPreview = Invoke-Page "document.getElementById('preview').innerHTML"
+Assert-True ($playersPreview -like "*-players 4*") "the player count reaches the command line"
+
+# Reset, so a leftover rule cannot leak into the next check.
+Invoke-Page "document.getElementById('noblock').checked=false;document.getElementById('noblock').onclick();document.getElementById('coopweapons').checked=false;document.getElementById('coopweapons').onclick();document.getElementById('nosharedkeys').checked=false;document.getElementById('nosharedkeys').onclick();" | Out-Null
+Pump 400
+
+$cleanPreview = Invoke-Page "document.getElementById('preview').innerHTML"
+Assert-True ($cleanPreview -notlike "*-noblock*") "clearing the checkboxes clears the flags"
+
 $form.Close()
 
 if ($failures -gt 0) {

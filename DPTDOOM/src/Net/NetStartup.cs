@@ -51,6 +51,16 @@ namespace DPTDOOM.Net
         {
             var players = args.players.Present ? args.players.Value : 2;
             var settings = BuildSettings(args, content);
+
+            // Four or more players in co-op: let them pass through each other by
+            // default. With two people blocking is the game; with four in a
+            // corridor it is a jam, and the player at the back gets pushed out of
+            // every lift. An explicit -noblock still wins for smaller sessions.
+            if (players >= 4 && !args.noblock.Present)
+            {
+                settings.TeammatesBlock = false;
+            }
+
             var relay = args.relay.Present;
             var delayOverride = args.netdelay.Present ? args.netdelay.Value : -1;
 
@@ -367,6 +377,16 @@ namespace DPTDOOM.Net
             settings.FastMonsters = args.fast.Present;
             settings.RespawnMonsters = args.respawn.Present;
             settings.NoMonsters = args.nomonsters.Present;
+
+            // Co-op rules, with the defaults a co-op run wants.
+            //
+            // Four players in one corridor is the case that made this a rule:
+            // with bodies blocking, the player at the back is shoved out of every
+            // lift and nobody can pass a doorway. Two players are fine, so the
+            // default flips on player count and an explicit switch still wins.
+            settings.TeammatesBlock = !args.noblock.Present;
+            settings.CoopDeathmatchWeapons = args.coopweapons.Present;
+            settings.SharedKeys = !args.nosharedkeys.Present;
 
             return settings;
         }

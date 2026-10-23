@@ -106,6 +106,7 @@
         <div id="network" class="hidden">
           <label>Адрес напарника<input id="address" type="text" value="127.0.0.1:5029" spellcheck="false"></label>
           <label>TCP-порт<input id="port" type="number" min="1024" max="65535" value="5029"></label>
+          <label>Игроков вместе с хостом<input id="players" type="number" min="2" max="4" value="2"></label>
           <label class="check"><input id="relay" type="checkbox">Хостить через relay</label>
           <label>Relay-сессия · гостю<input id="relaySession" type="text" maxlength="32" spellcheck="false" placeholder="32 hex-символа от хоста"></label>
           <p class="hint">Одинаковые ресурсы, карта и правила на обеих сторонах.
@@ -134,7 +135,15 @@
         <label class="check"><input id="fast" type="checkbox">Быстрые монстры</label>
         <label class="check"><input id="respawn" type="checkbox">Возрождение монстров</label>
         <label class="check"><input id="deathmatch" type="checkbox">Deathmatch</label>
-        <p class="hint">Классические правила по умолчанию. Боты и команды пока недоступны.</p>
+        <label class="check"><input id="noblock" type="checkbox">Игроки проходят друг сквозь друга</label>
+        <label class="check"><input id="coopweapons" type="checkbox">Оружие из дезматч-карт</label>
+        <label class="check"><input id="nosharedkeys" type="checkbox">Ключи у каждого свои</label>
+        <p class="hint">Без «сквозь друга» игроки блокируют друг друга в проёмах.
+           При 4 и более игроках проход включается сам.</p>
+        <p class="hint">«Оружие из дезматч-карт» — дубли пушек, расставленные под
+           дезматч. В коопе по умолчанию не спавнятся: одна пушка на карту.</p>
+        <p class="hint">Общие ключи: подобранный ключ получает вся команда.
+           Выключи, если хотите искать свой.</p>
       </div>
     </div>
 

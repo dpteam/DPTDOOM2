@@ -19,6 +19,7 @@ dptdoom-master.exe --bind 0.0.0.0 --port 25135
 Параметры: `--config <file>`, `--bind <ipv4>`, `--port <1..65535>`,
 `--lease-seconds <3..300>`, `--log <file>`, `--version`, `--help`.
 Relay: `--relay`, `--relay-port <1..65535>`, `--relay-sessions <1..64>`,
+`--relay-guests-per-session <1..16>`, `--relay-sessions-per-source <1..16>`,
 `--relay-per-source <1..16>`, `--relay-rate <4096..1048576>`,
 `--relay-buffer <512..65536>`, `--relay-idle-seconds <10..3600>`,
 `--relay-lifetime-seconds <60..86400>`. CLI перекрывает конфиг.
@@ -61,6 +62,8 @@ max-clients=24
 relay=on
 relay-port=25136
 relay-sessions=8
+relay-guests-per-session=3
+relay-sessions-per-source=2
 relay-per-source=4
 relay-rate=65536
 relay-buffer=4096

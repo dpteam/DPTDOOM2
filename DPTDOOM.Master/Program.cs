@@ -44,6 +44,8 @@ namespace DPTDOOM.Master
             int? relayBuffer = null;
             int? relayIdle = null;
             int? relayLifetime = null;
+            int? relayGuests = null;
+            int? relaySessionsPerSource = null;
 
             try
             {
@@ -102,6 +104,14 @@ namespace DPTDOOM.Master
 
                         case "--relay-lifetime-seconds":
                             relayLifetime = int.Parse(Next(args, ref i), CultureInfo.InvariantCulture);
+                            break;
+
+                        case "--relay-guests-per-session":
+                            relayGuests = int.Parse(Next(args, ref i), CultureInfo.InvariantCulture);
+                            break;
+
+                        case "--relay-sessions-per-source":
+                            relaySessionsPerSource = int.Parse(Next(args, ref i), CultureInfo.InvariantCulture);
                             break;
 
                         case "--version":
@@ -214,6 +224,16 @@ namespace DPTDOOM.Master
                 {
                     config.RelayLifetimeSeconds = Check(relayLifetime, 60, 86400, "--relay-lifetime-seconds");
                 }
+
+                if (relayGuests.HasValue)
+                {
+                    config.RelayGuestsPerSession = Check(relayGuests, 1, 16, "--relay-guests-per-session");
+                }
+
+                if (relaySessionsPerSource.HasValue)
+                {
+                    config.RelaySessionsPerSource = Check(relaySessionsPerSource, 1, 16, "--relay-sessions-per-source");
+                }
             }
             catch (Exception e)
             {
@@ -314,6 +334,8 @@ namespace DPTDOOM.Master
             Console.WriteLine("  --relay-buffer <512..65536>  relay copy buffer (default 4096)");
             Console.WriteLine("  --relay-idle-seconds <10..3600>  silence before a relay closes (default 120)");
             Console.WriteLine("  --relay-lifetime-seconds <60..86400>  hard relay cap (default 21600)");
+            Console.WriteLine("  --relay-guests-per-session <1..16>  guest tunnels per session (default 3)");
+            Console.WriteLine("  --relay-sessions-per-source <1..16>  relayed sessions per address (default 2)");
             Console.WriteLine("  --version              print the version");
             Console.WriteLine("  --help                 print this text");
         }

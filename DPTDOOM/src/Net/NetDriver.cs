@@ -67,6 +67,13 @@ namespace DPTDOOM.Net
             options.RespawnMonsters = settings.RespawnMonsters;
             options.NoMonsters = settings.NoMonsters;
 
+            // Rules that change the simulation. They come from the host through
+            // the welcome, never from this machine's command line, or the two
+            // ends would build different worlds.
+            options.TeammatesBlock = settings.TeammatesBlock;
+            options.CoopDeathmatchWeapons = settings.CoopDeathmatchWeapons;
+            options.SharedKeys = settings.SharedKeys;
+
             options.Episode = settings.Episode;
             options.Map = settings.Map;
             options.Skill = settings.Skill;

@@ -23,6 +23,22 @@ function Assert-True([bool]$condition, [string]$message) {
     Write-Host "  ok   $message"
 }
 
+function Remove-Master([byte[]]$Auth) {
+    $reply = Invoke-Master 4 $Auth
+
+    if ($reply.Status -ne 0) {
+        Write-Host "  --   cleanup remove failed with status $($reply.Status)"
+    }
+}
+
+function Remove-Master([byte[]]$Auth) {
+    $reply = Invoke-Master 4 $Auth
+
+    if ($reply.Status -ne 0) {
+        Write-Host "  --   cleanup remove failed with status $($reply.Status)"
+    }
+}
+
 function New-Header([int]$Operation, [int]$Length) {
     $header = New-Object byte[] 16
     [Text.Encoding]::ASCII.GetBytes("DPTM").CopyTo($header, 0)
@@ -312,6 +328,137 @@ else {
     Assert-True ($eof -le 0) "closing the guest reaches the host as EOF"
 
     $hostClient.Close()
+
+    # ---------------------------------------------------------------
+    # Limits
+    # ---------------------------------------------------------------
+    #
+    # The relay is paid for by one operator, so the policy limits matter: a
+    # source may hold two relayed sessions, and a session may hold three guest
+    # tunnels. Both defaults are reachable by real people (a household with two
+    # machines), so the test pushes one past each rather than only checking that
+    # the first one works.
+
+    Write-Host "Relay limits:"
+
+    # Three fresh sessions from this address. Two may hold a relayed session at
+    # once; the third must be refused. Both hosts are attached before the third
+    # is attempted, and they stay attached, so the counter has two live sessions
+    # to count - a channel that was closed is not a session any more.
+    $extraAuth = @()
+
+    for ($i = 1; $i -le 3; $i++) {
+        $info = New-Info "$SessionName $i" "MAP07" (5100 + $i) 3
+        $reply = Invoke-Master 2 $info
+
+        if ($reply.Status -ne 0) {
+            throw "extra register $i failed with status $($reply.Status)"
+        }
+
+        $extraAuth += ,([byte[]]$reply.Body[0..39])
+    }
+
+    $extraHosts = @()
+
+    for ($i = 0; $i -lt 2; $i++) {
+        $attached = Connect-Relay $relayPort
+        $attachedStream = $attached.GetStream()
+        Write-RelayRequest $attachedStream 5 $extraAuth[$i]
+        $attachedReply = Read-RelayReply $attachedStream
+
+        if ($attachedReply.Status -ne 0) {
+            throw "extra host $i should have attached, got status $($attachedReply.Status)"
+        }
+
+        $extraHosts += $attached
+    }
+
+    Assert-True ($extraHosts.Count -eq 2) "two sessions from the same address are allowed"
+
+    $third = Connect-Relay $relayPort
+    $thirdStream = $third.GetStream()
+    Write-RelayRequest $thirdStream 5 $extraAuth[2]
+    $thirdReply = Read-RelayReply $thirdStream
+
+    try { $third.Close() } catch { }
+
+    Assert-True ($thirdReply.Status -eq 4) "a third session from the same address is refused (status $($thirdReply.Status))"
+
+    # Guest tunnels per session. Release the two waiting channels first: they
+    # count against the per-address budget, and a session cannot be both the
+    # thing being tested and the thing hitting the previous limit.
+    foreach ($extra in $extraHosts) { try { $extra.Close() } catch { } }
+    $extraHosts = @()
+
+    # The master reaps a dead waiting channel on its own maintenance tick, once a
+    # second. Give it a moment: the point of the next check is the guest limit,
+    # not how fast a dead socket is noticed.
+    Start-Sleep -Seconds 2
+
+    $limitAuth = $extraAuth[2]
+    $limitId = New-Object byte[] 16
+    [Array]::Copy($limitAuth, 0, $limitId, 0, 16)
+
+    $hostChannel = Connect-Relay $relayPort
+    $hostChannelStream = $hostChannel.GetStream()
+    Write-RelayRequest $hostChannelStream 5 $limitAuth
+    $hostChannelReply = Read-RelayReply $hostChannelStream
+
+    if ($hostChannelReply.Status -ne 0) {
+        throw "limit host attach failed with status $($hostChannelReply.Status)"
+    }
+
+    $pairedGuests = 0
+
+    for ($i = 1; $i -le 3; $i++) {
+        $guest = Connect-Relay $relayPort
+        $guestStream = $guest.GetStream()
+        Write-RelayRequest $guestStream 6 $limitId
+        $guestReply = Read-RelayReply $guestStream
+
+        if ($guestReply.Status -ne 0) {
+            throw "guest $i should have paired, got status $($guestReply.Status)"
+        }
+
+        $pairedGuests++
+
+        # A real host offers a new waiting channel after admitting a guest; do
+        # the same so the next guest has something to pair with.
+        if ($i -lt 3) {
+            $again = Connect-Relay $relayPort
+            $againStream = $again.GetStream()
+            Write-RelayRequest $againStream 5 $limitAuth
+            $againReply = Read-RelayReply $againStream
+
+            if ($againReply.Status -ne 0) {
+                throw "host re-attach $i failed with status $($againReply.Status)"
+            }
+
+            $hostChannel = $again
+            $hostChannelStream = $againStream
+        }
+
+        $extraHosts += $guest
+    }
+
+    Assert-True ($pairedGuests -eq 3) "three guest tunnels are allowed on one session"
+
+    # The host tries to park a fourth channel; the session is full.
+    $full = Connect-Relay $relayPort
+    $fullStream = $full.GetStream()
+    Write-RelayRequest $fullStream 5 $limitAuth
+    $fullReply = Read-RelayReply $fullStream
+
+    try { $full.Close() } catch { }
+
+    Assert-True ($fullReply.Status -eq 4) "a fourth guest tunnel is refused (status $($fullReply.Status))"
+
+    foreach ($extra in $extraHosts) { try { $extra.Close() } catch { } }
+    try { $hostChannel.Close() } catch { }
+
+    Remove-Master $extraAuth[2]
+    Remove-Master $extraAuth[0]
+    Remove-Master $extraAuth[1]
 }
 
 $remove = Invoke-Master 4 $auth

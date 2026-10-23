@@ -39,6 +39,10 @@ namespace DPTDOOM
         public readonly Arg nomonsters;
         public readonly Arg solonet;
 
+        public readonly Arg noblock;
+        public readonly Arg coopweapons;
+        public readonly Arg nosharedkeys;
+
         public readonly Arg<string> playdemo;
         public readonly Arg<string> timedemo;
 
@@ -96,6 +100,13 @@ namespace DPTDOOM
             respawn = new Arg(args.Contains("-respawn"));
             nomonsters = new Arg(args.Contains("-nomonsters"));
             solonet = new Arg(args.Contains("-solo-net"));
+
+            // Co-op rules. Each has a default that suits co-op, and a switch that
+            // forces the other way; the host's choice travels to the guest in the
+            // welcome because these change the simulation.
+            noblock = new Arg(args.Contains("-noblock"));
+            coopweapons = new Arg(args.Contains("-coopweapons"));
+            nosharedkeys = new Arg(args.Contains("-nosharedkeys"));
 
             playdemo = GetString(args, "-playdemo");
             timedemo = GetString(args, "-timedemo");

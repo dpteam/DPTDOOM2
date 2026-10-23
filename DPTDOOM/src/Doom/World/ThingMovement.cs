@@ -286,6 +286,22 @@ namespace DPTDOOM
                 return true;
             }
 
+            // Teammates passing through each other.
+            //
+            // Doom lets players block players. With two people that is the game;
+            // with four it is a traffic jam in every doorway, and the one at the
+            // back keeps getting shoved out of lifts. The rule is deliberately
+            // narrow: only player against player, and only outside deathmatch.
+            // Monsters, barrels and the level still block, so nothing else about
+            // the map behaves differently.
+            if (!world.Options.TeammatesBlock &&
+                world.Options.Deathmatch == 0 &&
+                thing.Player != null &&
+                currentThing.Player != null)
+            {
+                return true;
+            }
+
             // Check for skulls slamming into things.
             if ((currentThing.Flags & MobjFlags.SkullFly) != 0)
             {

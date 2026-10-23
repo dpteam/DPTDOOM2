@@ -40,6 +40,17 @@ namespace DPTDOOM.Net
         public bool NoMonsters;
         public uint WadChecksum;
 
+        /// <summary>
+        /// Rules that change the simulation, so both ends must agree on them.
+        /// They travel in the settings record, not in the command line: a host
+        /// and a guest with different values would build different worlds and
+        /// desync on the first tic.
+        /// </summary>
+        public bool TeammatesBlock = true;
+
+        public bool CoopDeathmatchWeapons;
+        public bool SharedKeys = true;
+
         public byte[] Serialize()
         {
             using (var stream = new MemoryStream())
@@ -53,7 +64,10 @@ namespace DPTDOOM.Net
                 writer.Write((byte)((Deathmatch ? 1 : 0) |
                                     (FastMonsters ? 2 : 0) |
                                     (RespawnMonsters ? 4 : 0) |
-                                    (NoMonsters ? 8 : 0)));
+                                    (NoMonsters ? 8 : 0) |
+                                    (TeammatesBlock ? 16 : 0) |
+                                    (CoopDeathmatchWeapons ? 32 : 0) |
+                                    (SharedKeys ? 64 : 0)));
                 writer.Write(WadChecksum);
                 writer.Flush();
                 return stream.ToArray();
@@ -73,6 +87,9 @@ namespace DPTDOOM.Net
             settings.FastMonsters = (flags & 2) != 0;
             settings.RespawnMonsters = (flags & 4) != 0;
             settings.NoMonsters = (flags & 8) != 0;
+            settings.TeammatesBlock = (flags & 16) != 0;
+            settings.CoopDeathmatchWeapons = (flags & 32) != 0;
+            settings.SharedKeys = (flags & 64) != 0;
             settings.WadChecksum = reader.ReadUInt32();
             return settings;
         }
@@ -310,9 +327,17 @@ namespace DPTDOOM.Net
                 //
                 // A fixed override skips the probe entirely, so a test can pin
                 // the delay and stay reproducible.
+                var rtt = -1;
+                var spread = 0;
+
+                if (delayOverride < 0)
+                {
+                    rtt = MeasureRoundTrip(stream, reader, out spread);
+                }
+
                 var measured = delayOverride >= 0
                     ? delayOverride
-                    : DelayFromRoundTrip(MeasureRoundTrip(stream, reader), delayOverride);
+                    : DelayFromRoundTrip(rtt, spread, delayOverride);
 
                 delay = Math.Max(delay, measured);
 
@@ -332,21 +357,41 @@ namespace DPTDOOM.Net
         }
 
         /// <summary>
-        /// Round-trip time in milliseconds, best of three attempts.
+        /// Round-trip time in milliseconds, with the spikes trimmed.
         ///
         /// This runs before the welcome so the number can travel inside it. The
         /// guest answers pings while it is still waiting for the welcome, which
         /// is why it cannot simply be measured later: the game would already be
         /// running and the delay would have to change mid-session.
         ///
+        /// Seven probes, then the fastest and slowest are dropped and the rest
+        /// averaged.
+        ///
+        /// The first version took the *minimum* of three probes, which measures
+        /// the best case the path can ever do and leaves no room for jitter. On a
+        /// real international link that made the buffer too small: the session
+        /// held 35 tics per second for a while and then stalled for a few tics
+        /// whenever a packet took longer than the best case, which is most of the
+        /// time. Trimming both ends instead of keeping the fastest gives the
+        /// buffer something to breathe.
+        ///
+        /// The slowest sample is dropped because a single stall during setup
+        /// (a DNS-free connect, a busy machine) would otherwise inflate the delay
+        /// for the whole session.
+        ///
         /// Returns -1 when the peer does not answer, and the caller then keeps
-        /// the conservative default.
+        /// the conservative default. <paramref name="spreadMs"/> reports how far
+        /// the probes disagreed, which sizes the jitter margin.
         /// </summary>
-        private static int MeasureRoundTrip(Stream stream, BinaryReader reader)
+        private static int MeasureRoundTrip(Stream stream, BinaryReader reader, out int spreadMs)
         {
+            const int probes = 7;
+
+            spreadMs = 0;
+
             var previousTimeout = stream.CanTimeout ? stream.ReadTimeout : 0;
             var watch = new Stopwatch();
-            var best = long.MaxValue;
+            var samples = new List<long>();
 
             try
             {
@@ -355,7 +400,7 @@ namespace DPTDOOM.Net
                     stream.ReadTimeout = 3000;
                 }
 
-                for (var attempt = 0; attempt < 3; attempt++)
+                for (var attempt = 0; attempt < probes; attempt++)
                 {
                     var payload = new byte[4];
                     NetProtocol.WriteUInt32(payload, 0, (uint)attempt);
@@ -370,11 +415,7 @@ namespace DPTDOOM.Net
                     }
 
                     watch.Stop();
-
-                    if (watch.ElapsedMilliseconds < best)
-                    {
-                        best = watch.ElapsedMilliseconds;
-                    }
+                    samples.Add(watch.ElapsedMilliseconds);
                 }
             }
             catch (Exception)
@@ -395,7 +436,31 @@ namespace DPTDOOM.Net
                 }
             }
 
-            return best == long.MaxValue ? -1 : (int)best;
+            if (samples.Count == 0)
+            {
+                return -1;
+            }
+
+            if (samples.Count > 2)
+            {
+                samples.Sort();
+                samples.RemoveAt(samples.Count - 1);
+                samples.RemoveAt(0);
+            }
+
+            long total = 0;
+            var min = long.MaxValue;
+            var max = long.MinValue;
+
+            foreach (var sample in samples)
+            {
+                total += sample;
+                if (sample < min) { min = sample; }
+                if (sample > max) { max = sample; }
+            }
+
+            spreadMs = (int)(max - min);
+            return (int)(total / samples.Count);
         }
 
         /// <summary>
@@ -413,10 +478,11 @@ namespace DPTDOOM.Net
         /// and has long arrived. The price is delay tics of input latency, which
         /// is the trade every lockstep game makes.
         ///
-        /// One tic of margin is added for jitter, because a buffer that exactly
-        /// matches the measured round trip stalls on the first busy moment.
+        /// One tic of margin is added only when the path actually jitters. A
+        /// margin on a clean link is pure latency with nothing to show for it,
+        /// and at 100 ms of ping a tic is 29 ms the player feels.
         /// </summary>
-        private static int DelayFromRoundTrip(int roundTripMs, int overrideTics)
+        private static int DelayFromRoundTrip(int roundTripMs, int spreadMs, int overrideTics)
         {
             if (overrideTics >= 0)
             {
@@ -438,7 +504,17 @@ namespace DPTDOOM.Net
                 return 0;
             }
 
-            return MathEx.Clamp((roundTripMs + ticMs - 1) / ticMs + 1, 1, 10);
+            var tics = (roundTripMs + ticMs - 1) / ticMs;
+
+            // Jitter breaks an exactly-sized buffer: the first chunk that takes
+            // longer than the measurement stalls the tic. Only spend the extra
+            // tic when the probes actually disagree.
+            if (spreadMs > ticMs / 2)
+            {
+                tics++;
+            }
+
+            return MathEx.Clamp(tics, 1, 10);
         }
 
         private static void CloseGuest(TcpClient client, Stream stream)

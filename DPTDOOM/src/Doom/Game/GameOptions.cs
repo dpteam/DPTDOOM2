@@ -43,6 +43,10 @@ namespace DPTDOOM
         private bool respawnMonsters;
         private bool noMonsters;
 
+        private bool teammatesBlock;
+        private bool coopDeathmatchWeapons;
+        private bool sharedKeys;
+
         private IntermissionInfo intermissionInfo;
 
         private DoomRandom random;
@@ -77,6 +81,14 @@ namespace DPTDOOM
             fastMonsters = false;
             respawnMonsters = false;
             noMonsters = false;
+
+            // Co-op defaults: players do block each other, which is how Doom has
+            // always behaved, but keys are shared because a level that needs
+            // three keys otherwise stalls the moment one player holds a door and
+            // another cannot reach the switch.
+            teammatesBlock = true;
+            coopDeathmatchWeapons = false;
+            sharedKeys = true;
 
             intermissionInfo = new IntermissionInfo();
 
@@ -181,6 +193,47 @@ namespace DPTDOOM
         {
             get => noMonsters;
             set => noMonsters = value;
+        }
+
+        /// <summary>
+        /// Whether players collide with each other.
+        ///
+        /// Doom has always let players block each other, which is fine for two
+        /// players and becomes a traffic jam in a corridor with four. Turning it
+        /// off makes players pass through each other instead of fighting for the
+        /// same doorway. It is only meaningful in co-op: in deathmatch bodies
+        /// blocking the way is part of the game.
+        /// </summary>
+        public bool TeammatesBlock
+        {
+            get => teammatesBlock;
+            set => teammatesBlock = value;
+        }
+
+        /// <summary>
+        /// Whether weapon and ammo spots that a map placed for deathmatch spawn in
+        /// co-op. Off by default: those extra copies clutter a cooperative run,
+        /// and the level is balanced without them. Single player still spawns
+        /// everything, which is what "как в сингле" means here.
+        /// </summary>
+        public bool CoopDeathmatchWeapons
+        {
+            get => coopDeathmatchWeapons;
+            set => coopDeathmatchWeapons = value;
+        }
+
+        /// <summary>
+        /// Whether picking up a key gives it to the whole team.
+        ///
+        /// On by default. Without it a co-op run deadlocks easily: one player
+        /// grabs the blue key, walks through the door, and the second player has
+        /// to find it again while the first holds a lift. The key is not
+        /// consumed, so both players walk through their own door.
+        /// </summary>
+        public bool SharedKeys
+        {
+            get => sharedKeys;
+            set => sharedKeys = value;
         }
 
         public IntermissionInfo IntermissionInfo

@@ -82,6 +82,21 @@ namespace DPTDOOM.Launcher
                 builder.Append("-deathmatch ");
             }
 
+            if (state.NoBlock)
+            {
+                builder.Append("-noblock ");
+            }
+
+            if (state.CoopWeapons)
+            {
+                builder.Append("-coopweapons ");
+            }
+
+            if (state.NoSharedKeys)
+            {
+                builder.Append("-nosharedkeys ");
+            }
+
             if (state.Fast)
             {
                 builder.Append("-fast ");
@@ -107,7 +122,7 @@ namespace DPTDOOM.Launcher
             if (state.Mode == 1)
             {
                 builder.Append("-net host ");
-                Append(builder, "-players", "2");
+                Append(builder, "-players", state.Players.ToString());
                 Append(builder, "-port", state.Port.ToString());
 
                 if (state.Relay && !string.IsNullOrEmpty(state.Master))
