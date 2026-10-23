@@ -101,27 +101,28 @@ namespace DPTDOOMTest.CompatibilityTests
         }
 
         [TestMethod]
-        public void RushAndCautiousFinish()
+        public void EveryStyleCanFinish()
         {
-            // These two are the styles that finish MAP01 reliably. Sweeper and
-            // Hunter usually do as well, but not always: they can end up in a
-            // part of the map the directed graph cannot leave (a one-way drop),
-            // and then they wander until the tic budget runs out. That is a
-            // known limitation, recorded in docs/BOTS.md rather than hidden by a
-            // test that happens to pass.
             using (var content = GameContent.CreateDummy(WadPath.Doom2))
             {
-                var styles = new[] { BotStyle.Rush, BotStyle.Cautious };
+                var styles = new[]
+                {
+                    BotStyle.Rush,
+                    BotStyle.Sweeper,
+                    BotStyle.Hunter,
+                    BotStyle.Cautious
+                };
 
                 foreach (var style in styles)
                 {
                     DoomBot runner;
                     DoomGame game;
 
-                    var tic = Play(content, style, null, 35 * 180, out runner, out game);
+                    var tic = Play(content, style, null, 35 * 240, out runner, out game);
 
                     Console.WriteLine(style + ": " + (tic > 0 ? BotBrain.FormatTime(tic) : "did not finish") +
-                                      ", sectors " + runner.VisitedSectors + "/" + runner.TotalSectors);
+                                      ", sectors " + runner.VisitedSectors + "/" + runner.TotalSectors +
+                                      ", health " + game.World.ConsolePlayer.Health);
 
                     Assert.IsTrue(tic > 0, style + " did not finish MAP01");
                     Assert.IsTrue(runner.Finished, style + " did not press the exit itself");

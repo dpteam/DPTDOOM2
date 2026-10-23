@@ -347,13 +347,13 @@ namespace DPTDOOM
 
             if (!finished && runner.Health > 0)
             {
-                // The level ended under the bot's feet: somebody else — the
-                // human player — reached the exit first. The bot was alive and
-                // still playing, so its run says nothing about how good its
-                // style is. Scoring it would teach the brain a false lesson,
-                // which is exactly what the owner asked to avoid.
+                // The level ended under the bot's feet: somebody else got to the
+                // exit first, either the human player or a faster bot. The bot
+                // was alive and still playing, so its time says nothing about
+                // how good its style is. Scoring it would teach the brain a
+                // false lesson, which is exactly what the owner asked to avoid.
                 Console.WriteLine(
-                    "Bot: " + runner.Style + " run not counted (level ended by another player)");
+                    "Bot: " + runner.Style + " run not counted (level ended before it finished)");
 
                 return;
             }

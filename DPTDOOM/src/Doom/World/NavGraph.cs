@@ -78,6 +78,13 @@ namespace DPTDOOM
         private int[] edgeTarget = new int[0];
         private float[] edgeCost = new float[0];
 
+        /// <summary>
+        /// Per-node cost multiplier. A waypoint the bot keeps failing to reach
+        /// gets more expensive, so the next search routes around it instead of
+        /// trying the same thing again.
+        /// </summary>
+        private float[] nodePenalty = new float[0];
+
         private int nodeCount;
 
         // Scratch space reused by the search, so pathfinding allocates nothing.
@@ -302,6 +309,12 @@ namespace DPTDOOM
             cameFrom = new int[nodeCount];
             visitStamp = new int[nodeCount];
             closed = new bool[nodeCount];
+
+            nodePenalty = new float[nodeCount];
+            for (var i = 0; i < nodeCount; i++)
+            {
+                nodePenalty[i] = 1F;
+            }
 
             EdgeCount = edgeTarget.Length;
         }
@@ -822,6 +835,26 @@ namespace DPTDOOM
             return best;
         }
 
+        /// <summary>
+        /// Makes a waypoint more expensive for later searches.
+        ///
+        /// The bot calls this when it has spent too long failing to reach a
+        /// point. Penalising rather than removing keeps the graph usable: if
+        /// that point is the only way through a doorway, a four-times price is
+        /// still better than no route at all, and the search takes it.
+        /// </summary>
+        public void Penalize(int node)
+        {
+            if (node < 0 || node >= nodeCount)
+            {
+                return;
+            }
+
+            var value = nodePenalty[node] * 4F;
+
+            nodePenalty[node] = value > 64F ? 64F : value;
+        }
+
         /// <summary>Closest node to a world position, or -1.</summary>
         public int NodeAt(Fixed x, Fixed y)
         {
@@ -914,7 +947,7 @@ namespace DPTDOOM
                         continue;
                     }
 
-                    var candidate = cost[current] + edgeCost[e];
+                    var candidate = cost[current] + edgeCost[e] * nodePenalty[next];
                     if (candidate >= cost[next])
                     {
                         continue;
