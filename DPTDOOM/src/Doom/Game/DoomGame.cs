@@ -542,9 +542,38 @@ namespace DPTDOOM
 			return false;
 		}
 
+		/// <summary>
+		/// Number of players actually in the game.
+		///
+		/// Used to tell a solo game from a co-op one, which decides whether dying
+		/// restarts the level or just respawns the player.
+		/// </summary>
+		private int PlayersInGame()
+		{
+			var count = 0;
+
+			for (var i = 0; i < Player.MaxPlayerCount; i++)
+			{
+				if (options.Players[i].InGame)
+				{
+					count++;
+				}
+			}
+
+			return count;
+		}
+
 		private void DoReborn(int playerNumber)
 		{
-			if (!options.NetGame)
+			// Solo game: dying and pressing use reloads the level, which is what
+			// vanilla Doom does and what a player expects when playing alone.
+			//
+			// Co-op: respawn instead. The test used to be "is this a network
+			// game?", which is wrong now that co-op bots exist: a local co-op
+			// session is not a network game, so killing a bot reloaded the whole
+			// level under the player's feet. The honest question is how many people
+			// are playing, not how they are connected.
+			if (PlayersInGame() <= 1)
 			{
 				// Reload the level from scratch.
 				gameAction = GameAction.LoadLevel;
