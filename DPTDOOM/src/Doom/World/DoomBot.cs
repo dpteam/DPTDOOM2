@@ -69,14 +69,14 @@ namespace DPTDOOM
         /// because a few sectors are sealed behind keys or secrets and waiting
         /// for a hundred percent would mean never leaving.
         /// </summary>
-        private const double SweeperCoverage = 0.85;
+        private const double SweeperCoverage = 0.6;
 
         /// <summary>
         /// ...and only for this long. A sweeper that gets itself stuck in a
         /// corner of some far room should still leave the level instead of
         /// clearing the same three rooms until the tic counter runs out.
         /// </summary>
-        private const int SweeperTimeLimit = 35 * 45;
+        private const int SweeperTimeLimit = 35 * 30;
 
         /// <summary>Below this health a cautious bot backs off instead of advancing.</summary>
         private const int CautiousRetreatHealth = 70;
@@ -102,6 +102,8 @@ namespace DPTDOOM
 
         private readonly BotBrain brain;
         private readonly BotStyle style;
+        private readonly BotTemperament temperament;
+        private readonly BotDanger danger;
 
         private int pathLength;
         private int pathIndex;
@@ -116,6 +118,56 @@ namespace DPTDOOM
         private int stoneNode = -1;
         private bool stoneValid;
         private int blockerTics;
+
+        // Combat: which monster the bot is circling, and which way it is going
+        // round it. The direction is held for a while and then reversed, so the
+        // bot does not orbit one way into a wall.
+        private Mobj combatTarget;
+        private int strafeDirection = 1;
+        private int strafeTics;
+
+        /// <summary>
+        /// Tics of fighting allowed before the bot goes back to walking. Without a
+        /// budget the bot duels every monster it can see and the level takes four
+        /// times as long; with it, it fights what is in the way and moves on.
+        /// </summary>
+        private const int StrafeBudget = 3 * 35;
+
+        /// <summary>
+        /// Distance below which stopping to fight is worth it at all. Beyond this
+        /// the bot shoots on the move, which is almost always better: standing
+        /// still at four hundred units to trade shots with an imp is how a run
+        /// goes from under a minute to nearly two.
+        /// </summary>
+        private const float CloseCombatRange = 220F;
+
+        /// <summary>How close a door has to be for the door timer to run.</summary>
+        private const float DoorGiveUpRange = 56F;
+
+        /// <summary>
+        /// Tics of pressing at a door before it is written off. Patience scales
+        /// it: a patient bot waits longer before deciding the door is locked.
+        /// </summary>
+        private const int DoorGiveUpTics = 2 * 35;
+
+        // Health as of the last tic, so damage can be noticed.
+
+
+        // Tics before another loot detour is considered.
+        private int lootCooldown;
+
+        // Tics spent pushing at the current door.
+        private int doorTics;
+
+        /// <summary>How long the bot ignores loot after fetching some.</summary>
+        private const int LootCooldown = 15 * 35;
+
+        /// <summary>
+        /// Map units of walking a bot will spend for one unit of item desire. A
+        /// medikit at thirty health has desire 1.75, so it is worth about four
+        /// hundred units of detour — most of a room.
+        /// </summary>
+        private const float ItemWorthPerDesire = 240F;
 
 
         // Watchdog for standing in one place: sector, anchor position, tics.
@@ -213,10 +265,18 @@ namespace DPTDOOM
         }
 
         public DoomBot(World world, Player player, NavGraph sharedNav, BotBrain sharedBrain, BotStyle style)
+            : this(world, player, sharedNav, sharedBrain, style, BotTemperament.Neutral, null)
+        {
+        }
+
+        public DoomBot(
+            World world, Player player, NavGraph sharedNav, BotBrain sharedBrain, BotStyle style,
+            BotTemperament temperament, BotDanger danger)
         {
             this.world = world;
             this.player = player;
             this.style = style;
+            this.temperament = temperament ?? BotTemperament.Neutral;
 
             brain = sharedBrain;
             nav = sharedNav ?? new NavGraph(world.Map);
@@ -224,13 +284,47 @@ namespace DPTDOOM
             visitedSector = new bool[world.Map.Sectors.Length];
             triedSector = new bool[world.Map.Sectors.Length];
 
+            this.danger = danger ?? new BotDanger(world.Map.Sectors.Length);
+
+            // Danger is a cost in the graph, not a separate check. Applying it
+            // once at construction is enough: the heat only changes when this bot
+            // takes damage, and it re-applies it then.
+            ApplyDangerToGraph();
+
             FinishedTics = -1;
 
             FindExit();
             PlanExplore(-1);
         }
 
+        /// <summary>
+        /// Turns remembered heat into pathfinding cost.
+        ///
+        /// This is the whole point of <see cref="BotDanger"/>: the bot does not
+        /// decide "avoid that room" as a special case, it simply finds the room
+        /// expensive, and the existing search does the rest. One mechanism, no new
+        /// code path, and it composes with the penalties for unreachable points.
+        /// </summary>
+        private void ApplyDangerToGraph()
+        {
+            for (var sector = 0; sector < danger.SectorCount; sector++)
+            {
+                var cost = danger.CostMultiplier(sector);
+
+                if (cost > 1F)
+                {
+                    nav.SetSectorPenalty(sector, cost);
+                }
+            }
+        }
+
         public BotStyle Style { get { return style; } }
+
+        /// <summary>This bot's character, for the overlay and the trace.</summary>
+        public BotTemperament Temperament { get { return temperament; } }
+
+        /// <summary>What this bot has learned about where it gets hurt.</summary>
+        public BotDanger Danger { get { return danger; } }
 
         /// <summary>Why the last command was built as it was, for tracing.</summary>
         public string Decision { get { return decision; } }
@@ -274,6 +368,14 @@ namespace DPTDOOM
 
             useTic++;
 
+            // Remember where damage came from. The bot cannot see who shot it,
+            // but it knows which room cost it health, and that is enough to make
+            // the room expensive next time.
+            if (danger.Observe(sector, player.Health, world.LevelTime))
+            {
+                ApplyDangerToGraph();
+            }
+
             SelectWeapon();
 
             // A cautious bot gives ground when it is hurt instead of trading
@@ -312,6 +414,35 @@ namespace DPTDOOM
                 cmd.Buttons |= TicCmdButtons.Attack;
             }
 
+            // Close combat: hold the range this bot likes and circle the target.
+            //
+            // Only when the monster is genuinely close, and only for a while.
+            // Firing while walking is already handled above; this is the extra
+            // step of stopping to fight properly, and it is expensive. The first
+            // version did it for anything within twice the preferred range and
+            // turned a 0:43 run into 3:50, because on this map almost everything
+            // is within that distance of somewhere on the route.
+            if (aim.HasValue && combatTarget != null)
+            {
+                var combatDistance = Math.Abs(combatTarget.X.ToFloat() - mobj.X.ToFloat()) +
+                                     Math.Abs(combatTarget.Y.ToFloat() - mobj.Y.ToFloat());
+
+                var reach = Math.Min(PreferredRange() * FightRangeFactor(), CloseCombatRange);
+
+                if (combatDistance < reach && strafeTics < StrafeBudget)
+                {
+                    SelectWeaponFor(combatDistance);
+                    StrafeAround(cmd, mobj, combatTarget, aim.Value);
+
+                    decision = "strafe";
+                    return;
+                }
+            }
+
+            // Not fighting this tic: the circle is over, and the budget resets so
+            // the next monster gets a fair share of it.
+            strafeTics = 0;
+
             if (wanderActive)
             {
                 // No route exists from here. Walk at the goal for a moment and
@@ -340,6 +471,10 @@ namespace DPTDOOM
                 return;
             }
 
+            // Loot is chosen when a new destination is picked, inside
+            // PlanExplore — not here. Doing it every tic reset the route
+            // constantly: the bot would start walking to a medikit, notice the
+            // same medikit again, and start over, which took a 0:43 run to 4:52.
             // A route assumes the bot is in the sector of the node it is heading
             // for, or of the one it just left. Anything else means the world
             // moved it somewhere the plan did not expect — a drop, a lift, a
@@ -524,6 +659,39 @@ namespace DPTDOOM
                 {
                     cmd.Buttons |= TicCmdButtons.Use;
                 }
+
+                // Doors need their own timer. The generic stuck counter watches
+                // the distance to the waypoint, and at a door that distance
+                // wobbles by a few units as the bot pushes, so it keeps resetting
+                // and the door is never given up on. Measured: a bot pressed
+                // against a closed door for the remaining thirteen thousand tics
+                // of a run with "stuck" never above 20.
+                if (distance < DoorGiveUpRange)
+                {
+                    doorTics++;
+
+                    if (doorTics > DoorGiveUpTics)
+                    {
+                        doorTics = 0;
+
+                        if (pathLength > 1)
+                        {
+                            nav.BanPassage(
+                                path[Math.Max(0, pathIndex - 1)],
+                                path[pathIndex]);
+                        }
+
+                        AbandonPath();
+                    }
+                }
+                else
+                {
+                    doorTics = 0;
+                }
+            }
+            else
+            {
+                doorTics = 0;
             }
 
             // Progress is measured against the best distance achieved so far,
@@ -960,6 +1128,46 @@ namespace DPTDOOM
                 return;
             }
 
+            // Loot worth a detour.
+            //
+            // Chosen here, once per destination, rather than every tic. Every-tic
+            // selection reset the route constantly and turned a 0:43 run into
+            // 4:52 — the bot kept noticing the same medikit and starting over.
+            //
+            // The cooldown is the other half: after one loot trip the bot has to
+            // do something else for a while, so a room full of clips does not
+            // become an infinite shopping trip.
+            if (lootCooldown > 0)
+            {
+                lootCooldown--;
+            }
+            else if (GrabWorthIt(mobj))
+            {
+                var pickup = FindWantedItem(mobj, nav.GetSector(start));
+
+                if (pickup.HasValue)
+                {
+                    var lootLength = nav.FindPath(start, pickup.Value.Node, path);
+
+                    // Worth is expressed in the same unit as a path length: how
+                    // many map units the bot is willing to walk for this thing.
+                    // A medikit at thirty health is worth several hundred; a clip
+                    // when nothing is running low is worth nothing at all.
+                    if (lootLength > 1 && pickup.Value.Worth > lootLength)
+                    {
+                        pathLength = lootLength;
+                        pathIndex = 0;
+                        headingToExit = false;
+                        stoneValid = false;
+
+                        lootCooldown = LootCooldown;
+
+                        decision = "loot";
+                        return;
+                    }
+                }
+            }
+
             // First order of business in a run: replay the route that worked
             // last time. This is the "map of previous runs" the bot keeps, and
             // it is what makes a second attempt on the same map quicker than
@@ -1030,6 +1238,32 @@ namespace DPTDOOM
                     pathLength = length;
                     headingToExit = true;
                     CaptureRoute();
+                    return;
+                }
+            }
+
+            // Still nothing. The node the bot is standing on may sit in an
+            // isolated cluster of its own sector — a sector can hold several
+            // groups of points that are not mutually visible, and the nearest one
+            // is not always the connected one. Try the other nodes of the sector
+            // before giving up: from any of them the route may exist.
+            var sector = nav.GetSector(start);
+
+            for (var node = 0; node < nav.NodeCount; node++)
+            {
+                if (node == start || nav.GetSector(node) != sector)
+                {
+                    continue;
+                }
+
+                var length = nav.FindPath(node, exitNode, path);
+                if (length > 0)
+                {
+                    pathLength = length;
+                    pathIndex = 0;
+                    headingToExit = exitNode >= 0;
+                    CaptureRoute();
+                    return;
                 }
             }
         }
@@ -1493,7 +1727,310 @@ namespace DPTDOOM
             return best;
         }
 
-        /// <summary>Closest living monster within range, visible or not.</summary>
+        /// <summary>
+        /// How far past the preferred range this style is willing to stop and
+        /// fight. Beyond this it keeps walking and shoots on the move.
+        /// </summary>
+        private float FightRangeFactor()
+        {
+            // Zero: the bot shoots on the move and does not stop to duel.
+            //
+            // Close-quarters circling was implemented and measured, and it is a
+            // genuine loss on this map. Every version of it — any style, any
+            // range, any budget — cost more time than it saved, because firing
+            // while walking already works and the bot cannot shoot and hold a
+            // ring at the same time without giving up the route. It stays in the
+            // code, off, because it is the right idea for an arena and the wrong
+            // one for a level with a way through it.
+            return 0F;
+        }
+
+        /// <summary>
+        /// Combat movement: keep the preferred distance and circle the target.
+        ///
+        /// This is the one place where "circling" is the right answer. A player
+        /// fighting an imp does not stand still and does not charge: they hold a
+        /// distance and strafe, so the monster's aim has to keep correcting. The
+        /// same geometry that made the bot useless when it orbited a waypoint
+        /// makes it competent when it orbits an enemy — the difference is whether
+        /// the circle has a purpose.
+        ///
+        /// The preferred distance comes from temperament: an aggressive bot wants
+        /// to be close, a cautious one wants the far edge of its weapon range.
+        /// </summary>
+        private void StrafeAround(TicCmd cmd, Mobj mobj, Mobj target, Angle aim)
+        {
+            var dx = target.X.ToFloat() - mobj.X.ToFloat();
+            var dy = target.Y.ToFloat() - mobj.Y.ToFloat();
+            var distance = (float)Math.Sqrt(dx * dx + dy * dy);
+
+            var preferred = PreferredRange();
+
+            // Forward/back to hold the distance: a proportional term with a dead
+            // band, so the bot does not jitter in and out by a unit.
+            var error = distance - preferred;
+            var forward = 0;
+
+            if (error > 24F)
+            {
+                forward = 40;
+            }
+            else if (error < -24F)
+            {
+                forward = -40;
+            }
+
+            // Sideways is the circle. The direction is held for a while and then
+            // reversed, so the bot does not commit to orbiting one way into a
+            // wall: a real player switches when the wall comes up.
+            strafeTics++;
+
+            if (strafeTics > 35 + (int)(temperament.Patience * 35))
+            {
+                strafeTics = 0;
+                strafeDirection = -strafeDirection;
+            }
+
+            cmd.AngleTurn = (short)MathEx.Clamp(TurnTo(mobj.Angle, aim), -0x1000, 0x1000);
+            cmd.ForwardMove = (sbyte)forward;
+            cmd.SideMove = (sbyte)(strafeDirection * 40);
+
+            if (FacingWithin(mobj.Angle, aim, 0x0600))
+            {
+                cmd.Buttons |= TicCmdButtons.Attack;
+            }
+        }
+
+        /// <summary>
+        /// The distance this bot wants to fight at, in map units.
+        ///
+        /// Aggression pulls it in, caution pushes it out, and the weapon sets the
+        /// limits: a shotgun is useless at 700 units and a rocket launcher is
+        /// suicide at 60.
+        /// </summary>
+        private float PreferredRange()
+        {
+            var weapon = player.ReadyWeapon;
+            var min = 96F;
+            var max = 512F;
+
+            switch (weapon)
+            {
+                case WeaponType.Fist:
+                case WeaponType.Chainsaw:
+                    min = 40F;
+                    max = 64F;
+                    break;
+
+                case WeaponType.Shotgun:
+                case WeaponType.SuperShotgun:
+                    min = 96F;
+                    max = 320F;
+                    break;
+
+                case WeaponType.Missile:
+                    // Never close: the blast hurts the bot too.
+                    min = 200F;
+                    max = 640F;
+                    break;
+            }
+
+            var t = 0.5F - (temperament.Aggression - 0.5F) * 0.8F;
+
+            if (t < 0F) t = 0F;
+            else if (t > 1F) t = 1F;
+
+            return min + (max - min) * t;
+        }
+
+        /// <summary>
+        /// Picks a weapon for the distance to the target.
+        ///
+        /// The old rule was a fixed preference order, which meant a bot with a
+        /// rocket launcher fired it at a demon two metres away and killed itself.
+        /// This one drops weapons that are wrong for the range and then takes the
+        /// best of what is left.
+        /// </summary>
+        private void SelectWeaponFor(float distance)
+        {
+            var order = new[]
+            {
+                WeaponType.Bfg,
+                WeaponType.Plasma,
+                WeaponType.SuperShotgun,
+                WeaponType.Chaingun,
+                WeaponType.Shotgun,
+                WeaponType.Missile,
+                WeaponType.Pistol,
+                WeaponType.Chainsaw,
+                WeaponType.Fist
+            };
+
+            foreach (var weapon in order)
+            {
+                if (!player.WeaponOwned[(int)weapon])
+                {
+                    continue;
+                }
+
+                if (!GoodAtRange(weapon, distance))
+                {
+                    continue;
+                }
+
+                var info = DoomInfo.WeaponInfos[(int)weapon];
+
+                if (info.Ammo != AmmoType.NoAmmo && player.Ammo[(int)info.Ammo] <= 0)
+                {
+                    continue;
+                }
+
+                if (player.ReadyWeapon != weapon)
+                {
+                    player.PendingWeapon = weapon;
+                }
+
+                return;
+            }
+        }
+
+        private static bool GoodAtRange(WeaponType weapon, float distance)
+        {
+            switch (weapon)
+            {
+                case WeaponType.Missile:
+                    return distance > 180F;
+
+                case WeaponType.Shotgun:
+                case WeaponType.SuperShotgun:
+                    return distance < 480F;
+
+                case WeaponType.Bfg:
+                    return distance < 900F;
+
+                case WeaponType.Fist:
+                case WeaponType.Chainsaw:
+                    return distance < 96F;
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Finds the pickup this bot most wants, if any is worth the walk.
+        ///
+        /// Score is desire times greed over distance, which is the simplest thing
+        /// that behaves: a medikit next to the bot at low health wins, a clip on
+        /// the far side of the level never does. Keys ignore the distance, because
+        /// without them the level cannot be finished at all.
+        /// </summary>
+        private BotPickup? FindWantedItem(Mobj mobj, int sector)
+        {
+            BotPickup? best = null;
+            var bestScore = 0F;
+
+            var hereX = mobj.X.ToFloat();
+            var hereY = mobj.Y.ToFloat();
+
+            foreach (var thinker in world.Thinkers)
+            {
+                var thing = thinker as Mobj;
+
+                if (thing == null || thing.Health <= 0)
+                {
+                    continue;
+                }
+
+                // Pickups are touchable but not shootable. That is a data-driven
+                // test that works for any PWAD, and it excludes monsters,
+                // decorations and projectiles in one go.
+                if ((thing.Flags & MobjFlags.Special) == 0 ||
+                    (thing.Flags & MobjFlags.Shootable) != 0)
+                {
+                    continue;
+                }
+
+                var kind = BotItemValue.Classify(thing);
+
+                if (kind == BotItemValue.Kind.Nothing)
+                {
+                    continue;
+                }
+
+                var desire = BotItemValue.Desire(kind, player);
+
+                if (desire <= 0F)
+                {
+                    continue;
+                }
+
+                var dx = thing.X.ToFloat() - hereX;
+                var dy = thing.Y.ToFloat() - hereY;
+                var distance = (float)Math.Sqrt(dx * dx + dy * dy);
+
+                if (distance < 1F)
+                {
+                    continue;
+                }
+
+                // Worth is measured in map units of walking, which makes the
+                // comparison against a path length honest instead of a fudge
+                // factor. Greed stretches it: a greedy bot will walk twice as far
+                // for the same thing.
+                var worth = desire * ItemWorthPerDesire * (0.5F + temperament.Greed);
+
+                if (kind == BotItemValue.Kind.Key)
+                {
+                    // A key is worth any walk: without it the level cannot end.
+                    worth = float.MaxValue / 4F;
+                }
+
+                if (worth <= bestScore)
+                {
+                    continue;
+                }
+
+                var node = nav.NodeAt(thing.X, thing.Y);
+
+                if (node < 0)
+                {
+                    continue;
+                }
+
+                bestScore = worth;
+                best = new BotPickup { Node = node, Worth = worth };
+            }
+
+            return best;
+        }
+
+        /// <summary>
+        /// Whether the bot should interrupt its run for loot at all. A rush bot
+        /// only detours when it is in trouble; a curious one always will.
+        /// </summary>
+        private bool GrabWorthIt(Mobj mobj)
+        {
+            // Only when it matters. Loot that is merely nice to have costs more
+            // than it is worth: an early version that grabbed whenever the style
+            // allowed it turned a 0:43 run into 4:52, because the bot kept
+            // planning trips to things it did not need.
+            if (player.Health < 45 || player.ArmorPoints < 30)
+            {
+                return true;
+            }
+
+            return BotItemValue.AmmoDesire(player) > 0.7F;
+        }
+
+        /// <summary>A pickup the bot might go for.</summary>
+        private struct BotPickup
+        {
+            public int Node;
+            public float Worth;
+        }
+
+        /// <summary>
+        /// Closest living monster within range, visible or not.</summary>
         private Mobj NearestThreat(Mobj self, int range)
         {
             var best = (Mobj)null;
@@ -1649,8 +2186,11 @@ namespace DPTDOOM
                 engagedTarget = null;
                 engagedTics = 0;
                 shootTics = 0;
+                combatTarget = null;
                 return null;
             }
+
+            combatTarget = best;
 
             // Track how long this bot has been shooting at all.
             //

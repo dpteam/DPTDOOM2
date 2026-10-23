@@ -90,6 +90,10 @@ namespace DPTDOOM
 
         private int[] bestRoute = new int[0];
 
+        // Serialised danger heatmap, as read from the file. The caller applies it
+        // to a BotDanger once the map is known.
+        private string dangerText = "";
+
         private BotBrain()
         {
             // Disabled: used by tests and by -nobotbrain.
@@ -128,6 +132,23 @@ namespace DPTDOOM
 
         /// <summary>Node route of the best run, empty when unknown.</summary>
         public int[] BestRoute { get { return bestRoute; } }
+
+        /// <summary>
+        /// Remembered heatmap of where this bot got hurt, as text. Apply it to a
+        /// <see cref="BotDanger"/> with <see cref="BotDanger.Deserialize"/>.
+        /// </summary>
+        public string DangerText { get { return dangerText; } }
+
+        /// <summary>Stores the current danger heatmap so it survives a restart.</summary>
+        public void SetDanger(BotDanger danger)
+        {
+            if (danger == null)
+            {
+                return;
+            }
+
+            dangerText = danger.Serialize();
+        }
 
         /// <summary>
         /// Which style to play this run. Exploitation most of the time, with a
@@ -328,6 +349,12 @@ namespace DPTDOOM
                         case "route":
                             LoadRoute(parts);
                             break;
+
+                        case "danger":
+                            // Where the bot has been hurt before. Sparse pairs of
+                            // "sector:heat"; see BotDanger.
+                            dangerText = parts.Length > 1 ? parts[1] : "";
+                            break;
                     }
                 }
             }
@@ -390,6 +417,11 @@ namespace DPTDOOM
             text.Append("runs ").Append(Runs).Append('\n');
             text.Append("best ").Append(BestTics).Append('\n');
             text.Append("beststyle ").Append((int)BestStyle).Append('\n');
+
+            if (!string.IsNullOrEmpty(dangerText))
+            {
+                text.Append("danger ").Append(dangerText).Append('\n');
+            }
 
             for (var i = 0; i < StyleCount; i++)
             {

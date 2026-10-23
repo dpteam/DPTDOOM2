@@ -338,6 +338,33 @@ namespace DPTDOOM
             // and pressed Use. A real exit moves the game to the intermission.
             var completed = game.State != GameState.Level;
 
+            // Persist what the bots learned about danger on this map before the
+            // runs are scored, because scoring writes the brain file: setting the
+            // heat afterwards would leave it out of the save entirely, which is
+            // exactly what happened on the first attempt.
+            var worst = (BotDanger)null;
+
+            if (coopBots != null)
+            {
+                for (var i = 1; i < coopBots.Length; i++)
+                {
+                    if (coopBots[i] != null && coopBots[i].Danger != null)
+                    {
+                        worst = coopBots[i].Danger;
+                    }
+                }
+            }
+
+            if (bot != null && bot.Danger != null)
+            {
+                worst = bot.Danger;
+            }
+
+            if (worst != null)
+            {
+                brain.SetDanger(worst);
+            }
+
             if (coopBots != null)
             {
                 for (var i = 1; i < coopBots.Length; i++)
@@ -422,6 +449,27 @@ namespace DPTDOOM
             Console.WriteLine("Bot trace: " + target);
 
             botTrace = null;
+        }
+
+        /// <summary>
+        /// The bot's remembered danger for this map, ready to use.
+        ///
+        /// Danger is per map, not per bot, because it is knowledge about the
+        /// level: if one bot learned that the crusher room hurts, the others
+        /// benefit too. That is also why it lives in the brain file next to the
+        /// route.
+        /// </summary>
+        private BotDanger LoadDanger(int sectorCount)
+        {
+            var danger = new BotDanger(sectorCount);
+            var brain = GetBotBrain();
+
+            if (brain.Enabled)
+            {
+                danger.Deserialize(brain.DangerText);
+            }
+
+            return danger;
         }
 
         private void CheckGameArgs()
@@ -758,7 +806,9 @@ namespace DPTDOOM
                         // A new level invalidates the bot's map knowledge.
                         bot = new DoomBot(
                             game.World, game.World.ConsolePlayer, null,
-                            GetBotBrain(), ChooseBotStyle(0));
+                            GetBotBrain(), ChooseBotStyle(0),
+                            BotTemperament.FromSeed(BotTemperament.SeedFor(CurrentMapKey(), 0)),
+                            LoadDanger(game.World.Map.Sectors.Length));
                     }
 
                     if (game.World != null && coopBots == null && coopBotCount > 0)
@@ -783,7 +833,9 @@ namespace DPTDOOM
                                 // the same style and the run tests more than one
                                 // idea at a time.
                                 coopBots[i] = new DoomBot(
-                                    game.World, player, nav, brain, ChooseBotStyle(i));
+                                    game.World, player, nav, brain, ChooseBotStyle(i),
+                                    BotTemperament.FromSeed(BotTemperament.SeedFor(CurrentMapKey(), i)),
+                                    LoadDanger(game.World.Map.Sectors.Length));
                             }
                         }
 

@@ -1034,6 +1034,35 @@ namespace DPTDOOM
         }
 
         /// <summary>
+        /// Makes every node of a sector more expensive.
+        ///
+        /// Used by the bot's danger memory: a room that keeps costing health
+        /// becomes expensive to route through, and the existing search does the
+        /// rest. Only raises a price, never lowers it, so two sources of penalty
+        /// cannot cancel each other.
+        /// </summary>
+        public void SetSectorPenalty(int sector, float penalty)
+        {
+            if (penalty <= 1F)
+            {
+                return;
+            }
+
+            for (var i = 0; i < nodeCount; i++)
+            {
+                if (nodeSector[i] != sector)
+                {
+                    continue;
+                }
+
+                if (penalty > nodePenalty[i])
+                {
+                    nodePenalty[i] = penalty;
+                }
+            }
+        }
+
+        /// <summary>
         /// Closes a passage for the rest of the level.
         ///
         /// Used when the bot has stood at a door for seconds without it opening.
