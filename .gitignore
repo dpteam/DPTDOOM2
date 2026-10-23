@@ -625,6 +625,10 @@ artifacts/
 *.log
 user/
 
+# What the bots have learned about each map. Local to a machine and to a
+# player's own runs, so it never belongs in the repository.
+bots/
+
 # OS noise
 Thumbs.db
 desktop.ini

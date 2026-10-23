@@ -39,14 +39,43 @@ namespace DPTDOOM
     {
         private const int ShootRange = 1024;
         private const int ReachDistance = 32;
-        private const int DoorReachDistance = 96;
         private const int MaxStuckTics = 35;
+
+        /// <summary>How close the bot has to be to press an exit switch.</summary>
+        private const int ExitReachDistance = 96;
+
+        /// <summary>
+        /// A sweeper leaves only after seeing this much of the map. Below one,
+        /// because a few sectors are sealed behind keys or secrets and waiting
+        /// for a hundred percent would mean never leaving.
+        /// </summary>
+        private const double SweeperCoverage = 0.85;
+
+        /// <summary>
+        /// ...and only for this long. A sweeper that gets itself stuck in a
+        /// corner of some far room should still leave the level instead of
+        /// clearing the same three rooms until the tic counter runs out.
+        /// </summary>
+        private const int SweeperTimeLimit = 35 * 90;
+
+        /// <summary>Below this health a cautious bot backs off instead of advancing.</summary>
+        private const int CautiousRetreatHealth = 55;
+
+        /// <summary>How close a monster has to be to make a cautious bot retreat.</summary>
+        private const int CautiousThreatRange = 256;
 
         private readonly World world;
         private readonly Player player;
         private readonly NavGraph nav;
         private readonly int[] path;
         private readonly bool[] visitedSector;
+
+        // Sectors the bot failed to route to. Kept apart from visitedSector so a
+        // failed plan cannot be mistaken for progress.
+        private readonly bool[] triedSector;
+
+        private readonly BotBrain brain;
+        private readonly BotStyle style;
 
         private int pathLength;
         private int pathIndex;
@@ -55,36 +84,102 @@ namespace DPTDOOM
         private int turnDirection = 1;
         private int detourCount;
 
+        // A target that will not die is a target worth ignoring for a while: a
+        // hunter can otherwise stand in front of a window shooting at something
+        // it can never reach, for the rest of the level.
+        private Mobj engagedTarget;
+        private int engagedTics;
+        private Mobj ignoredTarget;
+        private int ignoreUntil;
+
+        /// <summary>Tics before an unkillable target is dropped for a while.</summary>
+        private const int GiveUpTics = 175;
+
+        // The engine treats Use as an edge: holding it counts as one press.
+        // Pressing every tic therefore gave exactly one attempt, usually while
+        // the bot was still walking up to the switch, and then nothing forever.
+        // A short pulse keeps giving it new chances.
+        private int useTic;
+
+        private bool WantUse
+        {
+            get { return useTic % 4 == 0; }
+        }
+
+        private bool headingToExit;
+        private int exitNode;
+
         // Target of the current leg, fixed until the bot enters the next sector.
         private float legTargetX;
         private float legTargetY;
         private bool legIsDoor;
 
+        // The remembered route from the brain is tried once per run.
+        private bool hintUsed;
 
-        private bool headingToExit;
-        private readonly int exitNode;
+        // Direct steering used when the graph offers no route at all.
+        private bool wanderActive;
+        private float wanderX;
+        private float wanderY;
+        private int wanderTics;
 
-        public DoomBot(World world, Player player) : this(world, player, null)
+        // Where the bot has to stand to end the level, and the sector that
+        // contains the exit line.
+        private float exitX;
+        private float exitY;
+        private int exitSector = -1;
+
+        // Route that led to the exit, kept so a successful run can be handed to
+        // the brain as a route worth repeating.
+        private int[] routeToExit = new int[0];
+        private int routeToExitLength;
+        private bool routeCaptured;
+
+        /// <summary>
+        /// Tic on which this bot pressed the exit, or -1 while it has not. A run
+        /// only counts as the bot's own if this is set: otherwise the level was
+        /// ended by somebody else, usually the human player, and the bot's time
+        /// says nothing about the bot.
+        /// </summary>
+        public int FinishedTics { get; private set; }
+
+        public DoomBot(World world, Player player) : this(world, player, null, null, BotStyle.Sweeper)
         {
         }
 
         /// <summary>
         /// Bots in the same game share one navigation graph: it depends only on
         /// the map, and rebuilding it per bot would waste memory and load time
-        /// for no benefit.
+        /// for no benefit. They also share one brain, so what one bot learns on
+        /// a map the others know too.
         /// </summary>
         public DoomBot(World world, Player player, NavGraph sharedNav)
+            : this(world, player, sharedNav, null, BotStyle.Sweeper)
+        {
+        }
+
+        public DoomBot(World world, Player player, NavGraph sharedNav, BotBrain sharedBrain, BotStyle style)
         {
             this.world = world;
             this.player = player;
+            this.style = style;
 
+            brain = sharedBrain;
             nav = sharedNav ?? new NavGraph(world.Map);
             path = new int[nav.NodeCount];
             visitedSector = new bool[world.Map.Sectors.Length];
+            triedSector = new bool[world.Map.Sectors.Length];
 
-            exitNode = FindExitNode();
+            FinishedTics = -1;
+
+            FindExit();
             PlanExplore();
         }
+
+        public BotStyle Style { get { return style; } }
+
+        /// <summary>Health of the bot's own player, for reporting a run.</summary>
+        public int Health { get { return player.Health; } }
 
         /// <summary>Fills the command for one tic.</summary>
         public void BuildTicCmd(TicCmd cmd)
@@ -100,11 +195,41 @@ namespace DPTDOOM
             var sector = mobj.Subsector.Sector.Number;
             visitedSector[sector] = true;
 
+            useTic++;
+
             SelectWeapon();
 
             if (Shoot(cmd, mobj))
             {
                 return;
+            }
+
+            // Exit: walk up to the switch and press it.
+            //
+            // Finding the exit sector is not enough. The exit is a switch line,
+            // and a switch has to be used from the front while standing in front
+            // of it. The bot used to reach the exit room, see no more nodes to
+            // visit and just stand there.
+            if (headingToExit && exitSector >= 0 && sector == exitSector &&
+                PressExit(cmd, mobj))
+            {
+                return;
+            }
+
+            // A route assumes the bot is in the sector of the node it is heading
+            // for, or of the one it just left. Anything else means the world
+            // moved it somewhere the plan did not expect — a drop, a lift, a
+            // teleport — and continuing to walk at a waypoint two rooms away is
+            // how the bot used to spend the rest of the level in a corner.
+            if (pathLength > 0 && pathIndex < pathLength)
+            {
+                var targetSector = nav.GetSector(path[pathIndex]);
+                var previousSector = pathIndex > 0 ? nav.GetSector(path[pathIndex - 1]) : targetSector;
+
+                if (sector != targetSector && sector != previousSector)
+                {
+                    AbandonPath();
+                }
             }
 
             // Advance along the path. A nav node is a point, so the honest test
@@ -130,7 +255,15 @@ namespace DPTDOOM
 
                 if (pathLength == 0 || pathIndex >= pathLength)
                 {
-                    return;
+                    // No route at all: the bot is on a node the graph cannot
+                    // leave, which in practice means it slid off a ledge into a
+                    // pit, or ended up in a corner with no plan. Walking at the
+                    // nearest point it can actually see beats standing still,
+                    // and often the next node is enough to find a route again.
+                    if (!WanderTowards(exitX, exitY))
+                    {
+                        return;
+                    }
                 }
             }
 
@@ -138,20 +271,33 @@ namespace DPTDOOM
             legTargetY = nav.GetY(path[pathIndex]);
             legIsDoor = nav.IsDoor(path[pathIndex]);
 
+            // A waypoint can be reachable in the graph and still be hidden
+            // behind the corner of a concave sector. Walking straight at it then
+            // means grinding along the wall forever, which is exactly what the
+            // bot used to do in the L-shaped corridor before the exit.
+            //
+            // When that happens, aim at the nearer point of the same sector that
+            // is visible from here and lies in the right direction. The path is
+            // untouched: this is only the point to walk at for this tic.
+            var hereX = mobj.X.ToFloat();
+            var hereY = mobj.Y.ToFloat();
+
+            if (nav.GetSector(path[pathIndex]) == sector &&
+                !nav.LineClear(hereX, hereY, legTargetX, legTargetY, sector))
+            {
+                var step = nav.VisibleNodeTowards(sector, hereX, hereY, legTargetX, legTargetY);
+
+                if (step >= 0)
+                {
+                    legTargetX = nav.GetX(step);
+                    legTargetY = nav.GetY(step);
+                    legIsDoor = nav.IsDoor(step);
+                }
+            }
+
             var dx = legTargetX - mobj.X.ToFloat();
             var dy = legTargetY - mobj.Y.ToFloat();
             var distance = Math.Abs(dx) + Math.Abs(dy);
-
-            // Exit switch: walk up to it and press it.
-            //
-            // Finding the exit sector is not enough. The exit is a *switch* line
-            // (or a walkover), and a switch has to be used from the front side
-            // while standing in front of it. The bot used to reach the exit room,
-            // see no more nodes to visit and stand there.
-            if (headingToExit && PressExitIfClose(cmd, mobj))
-            {
-                return;
-            }
 
             if (legIsDoor)
             {
@@ -159,7 +305,10 @@ namespace DPTDOOM
                 // while walking in: one press can be wasted on the frame before
                 // the engine registers contact, and a door still rising blocks
                 // movement.
-                cmd.Buttons |= TicCmdButtons.Use;
+                if (WantUse)
+                {
+                    cmd.Buttons |= TicCmdButtons.Use;
+                }
             }
 
             // Progress is measured against the best distance achieved so far,
@@ -176,6 +325,31 @@ namespace DPTDOOM
             }
 
             Steer(cmd, mobj, legTargetX, legTargetY);
+
+            // A cautious bot gives ground when it is hurt instead of trading
+            // blows. It keeps facing the threat while backing away, so it can
+            // still shoot: turning tail would only get it shot in the back.
+            //
+            // Only if there is actually room behind. Backing up into a wall
+            // while a demon closes in is how the first version of this style
+            // died every time.
+            if (style == BotStyle.Cautious && player.Health < CautiousRetreatHealth)
+            {
+                var threat = NearestThreat(mobj, CautiousThreatRange);
+
+                if (threat != null && HasRoomToRetreat(mobj, threat))
+                {
+                    var toThreat = Geometry.PointToAngle(mobj.X, mobj.Y, threat.X, threat.Y);
+                    var facing = (toThreat - mobj.Angle).Data >> 16;
+
+                    cmd.AngleTurn = (short)MathEx.Clamp(facing, -0x1000, 0x1000);
+                    cmd.ForwardMove = -25;
+                    cmd.SideMove = 0;
+                    cmd.Buttons |= TicCmdButtons.Attack;
+
+                    return;
+                }
+            }
 
             if (noProgressTics > MaxStuckTics)
             {
@@ -194,48 +368,36 @@ namespace DPTDOOM
         }
 
         /// <summary>
-        /// <summary>
-        /// Uses the exit switch if one is within reach. Returns true when the
-        /// bot stopped to press it.
+        /// Uses the exit switch if the bot is standing in front of it. Returns
+        /// true when the bot stopped to press it.
         /// </summary>
-        private bool PressExitIfClose(TicCmd cmd, Mobj mobj)
+        private bool PressExit(TicCmd cmd, Mobj mobj)
         {
-            foreach (var line in mobj.Subsector.Sector.Lines)
+            var dx = exitX - mobj.X.ToFloat();
+            var dy = exitY - mobj.Y.ToFloat();
+
+            if (Math.Abs(dx) + Math.Abs(dy) > ExitReachDistance)
             {
-                if (!IsExit(line))
-                {
-                    continue;
-                }
-
-                var midX = (line.Vertex1.X.ToFloat() + line.Vertex2.X.ToFloat()) * 0.5F;
-                var midY = (line.Vertex1.Y.ToFloat() + line.Vertex2.Y.ToFloat()) * 0.5F;
-
-                var dx = midX - mobj.X.ToFloat();
-                var dy = midY - mobj.Y.ToFloat();
-
-                if (Math.Abs(dx) + Math.Abs(dy) > 80F)
-                {
-                    continue;
-                }
-
-                // Face it, then press. A switch only works from the front.
-                var angle = Geometry.PointToAngle(
-                    mobj.X, mobj.Y,
-                    Fixed.FromDouble(midX), Fixed.FromDouble(midY));
-
-                var delta = (angle - mobj.Angle).Data >> 16;
-                cmd.AngleTurn = (short)MathEx.Clamp(delta, -0x1000, 0x1000);
-
-                if (Math.Abs(delta) < 0x1000)
-                {
-                    cmd.ForwardMove = 20;
-                    cmd.Buttons |= TicCmdButtons.Use;
-                }
-
-                return true;
+                return false;
             }
 
-            return false;
+            Steer(cmd, mobj, exitX, exitY);
+
+            // Press every tic while in reach. A switch only works from the front
+            // and only once the engine has registered the player as touching it,
+            // and one wasted press is cheaper than a bot that stands at an open
+            // exit doing nothing.
+            if (WantUse)
+            {
+                cmd.Buttons |= TicCmdButtons.Use;
+            }
+
+            if (FinishedTics < 0)
+            {
+                FinishedTics = world.LevelTime;
+            }
+
+            return true;
         }
 
         private void AbandonPath()
@@ -298,7 +460,10 @@ namespace DPTDOOM
             {
                 // Stage one: keep pressing forward and use. Doors need contact
                 // to open, and a doorway is the usual reason for being blocked.
-                cmd.Buttons |= TicCmdButtons.Use;
+                if (WantUse)
+                {
+                    cmd.Buttons |= TicCmdButtons.Use;
+                }
                 cmd.ForwardMove = 30;
             }
 
@@ -315,8 +480,8 @@ namespace DPTDOOM
         ////////////////////////////////////////////////////////////
 
         /// <summary>
-        /// Routes to the level exit when one is reachable, otherwise to the
-        /// nearest sector that has not been entered yet.
+        /// Picks the next route: the remembered one, the exit, or unexplored
+        /// ground — depending on the style.
         /// </summary>
         private void PlanExplore()
         {
@@ -325,33 +490,61 @@ namespace DPTDOOM
             headingToExit = false;
 
             var mobj = player.Mobj;
+            if (mobj == null)
+            {
+                return;
+            }
+
             var start = nav.NodeAt(mobj.X, mobj.Y);
             if (start < 0)
             {
                 return;
             }
 
-            if (exitNode >= 0)
+            // First order of business in a run: replay the route that worked
+            // last time. This is the "map of previous runs" the bot keeps, and
+            // it is what makes a second attempt on the same map quicker than
+            // the first.
+            if (!hintUsed)
+            {
+                hintUsed = true;
+
+                if (AdoptHint())
+                {
+                    return;
+                }
+            }
+
+            // A sweeper clears the level before leaving; everyone else heads for
+            // the exit straight away. That difference is the whole point of
+            // having styles: they cost different amounts of time and risk, and
+            // the brain finds out which trade the map rewards.
+            var exploreFirst = style == BotStyle.Sweeper &&
+                               Coverage < SweeperCoverage &&
+                               world.LevelTime < SweeperTimeLimit;
+
+            if (!exploreFirst && exitNode >= 0)
             {
                 var length = nav.FindPath(start, exitNode, path);
                 if (length > 0)
                 {
                     pathLength = length;
                     headingToExit = true;
+                    CaptureRoute();
                     return;
                 }
             }
 
             // Nearest unvisited sector, by straight line first, then verified
-            // with A*. Straight-line order is a heuristic; the path is the
-            // truth. A handful of attempts is enough to find something
+            // with a real search. Straight-line order is only a guess; the path
+            // is the truth. A handful of attempts is enough to find something
             // reachable without turning this into a quadratic search.
             for (var attempt = 0; attempt < 24; attempt++)
             {
                 var target = FindNearestUnvisitedNode(start);
                 if (target < 0)
                 {
-                    return;
+                    break;
                 }
 
                 var length = nav.FindPath(start, target, path);
@@ -361,9 +554,153 @@ namespace DPTDOOM
                     return;
                 }
 
-                // Unreachable: mark the whole sector so it is not picked again.
-                visitedSector[nav.GetSector(target)] = true;
+                // Unreachable: remember not to pick it again. This is a separate
+                // flag from "visited" on purpose. Marking it visited used to
+                // destroy the bot's map knowledge: after a few failed plans it
+                // believed it had seen every sector, stopped exploring, and then
+                // had nothing left to do at all.
+                triedSector[nav.GetSector(target)] = true;
             }
+
+            // Everything has been seen, so a sweeper may now leave.
+            if (exitNode >= 0)
+            {
+                var length = nav.FindPath(start, exitNode, path);
+                if (length > 0)
+                {
+                    pathLength = length;
+                    headingToExit = true;
+                    CaptureRoute();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Last resort when the graph has no route from where the bot stands:
+        /// walk at something it can see, or straight at the goal for a while.
+        /// </summary>
+        private bool WanderTowards(float goalX, float goalY)
+        {
+            var mobj = player.Mobj;
+            if (mobj == null)
+            {
+                return false;
+            }
+
+            var hereX = mobj.X.ToFloat();
+            var hereY = mobj.Y.ToFloat();
+            var sector = mobj.Subsector.Sector.Number;
+
+            var step = nav.VisibleNodeTowards(sector, hereX, hereY, goalX, goalY);
+
+            if (step >= 0)
+            {
+                var dx = nav.GetX(step) - hereX;
+                var dy = nav.GetY(step) - hereY;
+
+                if (Math.Abs(dx) + Math.Abs(dy) > ReachDistance)
+                {
+                    path[0] = step;
+                    pathLength = 1;
+                    pathIndex = 0;
+                    headingToExit = false;
+                    return true;
+                }
+            }
+
+            // Nothing worth walking to inside this sector. Aim straight at the
+            // goal for a second or so and let the ordinary steering slide along
+            // whatever it bumps into.
+            wanderActive = true;
+            wanderX = goalX;
+            wanderY = goalY;
+            wanderTics = 0;
+
+            return true;
+        }
+
+        /// <summary>
+        /// Copies the route that worked from the brain, if there is one.
+        ///
+        /// The node indices are only valid for the same map: the mesh is built
+        /// from the map data in a fixed order, so the same map always produces
+        /// the same numbering, and the brain file is keyed by a fingerprint of
+        /// the map. Anything out of range means the file belongs elsewhere, and
+        /// the hint is dropped rather than trusted.
+        /// </summary>
+        private bool AdoptHint()
+        {
+            if (brain == null)
+            {
+                return false;
+            }
+
+            var hint = brain.BestRoute;
+
+            if (hint.Length < 2)
+            {
+                return false;
+            }
+
+            for (var i = 0; i < hint.Length; i++)
+            {
+                if (hint[i] < 0 || hint[i] >= nav.NodeCount)
+                {
+                    return false;
+                }
+            }
+
+            // The route has to start where the bot is standing now. A start
+            // point that has moved means the route belongs to a different
+            // arrangement of the map, and following it would walk the bot
+            // across the level to reach its first waypoint.
+            var mobj = player.Mobj;
+
+            if (mobj != null)
+            {
+                var dx = nav.GetX(hint[0]) - mobj.X.ToFloat();
+                var dy = nav.GetY(hint[0]) - mobj.Y.ToFloat();
+
+                if (Math.Abs(dx) + Math.Abs(dy) > 512F)
+                {
+                    return false;
+                }
+            }
+
+            var length = Math.Min(hint.Length, path.Length);
+            Array.Copy(hint, path, length);
+
+            pathLength = length;
+            pathIndex = 0;
+            headingToExit = true;
+
+            return true;
+        }
+
+        /// <summary>
+        /// Keeps the first plan that headed for the exit.
+        ///
+        /// Only the first one: a plan made after the bot got stuck somewhere
+        /// halfway across the map starts halfway across the map, and replaying
+        /// that from the spawn would walk the bot backwards. The first plan
+        /// starts where the bot starts, which is what makes it replayable.
+        /// </summary>
+        private void CaptureRoute()
+        {
+            if (routeCaptured || pathLength <= 0)
+            {
+                return;
+            }
+
+            routeCaptured = true;
+
+            if (routeToExit.Length < pathLength)
+            {
+                routeToExit = new int[pathLength];
+            }
+
+            Array.Copy(path, routeToExit, pathLength);
+            routeToExitLength = pathLength;
         }
 
         private int FindNearestUnvisitedNode(int start)
@@ -374,7 +711,7 @@ namespace DPTDOOM
             for (var node = 0; node < nav.NodeCount; node++)
             {
                 var sector = nav.GetSector(node);
-                if (visitedSector[sector])
+                if (visitedSector[sector] || triedSector[sector])
                 {
                     continue;
                 }
@@ -394,31 +731,225 @@ namespace DPTDOOM
         }
 
         /// <summary>
-        /// Node whose sector contains a line that ends the level. Exit lines are
-        /// switches and walkovers; either way the bot has to stand in front of
-        /// one, so the sector is what matters.
+        /// Finds the level exit and works out where the bot has to stand to use
+        /// it: in front of the exit line, inside the sector the line belongs to.
+        ///
+        /// The node alone is not enough. A node is a waypoint somewhere in the
+        /// exit sector, and a switch has to be pressed from touching distance;
+        /// a bot that stops at the waypoint can be ten metres from the switch
+        /// and press Use at a wall forever.
         /// </summary>
-        private int FindExitNode()
+        private void FindExit()
         {
-            for (var node = 0; node < nav.NodeCount; node++)
+            exitNode = -1;
+
+            for (var s = 0; s < world.Map.Sectors.Length; s++)
             {
-                var sector = world.Map.Sectors[nav.GetSector(node)];
+                var sector = world.Map.Sectors[s];
 
                 foreach (var line in sector.Lines)
                 {
-                    if (IsExit(line))
+                    if (!IsExit(line))
                     {
-                        return node;
+                        continue;
                     }
+
+                    var midX = (line.Vertex1.X.ToFloat() + line.Vertex2.X.ToFloat()) * 0.5F;
+                    var midY = (line.Vertex1.Y.ToFloat() + line.Vertex2.Y.ToFloat()) * 0.5F;
+
+                    exitX = midX;
+                    exitY = midY;
+                    exitSector = s;
+
+                    // Step back from the wall into the room, so the target is a
+                    // place a 32-unit-wide body can actually stand.
+                    float inwardX;
+                    float inwardY;
+
+                    if (InwardPoint(sector, midX, midY, out inwardX, out inwardY))
+                    {
+                        exitX = inwardX;
+                        exitY = inwardY;
+                    }
+
+                    exitNode = NearestNode(exitX, exitY, s);
+
+                    return;
+                }
+            }
+        }
+
+        /// <summary>Point a little way inside a sector, from a position on its edge.</summary>
+        private bool InwardPoint(Sector sector, float x, float y, out float resultX, out float resultY)
+        {
+            resultX = 0;
+            resultY = 0;
+
+            var centreX = 0.0F;
+            var centreY = 0.0F;
+            var count = 0;
+
+            foreach (var line in sector.Lines)
+            {
+                centreX += (line.Vertex1.X.ToFloat() + line.Vertex2.X.ToFloat()) * 0.5F;
+                centreY += (line.Vertex1.Y.ToFloat() + line.Vertex2.Y.ToFloat()) * 0.5F;
+                count++;
+            }
+
+            if (count == 0)
+            {
+                return false;
+            }
+
+            centreX /= count;
+            centreY /= count;
+
+            var dx = centreX - x;
+            var dy = centreY - y;
+            var length = (float)Math.Sqrt(dx * dx + dy * dy);
+
+            if (length < 0.001F)
+            {
+                return false;
+            }
+
+            // Forty units clear of the wall: outside the player's radius, so
+            // walking there does not rub along the wall, and close enough that
+            // the switch is still within reach.
+            const float Inset = 40F;
+
+            var px = x + dx / length * Inset;
+            var py = y + dy / length * Inset;
+
+            var subsector = Geometry.PointInSubsector(
+                Fixed.FromDouble(px), Fixed.FromDouble(py), world.Map);
+
+            if (subsector.Sector.Number != sector.Number)
+            {
+                return false;
+            }
+
+            resultX = px;
+            resultY = py;
+
+            return true;
+        }
+
+        /// <summary>Closest navigation node to a position, preferring one sector.</summary>
+        private int NearestNode(float x, float y, int sector)
+        {
+            var best = -1;
+            var bestDistance = float.MaxValue;
+
+            for (var node = 0; node < nav.NodeCount; node++)
+            {
+                if (sector >= 0 && nav.GetSector(node) != sector)
+                {
+                    continue;
+                }
+
+                var dx = nav.GetX(node) - x;
+                var dy = nav.GetY(node) - y;
+                var distance = dx * dx + dy * dy;
+
+                if (distance < bestDistance)
+                {
+                    bestDistance = distance;
+                    best = node;
                 }
             }
 
-            return -1;
+            return best;
         }
 
         ////////////////////////////////////////////////////////////
         // Combat
         ////////////////////////////////////////////////////////////
+
+        /// <summary>
+        /// How far away this style is willing to engage.
+        ///
+        /// A hunter shoots at anything it can see; a cautious bot only takes
+        /// fights it cannot walk around. That is the difference between the two
+        /// styles that both go straight for the exit.
+        /// </summary>
+        private int EngagementRange
+        {
+            get
+            {
+                switch (style)
+                {
+                    case BotStyle.Rush:
+                        return 384;
+
+                    case BotStyle.Cautious:
+                        return 320;
+
+                    case BotStyle.Sweeper:
+                        return 512;
+
+                    default:
+                        return ShootRange;
+                }
+            }
+        }
+
+        /// <summary>Whether there is clear space behind the bot to step back into.</summary>
+        private bool HasRoomToRetreat(Mobj mobj, Mobj threat)
+        {
+            var ax = mobj.X.ToFloat() - threat.X.ToFloat();
+            var ay = mobj.Y.ToFloat() - threat.Y.ToFloat();
+            var length = (float)Math.Sqrt(ax * ax + ay * ay);
+
+            if (length < 1F)
+            {
+                return false;
+            }
+
+            var hereX = mobj.X.ToFloat();
+            var hereY = mobj.Y.ToFloat();
+            var sector = mobj.Subsector.Sector.Number;
+
+            return nav.LineClear(
+                hereX, hereY,
+                hereX + ax / length * 96F,
+                hereY + ay / length * 96F,
+                sector);
+        }
+
+        /// <summary>Closest living monster within range, visible or not.</summary>
+        private Mobj NearestThreat(Mobj self, int range)
+        {
+            var best = (Mobj)null;
+            var bestDistance = range;
+
+            foreach (var thinker in world.Thinkers)
+            {
+                var mobj = thinker as Mobj;
+
+                if (mobj == null || mobj == self || mobj.Health <= 0)
+                {
+                    continue;
+                }
+
+                if ((mobj.Flags & MobjFlags.Shootable) == 0)
+                {
+                    continue;
+                }
+
+                var dx = mobj.X - self.X;
+                var dy = mobj.Y - self.Y;
+                var distance = (int)(Math.Abs(dx.ToFloat()) + Math.Abs(dy.ToFloat()));
+
+                if (distance < bestDistance)
+                {
+                    bestDistance = distance;
+                    best = mobj;
+                }
+            }
+
+            return best;
+        }
 
         /// <summary>
         /// Switches to the best weapon that still has ammo.
@@ -492,7 +1023,7 @@ namespace DPTDOOM
             }
 
             var best = (Mobj)null;
-            var bestDistance = ShootRange;
+            var bestDistance = EngagementRange;
 
             foreach (var thinker in world.Thinkers)
             {
@@ -504,6 +1035,11 @@ namespace DPTDOOM
 
                 if ((mobj.Flags & MobjFlags.Shootable) == 0 ||
                     (mobj.Flags & MobjFlags.CountKill) == 0)
+                {
+                    continue;
+                }
+
+                if (mobj == ignoredTarget && world.LevelTime < ignoreUntil)
                 {
                     continue;
                 }
@@ -534,6 +1070,30 @@ namespace DPTDOOM
 
             if (best == null)
             {
+                engagedTarget = null;
+                engagedTics = 0;
+                return false;
+            }
+
+            // Track how long the same target has been engaged. If it survives
+            // this long it is probably out of reach, and standing there aiming
+            // at it forever is not a plan.
+            if (ReferenceEquals(best, engagedTarget))
+            {
+                engagedTics++;
+            }
+            else
+            {
+                engagedTarget = best;
+                engagedTics = 0;
+            }
+
+            if (engagedTics > GiveUpTics)
+            {
+                ignoredTarget = best;
+                ignoreUntil = world.LevelTime + 3 * 35;
+                engagedTarget = null;
+                engagedTics = 0;
                 return false;
             }
 
@@ -672,9 +1232,24 @@ namespace DPTDOOM
 
         public int TotalSectors { get { return visitedSector.Length; } }
         public int PathLength { get { return pathLength; } }
+        public int PathIndex { get { return pathIndex; } }
+
+        /// <summary>Route node at an index, or -1. For diagnostics and tests.</summary>
+        public int NodeAt(int index)
+        {
+            return index >= 0 && index < pathLength ? path[index] : -1;
+        }
         public bool HeadingToExit { get { return headingToExit; } }
         public NavGraph Nav { get { return nav; } }
         public int ExitNode { get { return exitNode; } }
+        public int ExitSector { get { return exitSector; } }
+
+        /// <summary>Route to the exit that this run took, for the brain to keep.</summary>
+        public int[] RouteToExit { get { return routeToExit; } }
+        public int RouteToExitLength { get { return routeToExitLength; } }
+
+        /// <summary>True when this bot ended the level itself.</summary>
+        public bool Finished { get { return FinishedTics >= 0; } }
 
         /// <summary>One line describing what the bot is doing, for diagnostics.</summary>
         public string Status

@@ -50,8 +50,19 @@ namespace DPTDOOM
         /// <summary>Points closer than this are treated as one.</summary>
         private const float MergeDistance = 24F;
 
-        /// <summary>How far inside a sector a doorway point sits.</summary>
-        private const float DoorInset = 20F;
+        /// <summary>
+        /// How far inside a sector a wall point sits, tried in this order. The
+        /// first that lands inside the sector wins, so a thin step still gets a
+        /// point while a wide room gets one comfortably clear of the wall.
+        /// </summary>
+        private static readonly float[] WallInsets = { 28F, 20F, 12F, 6F };
+
+        /// <summary>
+        /// Longest intra-sector link worth testing. Anything longer is walked as
+        /// a chain of shorter links, and testing every pair in a large hall
+        /// would cost thousands of visibility checks for no new routes.
+        /// </summary>
+        private const float MaxEdgeLength = 384F;
 
         /// <summary>Sampling step used to test whether a line stays in a sector.</summary>
         private const float VisibilityStep = 8F;
@@ -111,43 +122,21 @@ namespace DPTDOOM
                 AddSectorPoints(s, xs, ys, sectors, doors, pointsOfSector);
             }
 
-            // 2. Doorway points, one on each side of every passable two-sided
-            //    line. These have to be created *before* the arrays are sized:
-            //    adding points later was an off-by-one that crashed the build.
-            var frontDoor = new int[map.Lines.Length];
-            var backDoor = new int[map.Lines.Length];
-
-            for (var i = 0; i < map.Lines.Length; i++)
+            // 2. Wall points: for every line bounding a sector, a point a little
+            //    way inside it.
+            //
+            //    These are what hold the mesh together. Without them an L-shaped
+            //    corridor got grid points in both legs and no line of sight
+            //    between them, so the two halves became separate islands: 92 of
+            //    612 points were reachable from the spawn and the exit was not
+            //    one of them. Points hugging the walls give every sector a ring
+            //    that is connected around its corners.
+            for (var s = 0; s < map.Sectors.Length; s++)
             {
-                frontDoor[i] = -1;
-                backDoor[i] = -1;
-            }
-
-            for (var i = 0; i < map.Lines.Length; i++)
-            {
-                var line = map.Lines[i];
-
-                if (line.BackSector == null || line.FrontSector == null)
+                foreach (var line in map.Sectors[s].Lines)
                 {
-                    continue;
+                    AddWallPoint(s, line, xs, ys, sectors, doors, pointsOfSector);
                 }
-
-                var front = line.FrontSector.Number;
-                var back = line.BackSector.Number;
-
-                if (front == back)
-                {
-                    continue;
-                }
-
-                if (!CanWalk(line, line.FrontSector, line.BackSector) &&
-                    !CanWalk(line, line.BackSector, line.FrontSector))
-                {
-                    continue;
-                }
-
-                frontDoor[i] = DoorPoint(front, line, xs, ys, sectors, doors, pointsOfSector);
-                backDoor[i] = DoorPoint(back, line, xs, ys, sectors, doors, pointsOfSector);
             }
 
             // 3. Now that every point exists, the graph can be sized.
@@ -175,6 +164,15 @@ namespace DPTDOOM
                 {
                     for (var b = a + 1; b < list.Count; b++)
                     {
+                        // Long pairs are skipped: the mesh is dense enough that
+                        // any long move can be walked as a chain of short ones,
+                        // and testing every pair in a large hall would cost
+                        // thousands of visibility checks for no new routes.
+                        if (DistanceSquared(list[a], list[b]) > MaxEdgeLength * MaxEdgeLength)
+                        {
+                            continue;
+                        }
+
                         if (!Visible(list[a], list[b]))
                         {
                             continue;
@@ -185,13 +183,98 @@ namespace DPTDOOM
                 }
             }
 
-            // 5. Portal edges: connect the doorway point on one side to the one
-            //    on the other.
+            // A point with no edges is invisible to the search and, worse, makes
+            // the mesh look fragmented. Give every such point one link to its
+            // nearest neighbour in the same sector.
+            for (var i = 0; i < nodeCount; i++)
+            {
+                if (edges[i].Count > 0)
+                {
+                    continue;
+                }
+
+                var list = pointsOfSector[nodeSector[i]];
+
+                var best = -1;
+                var bestDistance = float.MaxValue;
+
+                for (var j = 0; j < list.Count; j++)
+                {
+                    if (list[j] == i)
+                    {
+                        continue;
+                    }
+
+                    var distance = DistanceSquared(i, list[j]);
+                    if (distance < bestDistance)
+                    {
+                        bestDistance = distance;
+                        best = list[j];
+                    }
+                }
+
+                if (best >= 0)
+                {
+                    Connect(edges, costs, xs, ys, i, best);
+                }
+            }
+
+            // 5. Portal edges: for every passable two-sided line, link the point
+            //    nearest its midpoint on one side to the point nearest its
+            //    midpoint on the other.
+            //
+            //    Picking the nearest existing point, rather than requiring a
+            //    dedicated doorway point, is what keeps a thin sector from
+            //    breaking the link: when the inset point does not fit, whatever
+            //    point is closest still gets used.
             for (var i = 0; i < map.Lines.Length; i++)
             {
-                if (frontDoor[i] >= 0 && backDoor[i] >= 0)
+                var line = map.Lines[i];
+
+                if (line.BackSector == null || line.FrontSector == null)
                 {
-                    Connect(edges, costs, xs, ys, frontDoor[i], backDoor[i]);
+                    continue;
+                }
+
+                if (line.FrontSector.Number == line.BackSector.Number)
+                {
+                    continue;
+                }
+
+                if (!CanWalk(line, line.FrontSector, line.BackSector) &&
+                    !CanWalk(line, line.BackSector, line.FrontSector))
+                {
+                    continue;
+                }
+
+                var midX = (line.Vertex1.X.ToFloat() + line.Vertex2.X.ToFloat()) * 0.5F;
+                var midY = (line.Vertex1.Y.ToFloat() + line.Vertex2.Y.ToFloat()) * 0.5F;
+
+                var front = NearestPointOfSector(
+                    pointsOfSector, line.FrontSector.Number, xs, ys, midX, midY);
+
+                var back = NearestPointOfSector(
+                    pointsOfSector, line.BackSector.Number, xs, ys, midX, midY);
+
+                if (front < 0 || back < 0)
+                {
+                    continue;
+                }
+
+                // Portal edges are **directed**, unlike the ones inside a
+                // sector. Dropping 48 units into a pit is allowed; climbing back
+                // out of it is not, and a two-way edge here let the bot plan a
+                // route that went down a ledge and then kept trying to walk back
+                // up it. It would fall in, fail to climb out, and repeat until
+                // the run ended.
+                if (CanWalk(line, line.FrontSector, line.BackSector))
+                {
+                    ConnectDirected(edges, costs, xs, ys, front, back);
+                }
+
+                if (CanWalk(line, line.BackSector, line.FrontSector))
+                {
+                    ConnectDirected(edges, costs, xs, ys, back, front);
                 }
             }
 
@@ -282,51 +365,25 @@ namespace DPTDOOM
                         continue;
                     }
 
-                    var index = AddPoint(x, y, sectorNumber, false, xs, ys, sectors, doors);
-                    if (index >= 0)
-                    {
-                        pointsOfSector[sectorNumber].Add(index);
-                    }
+                    var index = AddPoint(x, y, sectorNumber, false, xs, ys, sectors, doors, pointsOfSector);
                 }
             }
         }
 
         /// <summary>
-        /// A point just inside a sector, in front of a doorway, and an edge from
-        /// it to the interior points of the same sector.
+        /// A point a little way inside a sector, in front of one of its lines.
+        /// Returns the point index, or -1 when no inset fits.
         /// </summary>
-        private int DoorPoint(
+        private int AddWallPoint(
             int sectorNumber, LineDef line,
             List<float> xs, List<float> ys, List<int> sectors, List<bool> doors,
             List<int>[] pointsOfSector)
         {
-            var sector = map.Sectors[sectorNumber];
-
-            // Inward normal: from the line's midpoint toward the sector centre.
             var midX = (line.Vertex1.X.ToFloat() + line.Vertex2.X.ToFloat()) * 0.5F;
             var midY = (line.Vertex1.Y.ToFloat() + line.Vertex2.Y.ToFloat()) * 0.5F;
 
-            var centreX = 0.0F;
-            var centreY = 0.0F;
-            var count = 0;
-
-            foreach (var other in sector.Lines)
-            {
-                centreX += (other.Vertex1.X.ToFloat() + other.Vertex2.X.ToFloat()) * 0.5F;
-                centreY += (other.Vertex1.Y.ToFloat() + other.Vertex2.Y.ToFloat()) * 0.5F;
-                count++;
-            }
-
-            if (count == 0)
-            {
-                return -1;
-            }
-
-            centreX /= count;
-            centreY /= count;
-
-            var dx = centreX - midX;
-            var dy = centreY - midY;
+            var dx = line.Vertex2.X.ToFloat() - line.Vertex1.X.ToFloat();
+            var dy = line.Vertex2.Y.ToFloat() - line.Vertex1.Y.ToFloat();
             var length = (float)Math.Sqrt(dx * dx + dy * dy);
 
             if (length < 0.001F)
@@ -334,28 +391,72 @@ namespace DPTDOOM
                 return -1;
             }
 
-            var px = midX + dx / length * DoorInset;
-            var py = midY + dy / length * DoorInset;
+            var nx = dy / length;
+            var ny = -dx / length;
 
-            if (!InsideSector(px, py, sectorNumber))
+            // Both normals are tried rather than working out which side the
+            // sector is on from the front/back convention. The test is cheap and
+            // there is no way to get the sign wrong, which matters because a
+            // wrong sign puts the point inside the neighbouring sector and the
+            // whole mesh quietly becomes nonsense.
+            foreach (var inset in WallInsets)
             {
-                // The inset point fell into a wall; try the line midpoint itself,
-                // which is on the boundary but still crossable.
-                px = midX;
-                py = midY;
+                if (InsideSector(midX + nx * inset, midY + ny * inset, sectorNumber))
+                {
+                    return AddPoint(
+                        midX + nx * inset, midY + ny * inset, sectorNumber,
+                        IsDoorSpecial((int)line.Special), xs, ys, sectors, doors, pointsOfSector);
+                }
+
+                if (InsideSector(midX - nx * inset, midY - ny * inset, sectorNumber))
+                {
+                    return AddPoint(
+                        midX - nx * inset, midY - ny * inset, sectorNumber,
+                        IsDoorSpecial((int)line.Special), xs, ys, sectors, doors, pointsOfSector);
+                }
             }
 
-            var index = AddPoint(px, py, sectorNumber, IsDoorSpecial((int)line.Special), xs, ys, sectors, doors);
+            return -1;
+        }
 
-            if (index >= 0)
+        /// <summary>Point of a sector closest to a position, or -1.</summary>
+        private static int NearestPointOfSector(
+            List<int>[] pointsOfSector, int sectorNumber,
+            List<float> xs, List<float> ys,
+            float x, float y)
+        {
+            var list = pointsOfSector[sectorNumber];
+
+            var best = -1;
+            var bestDistance = float.MaxValue;
+
+            for (var i = 0; i < list.Count; i++)
             {
-                pointsOfSector[sectorNumber].Add(index);
+                var dx = xs[list[i]] - x;
+                var dy = ys[list[i]] - y;
+                var distance = dx * dx + dy * dy;
+
+                if (distance < bestDistance)
+                {
+                    bestDistance = distance;
+                    best = list[i];
+                }
             }
 
-            return index;
+            return best;
         }
 
         private static void Connect(
+            List<int>[] edges, List<float>[] costs,
+            List<float> xs, List<float> ys,
+            int a, int b)
+        {
+            ConnectDirected(edges, costs, xs, ys, a, b);
+            ConnectDirected(edges, costs, xs, ys, b, a);
+        }
+
+        /// <summary>One-way link, for portals where the drop is one-way.</summary>
+        private static void ConnectDirected(
             List<int>[] edges, List<float>[] costs,
             List<float> xs, List<float> ys,
             int a, int b)
@@ -371,28 +472,35 @@ namespace DPTDOOM
 
             edges[a].Add(b);
             costs[a].Add(distance);
-            edges[b].Add(a);
-            costs[b].Add(distance);
         }
 
         private int AddPoint(
             float x, float y, int sectorNumber, bool door,
-            List<float> xs, List<float> ys, List<int> sectors, List<bool> doors)
+            List<float> xs, List<float> ys, List<int> sectors, List<bool> doors,
+            List<int>[] pointsOfSector)
         {
             // Merge with an existing point of the same sector that is close by.
-            for (var i = 0; i < xs.Count; i++)
-            {
-                if (sectors[i] != sectorNumber)
-                {
-                    continue;
-                }
+            // Only that sector's list is scanned: merging across sectors would be
+            // meaningless, and scanning every point made the build quadratic.
+            var list = pointsOfSector[sectorNumber];
 
-                var dx = xs[i] - x;
-                var dy = ys[i] - y;
+            for (var i = 0; i < list.Count; i++)
+            {
+                var index = list[i];
+                var dx = xs[index] - x;
+                var dy = ys[index] - y;
 
                 if (dx * dx + dy * dy < MergeDistance * MergeDistance)
                 {
-                    return i;
+                    // A merged point keeps the door flag: if either of the two
+                    // places it stands for is a doorway, pressing Use there is
+                    // still correct.
+                    if (door)
+                    {
+                        doors[index] = true;
+                    }
+
+                    return index;
                 }
             }
 
@@ -401,7 +509,18 @@ namespace DPTDOOM
             sectors.Add(sectorNumber);
             doors.Add(door);
 
-            return xs.Count - 1;
+            var created = xs.Count - 1;
+            list.Add(created);
+
+            return created;
+        }
+
+        private float DistanceSquared(int a, int b)
+        {
+            var dx = nodeX[a] - nodeX[b];
+            var dy = nodeY[a] - nodeY[b];
+
+            return dx * dx + dy * dy;
         }
 
         private bool InsideSector(float x, float y, int sectorNumber)
@@ -410,6 +529,84 @@ namespace DPTDOOM
                 Fixed.FromDouble(x), Fixed.FromDouble(y), map);
 
             return subsector.Sector.Number == sectorNumber;
+        }
+
+        /// <summary>
+        /// True when a straight line crosses a solid wall.
+        ///
+        /// This is the only reliable "can I walk there" test, and it took a while
+        /// to arrive at. The obvious test — "are all the points on the line
+        /// inside the same sector?" — does not work, because the BSP tree has no
+        /// notion of solid space: a point in the void behind a one-sided wall
+        /// still belongs to *some* subsector, and that subsector is very often
+        /// the one in front of the wall. So a line straight through a wall
+        /// reported "same sector, clear", and the bot walked into the wall for
+        /// the rest of the level.
+        ///
+        /// Only one-sided lines count as solid. A two-sided line is a doorway or
+        /// a step: it may be closed right now (a door, a lift), but it opens, and
+        /// the bot presses Use on those anyway.
+        /// </summary>
+        private bool CrossesSolidLine(float ax, float ay, float bx, float by)
+        {
+            var minX = Math.Min(ax, bx);
+            var maxX = Math.Max(ax, bx);
+            var minY = Math.Min(ay, by);
+            var maxY = Math.Max(ay, by);
+
+            var lines = map.Lines;
+
+            for (var i = 0; i < lines.Length; i++)
+            {
+                var line = lines[i];
+
+                if (line.BackSector != null)
+                {
+                    continue;
+                }
+
+                var x1 = line.Vertex1.X.ToFloat();
+                var y1 = line.Vertex1.Y.ToFloat();
+                var x2 = line.Vertex2.X.ToFloat();
+                var y2 = line.Vertex2.Y.ToFloat();
+
+                // Cheap rejection before the real test.
+                if (Math.Max(x1, x2) < minX || Math.Min(x1, x2) > maxX ||
+                    Math.Max(y1, y2) < minY || Math.Min(y1, y2) > maxY)
+                {
+                    continue;
+                }
+
+                if (SegmentsCross(ax, ay, bx, by, x1, y1, x2, y2))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Proper crossing test. Touching an endpoint does not count, so a path
+        /// that grazes the corner of a wall is not rejected.
+        /// </summary>
+        private static bool SegmentsCross(
+            float ax, float ay, float bx, float by,
+            float cx, float cy, float dx, float dy)
+        {
+            var d1 = Side(cx, cy, dx, dy, ax, ay);
+            var d2 = Side(cx, cy, dx, dy, bx, by);
+            var d3 = Side(ax, ay, bx, by, cx, cy);
+            var d4 = Side(ax, ay, bx, by, dx, dy);
+
+            return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) &&
+                   ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
+        }
+
+        /// <summary>Which side of the line A→B the point P is on.</summary>
+        private static float Side(float ax, float ay, float bx, float by, float px, float py)
+        {
+            return (bx - ax) * (py - ay) - (by - ay) * (px - ax);
         }
 
         /// <summary>
@@ -424,6 +621,11 @@ namespace DPTDOOM
             var bx = nodeX[b];
             var by = nodeY[b];
             var sector = nodeSector[a];
+
+            if (CrossesSolidLine(ax, ay, bx, by))
+            {
+                return false;
+            }
 
             var dx = bx - ax;
             var dy = by - ay;
@@ -519,6 +721,106 @@ namespace DPTDOOM
         ////////////////////////////////////////////////////////////
         // Queries
         ////////////////////////////////////////////////////////////
+
+        /// <summary>
+        /// True when a body can walk straight from one position to another
+        /// without leaving the given sector.
+        ///
+        /// This is what the bot asks before trusting its next waypoint. A
+        /// waypoint can be perfectly reachable in the graph and still be hidden
+        /// behind the corner of a concave sector, and a bot that walks at it
+        /// anyway grinds along the wall and never arrives.
+        /// </summary>
+        public bool LineClear(float ax, float ay, float bx, float by, int sector)
+        {
+            var dx = bx - ax;
+            var dy = by - ay;
+            var length = (float)Math.Sqrt(dx * dx + dy * dy);
+
+            if (length < 1F)
+            {
+                return true;
+            }
+
+            if (CrossesSolidLine(ax, ay, bx, by))
+            {
+                return false;
+            }
+
+            var steps = (int)(length / VisibilityStep);
+            if (steps < 1)
+            {
+                steps = 1;
+            }
+
+            // The band is what makes a check honest for a 32-unit-wide body, but
+            // it has to shrink for short moves: a bot standing 16 units from a
+            // wall (which is normal, the body is that wide) would fail every
+            // check in every direction if the full band were always applied, and
+            // then no way out of the corner would ever be found.
+            var band = Math.Min(16F, length * 0.25F);
+
+            var nx = -dy / length * band;
+            var ny = dx / length * band;
+
+            for (var i = 1; i < steps; i++)
+            {
+                var t = (float)i / steps;
+                var px = ax + dx * t;
+                var py = ay + dy * t;
+
+                if (!InsideSector(px, py, sector))
+                {
+                    return false;
+                }
+
+                if (band > 0.5F &&
+                    (!InsideSector(px + nx, py + ny, sector) ||
+                     !InsideSector(px - nx, py - ny, sector)))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Node of a sector that is visible from a position and closest to a
+        /// goal, used as a stepping stone around a corner.
+        /// </summary>
+        public int VisibleNodeTowards(int sector, float fromX, float fromY, float goalX, float goalY)
+        {
+            var best = -1;
+            var bestDistance = float.MaxValue;
+
+            for (var i = 0; i < nodeCount; i++)
+            {
+                if (nodeSector[i] != sector)
+                {
+                    continue;
+                }
+
+                var dx = nodeX[i] - goalX;
+                var dy = nodeY[i] - goalY;
+                var distance = dx * dx + dy * dy;
+
+                if (distance >= bestDistance)
+                {
+                    continue;
+                }
+
+                if (!LineClear(fromX, fromY, nodeX[i], nodeY[i], sector))
+                {
+                    continue;
+                }
+
+                bestDistance = distance;
+                best = i;
+            }
+
+            return best;
+        }
 
         /// <summary>Closest node to a world position, or -1.</summary>
         public int NodeAt(Fixed x, Fixed y)

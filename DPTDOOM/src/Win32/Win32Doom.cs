@@ -347,6 +347,13 @@ namespace DPTDOOM.Win32
                         " ms   present " + video.LastPresentMs.ToString("0.0") + " ms";
             }
 
+            var bots = doom.BotReport;
+
+            if (bots != null)
+            {
+                text += "\n" + bots;
+            }
+
             return text;
         }
 

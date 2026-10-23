@@ -76,6 +76,10 @@ namespace DPTDOOM
         private int coopBotCount;
         private World botWorld;
 
+        // What the bots have learned about this map, shared by all of them.
+        private BotBrain botBrain;
+        private string botBrainKey;
+
         public Doom(CommandLineArgs args, Config config, GameContent content, IVideo video, ISound sound, IMusic music, IUserInput userInput)
             : this(args, config, content, video, sound, music, userInput, null)
         {
@@ -171,6 +175,197 @@ namespace DPTDOOM
             mouseGrabbed = false;
 
             CheckGameArgs();
+        }
+
+        /// <summary>
+        /// One line per bot for the on-screen overlay, or null when no bots are
+        /// playing. Kept short: the overlay sits over the game.
+        /// </summary>
+        public string BotReport
+        {
+            get
+            {
+                if (coopBots == null && bot == null)
+                {
+                    return null;
+                }
+
+                var text = "";
+
+                if (coopBots != null)
+                {
+                    for (var i = 1; i < coopBots.Length; i++)
+                    {
+                        var runner = coopBots[i];
+
+                        if (runner == null)
+                        {
+                            continue;
+                        }
+
+                        if (text.Length > 0)
+                        {
+                            text += "\n";
+                        }
+
+                        text += "Бот " + i + ": " + runner.Style +
+                                "  " + runner.VisitedSectors + "/" + runner.TotalSectors;
+                    }
+                }
+
+                if (bot != null)
+                {
+                    if (text.Length > 0)
+                    {
+                        text += "\n";
+                    }
+
+                    text += "Бот (игрок): " + bot.Style +
+                            "  " + bot.VisitedSectors + "/" + bot.TotalSectors;
+                }
+
+                if (botBrain != null)
+                {
+                    text += "\nЛучшее время: " + botBrain.Describe();
+                }
+
+                return text;
+            }
+        }
+
+        ////////////////////////////////////////////////////////////
+        // Bot brain
+        ////////////////////////////////////////////////////////////
+
+        /// <summary>
+        /// Knowledge of the current map, shared by every bot in the game.
+        /// </summary>
+        private BotBrain GetBotBrain()
+        {
+            var key = CurrentMapKey();
+
+            if (botBrain != null && botBrainKey == key)
+            {
+                return botBrain;
+            }
+
+            botBrainKey = key;
+
+            if (recordPath != null || netDriver != null)
+            {
+                // A demo has to replay the same commands every time, and a brain
+                // that learns between runs would make the recording depend on
+                // the state of a text file. A network game needs the same
+                // commands on every machine, which a local brain cannot promise.
+                botBrain = BotBrain.Disabled;
+                return botBrain;
+            }
+
+            var folder = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "bots");
+
+            botBrain = new BotBrain(folder, key);
+
+            return botBrain;
+        }
+
+        private BotStyle ChooseBotStyle(int index)
+        {
+            return GetBotBrain().ChooseStyle(index * 7919 + 1);
+        }
+
+        /// <summary>
+        /// Key that identifies a level: its name plus a fingerprint of its
+        /// geometry, so a PWAD that also calls its level MAP01 does not inherit
+        /// a brain trained on a different map with that name.
+        /// </summary>
+        private string CurrentMapKey()
+        {
+            var name = options.GameMode == GameMode.Commercial
+                ? "MAP" + options.Map.ToString("00")
+                : "E" + options.Episode + "M" + options.Map;
+
+            var map = game.World != null ? game.World.Map : null;
+
+            if (map == null)
+            {
+                return name;
+            }
+
+            long fingerprint = map.Sectors.Length * 1000003L +
+                               map.Lines.Length * 31L +
+                               map.Vertices.Length;
+
+            if (map.Vertices.Length > 0)
+            {
+                fingerprint = fingerprint * 31 + map.Vertices[0].X.Data;
+                fingerprint = fingerprint * 31 + map.Vertices[map.Vertices.Length - 1].Y.Data;
+            }
+
+            return name + "-" + (fingerprint & 0xFFFFFF).ToString("x6");
+        }
+
+        /// <summary>
+        /// Hands the finished run of every bot to the brain.
+        ///
+        /// Only a run the bot finished itself counts as a completion. If the
+        /// human player left the level first, the level ends under the bot's
+        /// feet and its time says nothing about how well it played — scoring
+        /// that would teach the brain a false lesson.
+        /// </summary>
+        private void RecordBotRuns()
+        {
+            var brain = GetBotBrain();
+
+            if (!brain.Enabled)
+            {
+                return;
+            }
+
+            if (coopBots != null)
+            {
+                for (var i = 1; i < coopBots.Length; i++)
+                {
+                    RecordBotRun(brain, coopBots[i]);
+                }
+            }
+
+            if (bot != null)
+            {
+                RecordBotRun(brain, bot);
+            }
+        }
+
+        private static void RecordBotRun(BotBrain brain, DoomBot runner)
+        {
+            if (runner == null)
+            {
+                return;
+            }
+
+            var finished = runner.Finished;
+            var tics = finished ? runner.FinishedTics : 0;
+
+            if (!finished && runner.Health > 0)
+            {
+                // The level ended under the bot's feet: somebody else — the
+                // human player — reached the exit first. The bot was alive and
+                // still playing, so its run says nothing about how good its
+                // style is. Scoring it would teach the brain a false lesson,
+                // which is exactly what the owner asked to avoid.
+                Console.WriteLine(
+                    "Bot: " + runner.Style + " run not counted (level ended by another player)");
+
+                return;
+            }
+
+            brain.RecordRun(
+                runner.Style, tics, finished,
+                runner.RouteToExit, runner.RouteToExitLength);
+
+            Console.WriteLine(
+                "Bot: " + runner.Style + " " +
+                (finished ? "reached the exit in " + BotBrain.FormatTime(tics) : "died") +
+                " | best " + brain.Describe());
         }
 
         private void CheckGameArgs()
@@ -487,7 +682,7 @@ namespace DPTDOOM
                     if (currentState == DoomState.Game && botMode && game.World != null)
                     {
                         // A new level invalidates the bot's map knowledge.
-                        bot = new DoomBot(game.World, game.World.ConsolePlayer);
+                        bot = new DoomBot(game.World, game.World.ConsolePlayer, null, GetBotBrain(), ChooseBotStyle(0));
                     }
                 }
 
@@ -511,6 +706,11 @@ namespace DPTDOOM
                         // depends only on the map.
                         var nav = new NavGraph(game.World.Map);
 
+                        // One brain too. What one bot learns about the map, the
+                        // others know, which is what makes a second attempt on
+                        // the same level faster than the first.
+                        var brain = GetBotBrain();
+
                         coopBots = new DoomBot[Player.MaxPlayerCount];
 
                         for (var i = 1; i <= coopBotCount; i++)
@@ -518,11 +718,15 @@ namespace DPTDOOM
                             var player = options.Players[i];
                             if (player.InGame)
                             {
-                                coopBots[i] = new DoomBot(game.World, player, nav);
+                                // Different seeds, so the bots do not all pick
+                                // the same style and the run tests more than one
+                                // idea at a time.
+                                coopBots[i] = new DoomBot(
+                                    game.World, player, nav, brain, ChooseBotStyle(i));
                             }
                         }
 
-                        Console.WriteLine("Co-op bots: " + coopBotCount + " joined.");
+                        Console.WriteLine("Co-op bots: " + coopBotCount + " joined. Brain: " + brain.Describe());
                     }
                 }
 
@@ -633,6 +837,10 @@ namespace DPTDOOM
 
                         if (gameResult == UpdateResult.NeedWipe)
                         {
+                            // The level is over. Let the bots learn from it
+                            // before the world is thrown away.
+                            RecordBotRuns();
+
                             // A demo covers one level; the next one starts a new
                             // recording rather than concatenating levels.
                             StopRecording();
