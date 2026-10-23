@@ -50,6 +50,10 @@ namespace DPTDOOM
                     return 0;
                 }
 
+                DebugSettings.Wireframe = cmd.wireframe.Present;
+                DebugSettings.FreezeMonsters = cmd.freeze.Present;
+                DebugSettings.MapOnly = cmd.maponly.Present;
+
                 if (cmd.headless.Present)
                 {
                     if (cmd.soundtest.Present)

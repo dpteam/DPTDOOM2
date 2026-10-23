@@ -53,6 +53,17 @@ namespace DPTDOOM.Win32
         DebugGod,
         DebugNoClip,
         DebugGiveAll,
+        DebugWireframe,
+        DebugMapOnly,
+        DebugFreeze,
+        DebugSlowMotion,
+        DebugKillAll,
+        DebugRevealMap,
+        DebugWarpNext,
+        DebugWarpPrev,
+        DebugSpawnHealth,
+        DebugSpawnArmor,
+        DebugSpawnAmmo,
 
         HelpControls = 1401,
         HelpAbout,
@@ -176,9 +187,27 @@ namespace DPTDOOM.Win32
             Item(popup, MenuCommand.DebugDumpState, "Сбросить состояние мира в лог");
             Item(popup, MenuCommand.DebugSoundTest, "Отрендерить звуки в WAV");
             Separator(popup);
+
+            Item(popup, MenuCommand.DebugWireframe, "Каркас геометрии");
+            Item(popup, MenuCommand.DebugMapOnly, "Только карта");
+            Item(popup, MenuCommand.DebugFreeze, "Заморозить монстров");
+            Item(popup, MenuCommand.DebugSlowMotion, "Замедление x1");
+            Separator(popup);
+
             Item(popup, MenuCommand.DebugGod, "Бог");
             Item(popup, MenuCommand.DebugNoClip, "Сквозь стены");
             Item(popup, MenuCommand.DebugGiveAll, "Всё оружие и патроны");
+            Item(popup, MenuCommand.DebugKillAll, "Убить всех монстров");
+            Item(popup, MenuCommand.DebugRevealMap, "Открыть карту");
+            Separator(popup);
+
+            Item(popup, MenuCommand.DebugSpawnHealth, "Бросить аптечку");
+            Item(popup, MenuCommand.DebugSpawnArmor, "Бросить броню");
+            Item(popup, MenuCommand.DebugSpawnAmmo, "Бросить патроны");
+            Separator(popup);
+
+            Item(popup, MenuCommand.DebugWarpNext, "Следующая карта");
+            Item(popup, MenuCommand.DebugWarpPrev, "Предыдущая карта");
         }
 
         private void BuildHelp()
@@ -265,6 +294,26 @@ namespace DPTDOOM.Win32
                 (int)last,
                 (int)selected,
                 NativeMethods.MF_BYCOMMAND);
+        }
+
+        /// <summary>Changes the text of an existing item, keeping its id.</summary>
+        public void SetLabel(MenuCommand command, string text)
+        {
+            List<IntPtr> popups;
+            if (!owners.TryGetValue((int)command, out popups))
+            {
+                return;
+            }
+
+            foreach (var popup in popups)
+            {
+                NativeMethods.ModifyMenu(
+                    popup,
+                    (uint)command,
+                    NativeMethods.MF_BYCOMMAND | NativeMethods.MF_STRING,
+                    new IntPtr((int)command),
+                    text);
+            }
         }
 
         public void SetEnabled(MenuCommand command, bool value)

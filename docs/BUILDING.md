@@ -62,6 +62,8 @@ dotnet build DPTDOOM\DPTDOOM.csproj -f net40 -c Release
 | `-soundtest <file.wav>` | отрендерить звуки в WAV (нужен `-headless`) |
 | `-sfx <NAME,...>` | какие звуки рендерить (`PISTOL,SHOTGN`); по умолчанию набор |
 | `-fpslog <file.tsv>` | лог тайминга каждого кадра |
+| `-bots` | вместо клавиатуры играет бот |
+| `-wireframe`, `-freeze`, `-maponly` | отладочные режимы (в т.ч. headless) |
 | `-net host\|join` | сетевая сессия |
 | `-players <2..4>` | размер сессии (хост) |
 | `-port <n>` | TCP-порт сессии |
@@ -216,6 +218,23 @@ Windows 3.x, и оно удобно, когда игра ждёт напарни
 Меню и трей проверяются `tools/test-menu.ps1`: он шлёт те же `WM_COMMAND`, что
 и клик, и проверяет, что состояние действительно изменилось (размер окна,
 полный экран, скрытие в трей), а не только что пункт существует.
+
+## Упаковка
+
+Каждый крупный апдейт пакуется в готовый ZIP:
+
+```powershell
+powershell -NoProfile -File tools\package-build.ps1 -Version 0.2.0
+# -> artifacts/dptdoom-windows-x64-0.2.0.zip
+```
+
+Внутри: `dptdoom.exe`, `dptdoom-master.exe`, `dptdoom-launcher.exe`,
+`DPTDOOM.Shared.dll`, лицензия, `READ-ME-FIRST.txt` и `source.zip` — исходники
+того же коммита (GPL). IWAD, конфиги, сохранения и логи в пакет не попадают;
+упаковщик явно отказывается их класть.
+
+CI собирает такой же архив в артефактах на каждый пуш
+(`dptdoom-windows-<commit>`).
 
 ## Ограничения
 

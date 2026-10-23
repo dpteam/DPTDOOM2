@@ -962,8 +962,6 @@ namespace DPTDOOM.Win32
                     ClearInput();
                     ReleaseMouse();
                     break;
-
-                    break;
             }
             return NativeMethods.DefWindowProc(hWnd, msg, wParam, lParam);
         }

@@ -733,6 +733,13 @@ namespace DPTDOOM.Video
             ClearRenderingHistory();
             ClearSpriteRendering();
 
+            if (DebugSettings.Wireframe)
+            {
+                // Black background so the outlines read as a mesh. Without this
+                // the previous frame shows through the gaps between walls.
+                Array.Clear(screenData, 0, screenData.Length);
+            }
+
             RenderBspNode(world.Map.Nodes.Length - 1);
             RenderSprites();
             RenderMaskedTextures();
@@ -2013,6 +2020,13 @@ namespace DPTDOOM.Video
             int y2,
             Fixed ceilingHeight)
         {
+            if (DebugSettings.Wireframe)
+            {
+                // No fill in wireframe mode: the wall outlines alone read as a
+                // mesh, and skipping the fill is what makes it legible.
+                return;
+            }
+
             if (flat == flats.SkyFlat)
             {
                 DrawSkyColumn(x, y1, y2);
@@ -2129,6 +2143,13 @@ namespace DPTDOOM.Video
             int y2,
             Fixed floorHeight)
         {
+            if (DebugSettings.Wireframe)
+            {
+                // No fill in wireframe mode: the wall outlines alone read as a
+                // mesh, and skipping the fill is what makes it legible.
+                return;
+            }
+
             if (flat == flats.SkyFlat)
             {
                 DrawSkyColumn(x, y1, y2);
@@ -2249,6 +2270,19 @@ namespace DPTDOOM.Video
         {
             if (y2 - y1 < 0)
             {
+                return;
+            }
+
+            if (DebugSettings.Wireframe)
+            {
+                // Only the top and bottom of the column: the wall outline.
+                var top = screenHeight * (windowX + x) + windowY + y1;
+                var bottom = top + (y2 - y1);
+                var shade = map[column.Data[column.Offset]];
+
+                screenData[top] = shade;
+                screenData[bottom] = shade;
+
                 return;
             }
 

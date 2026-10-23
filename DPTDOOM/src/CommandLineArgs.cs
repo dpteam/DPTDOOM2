@@ -67,6 +67,10 @@ namespace DPTDOOM
         public readonly Arg<string> sfx;
         public readonly Arg<string> fpslog;
         public readonly Arg<string> record;
+        public readonly Arg wireframe;
+        public readonly Arg freeze;
+        public readonly Arg maponly;
+        public readonly Arg bots;
 
         public CommandLineArgs(string[] args)
         {
@@ -113,6 +117,10 @@ namespace DPTDOOM
             sfx = GetString(args, "-sfx");
             fpslog = GetString(args, "-fpslog");
             record = GetString(args, "-record");
+            wireframe = new Arg(args.Contains("-wireframe"));
+            freeze = new Arg(args.Contains("-freeze"));
+            maponly = new Arg(args.Contains("-maponly"));
+            bots = new Arg(args.Contains("-bots"));
 
             // Check for drag & drop.
             if (args.Length > 0 && args.All(arg => arg.FirstOrDefault() != '-'))

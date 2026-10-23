@@ -67,6 +67,9 @@ namespace DPTDOOM
         private DemoRecorder recorder;
         private string recordPath;
 
+        private DoomBot bot;
+        private bool botMode;
+
         public Doom(CommandLineArgs args, Config config, GameContent content, IVideo video, ISound sound, IMusic music, IUserInput userInput)
             : this(args, config, content, video, sound, music, userInput, null)
         {
@@ -95,6 +98,8 @@ namespace DPTDOOM
             this.music = music;
             this.userInput = userInput;
             this.netDriver = netDriver;
+
+            botMode = args.bots.Present;
 
             if (args.record.Present)
             {
@@ -426,6 +431,12 @@ namespace DPTDOOM
                         // line or from a loaded save).
                         recorder = new DemoRecorder(options);
                     }
+
+                    if (currentState == DoomState.Game && botMode && game.World != null)
+                    {
+                        // A new level invalidates the bot's map knowledge.
+                        bot = new DoomBot(game.World, game.World.ConsolePlayer);
+                    }
                 }
 
                 if (quit)
@@ -496,7 +507,14 @@ namespace DPTDOOM
                             break;
                         }
 
-                        userInput.BuildTicCmd(cmds[options.ConsolePlayer]);
+                        if (bot != null)
+                        {
+                            bot.BuildTicCmd(cmds[options.ConsolePlayer]);
+                        }
+                        else
+                        {
+                            userInput.BuildTicCmd(cmds[options.ConsolePlayer]);
+                        }
                         if (sendPause)
                         {
                             sendPause = false;

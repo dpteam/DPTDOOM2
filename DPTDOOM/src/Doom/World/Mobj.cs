@@ -177,6 +177,13 @@ namespace DPTDOOM
 
         public override void Run()
         {
+            // Debug freeze: killable monsters stop thinking, which makes it
+            // possible to inspect a level or line up a shot without interference.
+            if (DebugSettings.FreezeMonsters && (flags & MobjFlags.CountKill) != 0)
+            {
+                return;
+            }
+
             // Momentum movement.
             if (momX != Fixed.Zero || momY != Fixed.Zero ||
                 (flags & MobjFlags.SkullFly) != 0)

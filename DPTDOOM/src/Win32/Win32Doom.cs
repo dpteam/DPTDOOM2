@@ -41,6 +41,7 @@ namespace DPTDOOM.Win32
         private readonly Doom doom;
 
         private FrameClock clock;
+        private int slowCounter;
 
         private bool disposed;
 
@@ -249,6 +250,61 @@ namespace DPTDOOM.Win32
                     GiveAll();
                     break;
 
+                case MenuCommand.DebugWireframe:
+                    DebugSettings.Wireframe = !DebugSettings.Wireframe;
+                    break;
+
+                case MenuCommand.DebugMapOnly:
+                    DebugSettings.MapOnly = !DebugSettings.MapOnly;
+                    ToggleMapOnly();
+                    break;
+
+                case MenuCommand.DebugFreeze:
+                    if (RequireSinglePlayer())
+                    {
+                        DebugSettings.FreezeMonsters = !DebugSettings.FreezeMonsters;
+                    }
+
+                    break;
+
+                case MenuCommand.DebugSlowMotion:
+                    if (RequireSinglePlayer())
+                    {
+                        // 1x -> 2x -> 4x -> 1x
+                        DebugSettings.SlowMotion = DebugSettings.SlowMotion == 1 ? 2
+                            : DebugSettings.SlowMotion == 2 ? 4 : 1;
+                    }
+
+                    break;
+
+                case MenuCommand.DebugKillAll:
+                    KillAllMonsters();
+                    break;
+
+                case MenuCommand.DebugRevealMap:
+                    doom.Game.World.AutoMap.ToggleCheat();
+                    break;
+
+                case MenuCommand.DebugSpawnHealth:
+                    SpawnNearPlayer(2012); // medikit
+                    break;
+
+                case MenuCommand.DebugSpawnArmor:
+                    SpawnNearPlayer(2018); // green armor
+                    break;
+
+                case MenuCommand.DebugSpawnAmmo:
+                    SpawnNearPlayer(2007); // clip
+                    break;
+
+                case MenuCommand.DebugWarpNext:
+                    WarpRelative(1);
+                    break;
+
+                case MenuCommand.DebugWarpPrev:
+                    WarpRelative(-1);
+                    break;
+
                 case MenuCommand.HelpControls:
                     doom.PostEvent(new DoomEvent(EventType.KeyDown, DoomKey.F1));
                     break;
@@ -393,6 +449,122 @@ namespace DPTDOOM.Win32
             }
         }
 
+        /// <summary>
+        /// Simulation-changing toggles are refused outside a plain single-player
+        /// game: a demo or a network session that froze its monsters would be
+        /// broken in a way that is hard to explain later.
+        /// </summary>
+        private bool RequireSinglePlayer()
+        {
+            if (DebugSettings.SimulationChangesAllowed(doom))
+            {
+                return true;
+            }
+
+            Console.WriteLine("Debug: this toggle only works in single player.");
+            return false;
+        }
+
+        private void ToggleMapOnly()
+        {
+            var world = doom.Game != null ? doom.Game.World : null;
+            if (world == null)
+            {
+                return;
+            }
+
+            if (DebugSettings.MapOnly)
+            {
+                world.AutoMap.Open();
+            }
+            else
+            {
+                world.AutoMap.Close();
+            }
+        }
+
+        private void KillAllMonsters()
+        {
+            var world = doom.Game != null ? doom.Game.World : null;
+            if (world == null)
+            {
+                return;
+            }
+
+            // Collected first: damaging an object can spawn replacements or
+            // remove it from the thinker list while it is being walked.
+            var victims = new System.Collections.Generic.List<Mobj>();
+
+            foreach (var thinker in world.Thinkers)
+            {
+                var mobj = thinker as Mobj;
+                if (mobj != null &&
+                    (mobj.Flags & MobjFlags.CountKill) != 0 &&
+                    mobj.Health > 0)
+                {
+                    victims.Add(mobj);
+                }
+            }
+
+            foreach (var victim in victims)
+            {
+                world.ThingInteraction.DamageMobj(victim, null, null, 10000);
+            }
+
+            Console.WriteLine("Debug: killed " + victims.Count + " monsters.");
+        }
+
+        /// <summary>
+        /// Spawns a thing by its map editor number, the way a level does, so the
+        /// menu does not need to know the internal enum names.
+        /// </summary>
+        private void SpawnNearPlayer(int doomEdNum)
+        {
+            var player = ConsolePlayer();
+            if (player == null || player.Mobj == null)
+            {
+                return;
+            }
+
+            var type = MobjType.Player;
+            var found = false;
+
+            for (var i = 0; i < DoomInfo.MobjInfos.Length; i++)
+            {
+                if (DoomInfo.MobjInfos[i].DoomEdNum == doomEdNum)
+                {
+                    type = (MobjType)i;
+                    found = true;
+                    break;
+                }
+            }
+
+            if (!found)
+            {
+                return;
+            }
+
+            var mobj = player.Mobj;
+            doom.Game.World.ThingAllocation.SpawnMobj(mobj.X, mobj.Y, mobj.Z, type);
+        }
+
+        private void WarpRelative(int delta)
+        {
+            var limit = doom.Options.GameMode == GameMode.Commercial ? 32 : 9;
+            var map = doom.Options.Map + delta;
+
+            if (map > limit)
+            {
+                map = 1;
+            }
+            else if (map < 1)
+            {
+                map = limit;
+            }
+
+            doom.NewGame(doom.Options.Skill, doom.Options.Episode, map);
+        }
+
         private Player ConsolePlayer()
         {
             var game = doom.Game;
@@ -438,6 +610,13 @@ namespace DPTDOOM.Win32
                 player != null && (player.Cheats & CheatFlags.NoClip) != 0);
             menu.SetChecked(MenuCommand.AudioMuteSfx, sound != null && sound.Volume == 0);
             menu.SetChecked(MenuCommand.AudioMuteMusic, music != null && music.Volume == 0);
+
+            menu.SetChecked(MenuCommand.DebugWireframe, DebugSettings.Wireframe);
+            menu.SetChecked(MenuCommand.DebugMapOnly, DebugSettings.MapOnly);
+            menu.SetChecked(MenuCommand.DebugFreeze, DebugSettings.FreezeMonsters);
+
+            var slow = DebugSettings.SlowMotion > 1 ? "Замедление x" + DebugSettings.SlowMotion : "Замедление x1";
+            menu.SetLabel(MenuCommand.DebugSlowMotion, slow);
         }
 
         /// <summary>
@@ -532,9 +711,15 @@ namespace DPTDOOM.Win32
 
                         if (step.Update)
                         {
-                            if (doom.Update() == UpdateResult.Completed)
+                            // Slow motion skips simulation tics, which is only
+                            // meaningful in single player.
+                            if (DebugSettings.SlowMotion <= 1 ||
+                                (slowCounter++ % DebugSettings.SlowMotion) == 0)
                             {
-                                break;
+                                if (doom.Update() == UpdateResult.Completed)
+                                {
+                                    break;
+                                }
                             }
                         }
 
