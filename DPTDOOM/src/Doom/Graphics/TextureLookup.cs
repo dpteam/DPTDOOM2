@@ -29,6 +29,7 @@ namespace DPTDOOM
         private Dictionary<string, int> nameToNumber;
 
         private int[] switchList;
+        private int pk3Replaced;
 
         public TextureLookup(Wad wad) : this(wad, false)
         {
@@ -43,7 +44,8 @@ namespace DPTDOOM
                 InitLookup(wad);
                 InitSwitchList();
 
-                Console.WriteLine("OK (" + textures.Count + " textures)");
+                Console.WriteLine("OK (" + textures.Count + " textures" +
+                                  (pk3Replaced > 0 ? ", " + pk3Replaced + " from PK3" : "") + ")");
             }
             catch (Exception e)
             {
@@ -79,6 +81,85 @@ namespace DPTDOOM
                     nameToTexture.TryAdd(texture.Name, texture);
                 }
             }
+
+            AddPk3Textures(wad);
+        }
+
+        /// <summary>
+        /// Replaces wall textures with PNG files from a PK3.
+        ///
+        /// A texture is a composition of patches, and a PNG is a finished picture,
+        /// so a PNG-backed texture is a composition of exactly one patch covering
+        /// the whole area. That keeps every existing code path — the renderer, the
+        /// switch list, the animation table — working unchanged, because they all
+        /// deal with a Texture, not with where it came from.
+        ///
+        /// Only the simple form is supported: <c>textures/NAME.png</c> replaces the
+        /// texture called NAME. The ZDoom TEXTURES definition lump, which can
+        /// compose new textures out of pieces, is a separate language and is not
+        /// implemented.
+        /// </summary>
+        private void AddPk3Textures(Wad wad)
+        {
+            if (wad.Graphics == null || wad.Graphics.Count == 0)
+            {
+                return;
+            }
+
+            var playpal = wad.ReadLump("PLAYPAL");
+            var replaced = 0;
+
+            foreach (var graphic in wad.Graphics)
+            {
+                if (!Pk3Graphics.IsTexturePath(graphic.Path))
+                {
+                    continue;
+                }
+
+                var name = Pk3Graphics.LumpNameOf(graphic.Path);
+
+                if (name == null)
+                {
+                    continue;
+                }
+
+                Texture texture;
+
+                try
+                {
+                    var image = PngImage.Decode(graphic.Data);
+                    var patch = Pk3Graphics.ToPatch(image, playpal, name, false);
+
+                    texture = new Texture(
+                        name, true, image.Width, image.Height,
+                        new[] { new TexturePatch(0, 0, patch) });
+                }
+                catch (Exception e)
+                {
+                    // A broken PNG must not stop the game: the IWAD texture stays.
+                    Console.WriteLine();
+                    Console.WriteLine("  skipping " + graphic.Path + ": " + e.Message);
+                    continue;
+                }
+
+                int number;
+
+                if (nameToNumber.TryGetValue(name, out number))
+                {
+                    textures[number] = texture;
+                }
+                else
+                {
+                    number = textures.Count;
+                    textures.Add(texture);
+                    nameToNumber[name] = number;
+                }
+
+                nameToTexture[name] = texture;
+                replaced++;
+            }
+
+            pk3Replaced = replaced;
         }
 
         private void InitSwitchList()

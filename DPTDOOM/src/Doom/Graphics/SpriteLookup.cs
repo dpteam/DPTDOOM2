@@ -48,69 +48,17 @@ namespace DPTDOOM
                         continue;
                     }
 
-                    var list = temp[name];
+                    var index = lump;
 
-                    {
-                        var frame = wad.LumpInfos[lump].Name[4] - 'A';
-                        var rotation = wad.LumpInfos[lump].Name[5] - '0';
-
-                        while (list.Count < frame + 1)
-                        {
-                            list.Add(new SpriteInfo());
-                        }
-
-                        if (rotation == 0)
-                        {
-                            for (var i = 0; i < 8; i++)
-                            {
-                                if (list[frame].Patches[i] == null)
-                                {
-                                    list[frame].Patches[i] = CachedRead(lump, wad, cache);
-                                    list[frame].Flip[i] = false;
-                                }
-                            }
-                        }
-                        else
-                        {
-                            if (list[frame].Patches[rotation - 1] == null)
-                            {
-                                list[frame].Patches[rotation - 1] = CachedRead(lump, wad, cache);
-                                list[frame].Flip[rotation - 1] = false;
-                            }
-                        }
-                    }
-
-                    if (wad.LumpInfos[lump].Name.Length == 8)
-                    {
-                        var frame = wad.LumpInfos[lump].Name[6] - 'A';
-                        var rotation = wad.LumpInfos[lump].Name[7] - '0';
-
-                        while (list.Count < frame + 1)
-                        {
-                            list.Add(new SpriteInfo());
-                        }
-
-                        if (rotation == 0)
-                        {
-                            for (var i = 0; i < 8; i++)
-                            {
-                                if (list[frame].Patches[i] == null)
-                                {
-                                    list[frame].Patches[i] = CachedRead(lump, wad, cache);
-                                    list[frame].Flip[i] = true;
-                                }
-                            }
-                        }
-                        else
-                        {
-                            if (list[frame].Patches[rotation - 1] == null)
-                            {
-                                list[frame].Patches[rotation - 1] = CachedRead(lump, wad, cache);
-                                list[frame].Flip[rotation - 1] = true;
-                            }
-                        }
-                    }
+                    RegisterSprite(
+                        temp, wad.LumpInfos[lump].Name,
+                        () => CachedRead(index, wad, cache),
+                        false);
                 }
+
+                // Sprites from a PK3 come last, so they replace the IWAD's. That
+                // is the point of loading a mod.
+                var replaced = AddPk3Sprites(wad, temp);
 
                 spriteDefs = new SpriteDef[(int)Sprite.Count];
                 for (var i = 0; i < spriteDefs.Length; i++)
@@ -129,13 +77,149 @@ namespace DPTDOOM
                     spriteDefs[i] = new SpriteDef(frames);
                 }
 
-                Console.WriteLine("OK (" + cache.Count + " sprites)");
+                Console.WriteLine("OK (" + cache.Count + " sprites" +
+                                  (replaced > 0 ? ", " + replaced + " from PK3" : "") + ")");
             }
             catch (Exception e)
             {
                 Console.WriteLine("Failed");
                 ExceptionDispatchInfo.Throw(e);
             }
+        }
+
+        /// <summary>
+        /// Registers one sprite lump under its name.
+        ///
+        /// A lump name is four letters of sprite, a frame letter and a rotation
+        /// digit, optionally followed by a second frame and rotation for the
+        /// mirrored variant. Rotation 0 means "every rotation".
+        ///
+        /// Extracted from the loading loop so that a PNG from a PK3 goes through
+        /// exactly the same rules as a lump from a WAD. Duplicating those rules
+        /// would have been a reliable way to make the two behave differently.
+        /// </summary>
+        private static void RegisterSprite(
+            Dictionary<string, List<SpriteInfo>> temp,
+            string lumpName,
+            Func<Patch> read,
+            bool replaceExisting)
+        {
+            if (lumpName.Length < 6)
+            {
+                return;
+            }
+
+            var list = temp[lumpName.Substring(0, 4)];
+
+            RegisterFrame(list, lumpName[4], lumpName[5], false, read, replaceExisting);
+
+            if (lumpName.Length == 8)
+            {
+                // The second pair is the mirrored rotation, which Doom draws by
+                // flipping the picture horizontally.
+                RegisterFrame(list, lumpName[6], lumpName[7], true, read, replaceExisting);
+            }
+        }
+
+        private static void RegisterFrame(
+            List<SpriteInfo> list, char frameChar, char rotationChar, bool flip,
+            Func<Patch> read, bool replaceExisting)
+        {
+            var frame = frameChar - 'A';
+            var rotation = rotationChar - '0';
+
+            if (frame < 0 || frame > 28 || rotation < 0 || rotation > 8)
+            {
+                return;
+            }
+
+            while (list.Count < frame + 1)
+            {
+                list.Add(new SpriteInfo());
+            }
+
+            if (rotation == 0)
+            {
+                for (var i = 0; i < 8; i++)
+                {
+                    if (replaceExisting || list[frame].Patches[i] == null)
+                    {
+                        list[frame].Patches[i] = read();
+                        list[frame].Flip[i] = flip;
+                    }
+                }
+            }
+            else if (replaceExisting || list[frame].Patches[rotation - 1] == null)
+            {
+                list[frame].Patches[rotation - 1] = read();
+                list[frame].Flip[rotation - 1] = flip;
+            }
+        }
+
+        /// <summary>
+        /// Loads sprite pictures from a PK3.
+        ///
+        /// PK3 sprites are PNG files under <c>sprites/</c>, named either
+        /// <c>POSSA1.png</c> or <c>POSS A1.png</c>. They are decoded and converted
+        /// to patches with the anchor in the middle of the bottom edge, which is
+        /// how a sprite standing on the floor has to be positioned.
+        /// </summary>
+        private static int AddPk3Sprites(Wad wad, Dictionary<string, List<SpriteInfo>> temp)
+        {
+            if (wad.Graphics == null || wad.Graphics.Count == 0)
+            {
+                return 0;
+            }
+
+            var playpal = wad.ReadLump("PLAYPAL");
+            var replaced = 0;
+
+            foreach (var graphic in wad.Graphics)
+            {
+                var name = Pk3Graphics.ParseSpriteName(graphic.Path);
+
+                if (name == null || !temp.ContainsKey(name.Substring(0, 4)))
+                {
+                    continue;
+                }
+
+                var source = graphic;
+                Patch decoded = null;
+                var failed = false;
+
+                Func<Patch> read = () =>
+                {
+                    if (decoded != null || failed)
+                    {
+                        return decoded;
+                    }
+
+                    try
+                    {
+                        var image = PngImage.Decode(source.Data);
+                        decoded = Pk3Graphics.ToPatch(image, playpal, name, true);
+                    }
+                    catch (Exception e)
+                    {
+                        // A broken PNG must not stop the game: the IWAD sprite
+                        // stays in place.
+                        Console.WriteLine();
+                        Console.WriteLine("  skipping " + source.Path + ": " + e.Message);
+                        failed = true;
+                    }
+
+                    return decoded;
+                };
+
+                RegisterSprite(temp, name, read, true);
+
+                if (decoded != null)
+                {
+                    replaced++;
+                }
+            }
+
+            return replaced;
         }
 
         private static IEnumerable<int> EnumerateSprites(Wad wad)

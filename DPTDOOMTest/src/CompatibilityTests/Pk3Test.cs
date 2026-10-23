@@ -277,6 +277,178 @@ namespace DPTDOOMTest.CompatibilityTests
         }
 
         [TestMethod]
+        public void Pk3TextureReplacesTheIwadTexture()
+        {
+            if (!File.Exists(WadPath.Doom2))
+            {
+                Assert.Inconclusive("doom2.wad not available.");
+            }
+
+            var path = Path.Combine(folder, "textures.pk3");
+
+            // STARTAN2 is the standard Doom 2 wall texture.
+            using (var archive = ZipFile.Open(path, ZipArchiveMode.Create))
+            {
+                var entry = archive.CreateEntry("textures/STARTAN2.png", CompressionLevel.Optimal);
+
+                using (var stream = entry.Open())
+                {
+                    var png = PngBuilder.SolidRgb(64, 128, 255, 0, 255);
+                    stream.Write(png, 0, png.Length);
+                }
+            }
+
+            using (var wad = new Wad(WadPath.Doom2, path))
+            {
+                var original = new TextureLookup(new Wad(WadPath.Doom2));
+                var patched = new TextureLookup(wad);
+
+                var before = original["STARTAN2"];
+                var after = patched["STARTAN2"];
+
+                Assert.AreEqual(64, after.Width, "the PK3 texture defines its own width");
+                Assert.AreEqual(128, after.Height, "the PK3 texture defines its own height");
+
+                Assert.IsTrue(
+                    before.Width != after.Width || before.Height != after.Height ||
+                    !SamePixels(before, after),
+                    "the PK3 texture must replace the IWAD's texture of the same name");
+
+                // Every pixel came from one solid colour, so every column must be
+                // one post covering the whole height.
+                var column = after.Composite.Columns[0];
+
+                Assert.AreEqual(1, column.Length, "a solid texture is one post per column");
+                Assert.AreEqual(128, column[0].Length);
+            }
+        }
+
+        private static bool SamePixels(Texture a, Texture b)
+        {
+            if (a.Width != b.Width || a.Height != b.Height)
+            {
+                return false;
+            }
+
+            for (var x = 0; x < a.Width; x++)
+            {
+                var ca = a.Composite.Columns[x];
+                var cb = b.Composite.Columns[x];
+
+                if (ca.Length != cb.Length)
+                {
+                    return false;
+                }
+
+                for (var i = 0; i < ca.Length; i++)
+                {
+                    if (ca[i].TopDelta != cb[i].TopDelta || ca[i].Length != cb[i].Length)
+                    {
+                        return false;
+                    }
+
+                    for (var k = 0; k < ca[i].Length; k++)
+                    {
+                        if (ca[i].Data[ca[i].Offset + k] != cb[i].Data[cb[i].Offset + k])
+                        {
+                            return false;
+                        }
+                    }
+                }
+            }
+
+            return true;
+        }
+
+        [TestMethod]
+        public void Pk3SpriteReplacesTheIwadSprite()
+        {
+            if (!File.Exists(WadPath.Doom2))
+            {
+                Assert.Inconclusive("doom2.wad not available.");
+            }
+
+            var path = Path.Combine(folder, "sprites.pk3");
+
+            // POSSA1 is the zombie's first walking frame.
+            using (var archive = ZipFile.Open(path, ZipArchiveMode.Create))
+            {
+                var entry = archive.CreateEntry("sprites/POSSA1.png", CompressionLevel.Optimal);
+
+                using (var stream = entry.Open())
+                {
+                    var png = PngBuilder.SolidRgb(40, 56, 255, 0, 255);
+                    stream.Write(png, 0, png.Length);
+                }
+            }
+
+            using (var wad = new Wad(WadPath.Doom2, path))
+            {
+                var patched = new SpriteLookup(wad);
+
+                var def = patched[Sprite.POSS];
+                var frame = def.Frames[0];
+                var patch = frame.Patches[0];
+
+                Assert.IsNotNull(patch, "the PK3 sprite must be registered");
+
+                Assert.AreEqual(40, patch.Width, "the PK3 sprite defines its own width");
+                Assert.AreEqual(56, patch.Height, "the PK3 sprite defines its own height");
+
+                // Sprites are anchored in the middle of the bottom edge, so they
+                // stand on the floor.
+                Assert.AreEqual(20, patch.LeftOffset, "sprite anchor is the middle");
+                Assert.AreEqual(56, patch.TopOffset, "sprite anchor is the bottom");
+            }
+        }
+
+        [TestMethod]
+        public void PngWithTransparencyBecomesPosts()
+        {
+            // A 2x8 image: transparent top, opaque middle, transparent bottom.
+            // The patch must come out as a single post starting at row 3.
+            var playpal = new byte[256 * 3];
+            playpal[3] = 255; playpal[4] = 255; playpal[5] = 255;
+
+            var raw = new byte[2 * 8 * 4];
+
+            for (var y = 0; y < 8; y++)
+            {
+                for (var x = 0; x < 2; x++)
+                {
+                    var offset = (y * 2 + x) * 4;
+                    var opaque = y >= 3 && y <= 5;
+
+                    raw[offset] = 255;
+                    raw[offset + 1] = 255;
+                    raw[offset + 2] = 255;
+                    raw[offset + 3] = (byte)(opaque ? 255 : 0);
+                }
+            }
+
+            var png = PngBuilder.Build(2, 8, 6, 8, raw, 0, null);
+            var patch = Pk3Graphics.ToPatch(PngImage.Decode(png), playpal, "TEST", true);
+
+            Assert.AreEqual(1, patch.Columns[0].Length, "one opaque run means one post");
+            Assert.AreEqual(3, patch.Columns[0][0].TopDelta, "the post starts at row 3");
+            Assert.AreEqual(3, patch.Columns[0][0].Length, "the post is three rows tall");
+        }
+
+        [TestMethod]
+        public void SpriteNamesAreParsedInBothConventions()
+        {
+            Assert.AreEqual("POSSA1", Pk3Graphics.ParseSpriteName("sprites/POSSA1.png"));
+            Assert.AreEqual("POSSA1", Pk3Graphics.ParseSpriteName("sprites/POSS A1.png"));
+            Assert.AreEqual("POSSA1", Pk3Graphics.ParseSpriteName("sprites/poss a1.png"));
+
+            // Malformed names are refused rather than registered as garbage.
+            Assert.IsNull(Pk3Graphics.ParseSpriteName("sprites/TOOLONGNAME1.png"));
+            Assert.IsNull(Pk3Graphics.ParseSpriteName("sprites/POSSA.png"));
+            Assert.IsNull(Pk3Graphics.ParseSpriteName("textures/POSSA1.png"));
+            Assert.IsNull(Pk3Graphics.ParseSpriteName("sprites/1234A1.png"));
+        }
+
+        [TestMethod]
         public void GameModeIsDetectedFromMapsNotFromTheFileName()
         {
             // A container has no useful name: "my-stuff.pk3" says nothing. The

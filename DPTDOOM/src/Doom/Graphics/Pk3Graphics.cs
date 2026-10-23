@@ -116,6 +116,126 @@ namespace DPTDOOM
         }
 
         /// <summary>
+        /// Converts an image to a Doom patch: the column-and-post format the
+        /// renderer draws from.
+        ///
+        /// This is the format sprites and wall textures use. A patch is a set of
+        /// columns, each column a list of opaque runs ("posts"); the gaps between
+        /// posts are the transparent parts. So transparency is not a colour, it is
+        /// an absence — which is why a PNG cannot simply be dropped in as a patch
+        /// and why this conversion exists.
+        ///
+        /// <paramref name="spriteOffsets"/> puts the anchor point in the middle of
+        /// the bottom edge, which is how a sprite standing on the floor has to be
+        /// positioned. Textures pass false: their anchor is the top-left corner.
+        /// </summary>
+        public static Patch ToPatch(PngImage image, byte[] playpal, string name, bool spriteOffsets)
+        {
+            if (image == null)
+            {
+                throw new ArgumentNullException("image");
+            }
+
+            if (playpal == null || playpal.Length < 256 * 3)
+            {
+                throw new Exception("PLAYPAL is too short to convert an image.");
+            }
+
+            var cache = new Dictionary<int, byte>();
+            var columns = new Column[image.Width][];
+
+            for (var x = 0; x < image.Width; x++)
+            {
+                var posts = new List<Column>();
+                var y = 0;
+
+                while (y < image.Height)
+                {
+                    // Skip transparent pixels.
+                    while (y < image.Height && image.Rgba[(y * image.Width + x) * 4 + 3] < 128)
+                    {
+                        y++;
+                    }
+
+                    if (y >= image.Height)
+                    {
+                        break;
+                    }
+
+                    var top = y;
+
+                    // Collect one opaque run.
+                    while (y < image.Height && image.Rgba[(y * image.Width + x) * 4 + 3] >= 128)
+                    {
+                        y++;
+                    }
+
+                    var length = y - top;
+                    var data = new byte[length];
+
+                    for (var i = 0; i < length; i++)
+                    {
+                        var offset = ((top + i) * image.Width + x) * 4;
+
+                        var r = image.Rgba[offset];
+                        var g = image.Rgba[offset + 1];
+                        var b = image.Rgba[offset + 2];
+                        var key = (r << 16) | (g << 8) | b;
+
+                        byte index;
+
+                        if (!cache.TryGetValue(key, out index))
+                        {
+                            index = NearestIndex(r, g, b, playpal);
+                            cache[key] = index;
+                        }
+
+                        data[i] = index;
+                    }
+
+                    // A Doom post is limited to 255 rows, and its top delta is a
+                    // single byte too, so a run taller than that has to be split.
+                    // 200-pixel columns do occur in large sprites.
+                    if (length <= 255 && top <= 255)
+                    {
+                        posts.Add(new Column(top, data, 0, length));
+                    }
+                    else
+                    {
+                        var written = 0;
+
+                        while (written < length)
+                        {
+                            var row = top + written;
+                            var chunk = Math.Min(255, length - written);
+
+                            if (row > 255)
+                            {
+                                // Past 255 the format cannot express the offset.
+                                // Give up on the rest of the column rather than
+                                // draw it in the wrong place.
+                                break;
+                            }
+
+                            var piece = new byte[chunk];
+                            Array.Copy(data, written, piece, 0, chunk);
+
+                            posts.Add(new Column(row, piece, 0, chunk));
+                            written += chunk;
+                        }
+                    }
+                }
+
+                columns[x] = posts.ToArray();
+            }
+
+            var leftOffset = spriteOffsets ? image.Width / 2 : 0;
+            var topOffset = spriteOffsets ? image.Height : 0;
+
+            return new Patch(name, image.Width, image.Height, leftOffset, topOffset, columns);
+        }
+
+        /// <summary>
         /// Index of the palette entry closest to a colour, by squared distance in
         /// RGB. Squared, so no square root is needed to compare.
         /// </summary>
@@ -169,6 +289,99 @@ namespace DPTDOOM
             }
 
             return lower.StartsWith("flats/") || lower.IndexOf('/') < 0;
+        }
+
+        /// <summary>Whether a PK3 entry path names a wall texture.</summary>
+        public static bool IsTexturePath(string path)
+        {
+            if (path == null)
+            {
+                return false;
+            }
+
+            var lower = path.ToLowerInvariant();
+
+            return lower.StartsWith("textures/") && lower.EndsWith(".png");
+        }
+
+        /// <summary>
+        /// Whether a PK3 entry path names a sprite, and which one.
+        ///
+        /// Two naming conventions are in use and both are accepted:
+        ///
+        ///   - <c>sprites/POSSA1.png</c> — the lump name as the file name;
+        ///   - <c>sprites/POSS A1.png</c> — sprite, space, frame and rotation,
+        ///     which is how ZDoom documentation writes it.
+        /// </summary>
+        public static bool IsSpritePath(string path)
+        {
+            return ParseSpriteName(path) != null;
+        }
+
+        /// <summary>
+        /// Splits a PK3 sprite path into its eight-character lump name, or null
+        /// when the path is not a sprite or the name is malformed.
+        /// </summary>
+        public static string ParseSpriteName(string path)
+        {
+            if (path == null)
+            {
+                return null;
+            }
+
+            var lower = path.ToLowerInvariant();
+
+            if (!lower.StartsWith("sprites/") || !lower.EndsWith(".png"))
+            {
+                return null;
+            }
+
+            var slash = path.LastIndexOf('/');
+            var name = path.Substring(slash + 1);
+
+            var dot = name.LastIndexOf('.');
+            if (dot >= 0)
+            {
+                name = name.Substring(0, dot);
+            }
+
+            name = name.Replace(" ", "").ToUpperInvariant();
+
+            if (name.Length < 6 || name.Length > 8)
+            {
+                return null;
+            }
+
+            // Four letters of sprite name, a frame letter, a rotation digit.
+            for (var i = 0; i < 4; i++)
+            {
+                if (name[i] < 'A' || name[i] > 'Z')
+                {
+                    return null;
+                }
+            }
+
+            if (name[4] < 'A' || name[4] > 'Z')
+            {
+                return null;
+            }
+
+            if (name[5] < '0' || name[5] > '9')
+            {
+                return null;
+            }
+
+            if (name.Length > 6 && (name[6] < 'A' || name[6] > 'Z'))
+            {
+                return null;
+            }
+
+            if (name.Length > 7 && (name[7] < '0' || name[7] > '9'))
+            {
+                return null;
+            }
+
+            return name;
         }
 
         /// <summary>
