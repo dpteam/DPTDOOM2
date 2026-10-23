@@ -64,6 +64,9 @@ powershell -NoProfile -File tools\test-launcher.ps1
   сборке. Это ловит `PInvokeDeclarationTest` — не отключать.
 - Иконка: только DIB-кадры в `.ico`, PNG внутри не понимает Windows XP.
   Пересборка — `tools/fix-icon.ps1`, проверка — `tools/test-icon.ps1`.
+- Меню окна — `src/Win32/GameMenu.cs`, обработка команд — `Win32Doom.Execute`.
+  Новый пункт добавлять в оба места и в `tools/test-menu.ps1`. Проверять
+  галочки через `UpdateMenuChecks`, а не выставлять их вручную.
 - CI: `.github/workflows/ci.yml`, описание — `docs/CI.md`.
 
 ## Архитектурные ограничения

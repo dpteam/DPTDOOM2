@@ -98,6 +98,9 @@ foreach ($entry in $outputs) {
         if ($name -like "*.cfg") { continue }
         if ($name -like "*.dsg") { continue }
         if ($name -like "*.log") { continue }
+        if ($name -like "*.tsv") { continue }
+        if ($name -like "*.bmp") { continue }
+        if ($name -like "*.wav") { continue }
 
         $unexpected += $name
     }

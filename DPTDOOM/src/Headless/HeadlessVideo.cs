@@ -82,52 +82,13 @@ namespace DPTDOOM.Headless
         /// because it needs no external encoder and every Windows version can
         /// open it.
         /// </summary>
+        /// <summary>
+        /// Writes the last rendered frame as a BMP. The encoder is shared with
+        /// the debug menu so a captured frame looks the same either way.
+        /// </summary>
         public void SaveBmp(string path)
         {
-            var width = renderer.Width;
-            var height = renderer.Height;
-            var rowSize = ((width * 3) + 3) & ~3;
-            var imageSize = rowSize * height;
-            var fileSize = 14 + 40 + imageSize;
-
-            using (var stream = new FileStream(path, FileMode.Create, FileAccess.Write))
-            using (var writer = new BinaryWriter(stream))
-            {
-                writer.Write((byte)'B');
-                writer.Write((byte)'M');
-                writer.Write(fileSize);
-                writer.Write((short)0);
-                writer.Write((short)0);
-                writer.Write(14 + 40);
-
-                writer.Write(40);
-                writer.Write(width);
-                writer.Write(height);
-                writer.Write((short)1);
-                writer.Write((short)24);
-                writer.Write(0);
-                writer.Write(imageSize);
-                writer.Write(2835);
-                writer.Write(2835);
-                writer.Write(0);
-                writer.Write(0);
-
-                var row = new byte[rowSize];
-                for (var y = height - 1; y >= 0; y--)
-                {
-                    var src = y * width * 4;
-                    var dst = 0;
-                    for (var x = 0; x < width; x++)
-                    {
-                        row[dst++] = pixels[src + 2];
-                        row[dst++] = pixels[src + 1];
-                        row[dst++] = pixels[src + 0];
-                        src += 4;
-                    }
-
-                    writer.Write(row);
-                }
-            }
+            BmpWriter.Save(path, pixels, renderer.Width, renderer.Height);
         }
     }
 }

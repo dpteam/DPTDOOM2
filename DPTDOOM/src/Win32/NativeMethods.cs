@@ -22,7 +22,7 @@ namespace DPTDOOM.Win32
     /// Windows XP, which is why the port can stay free of third-party runtime
     /// libraries.
     /// </summary>
-    internal static class NativeMethods
+    internal static partial class NativeMethods
     {
         public const int WM_NULL = 0x0000;
         public const int WM_DESTROY = 0x0002;
@@ -55,6 +55,7 @@ namespace DPTDOOM.Win32
         public const uint PM_NOREMOVE = 0x0000;
         public const uint PM_REMOVE = 0x0001;
 
+        public const int SW_HIDE = 0;
         public const int SW_SHOWNORMAL = 1;
         public const int SW_SHOW = 5;
 

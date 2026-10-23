@@ -79,6 +79,10 @@ jobs:
             if (-not $master.HasExited) { $master.Kill() }
           }
 
+      - name: Window menu and tray
+        shell: pwsh
+        run: ./tools/test-menu.ps1
+
       - name: Launcher bridge
         # Windows PowerShell 5.1, not pwsh: the test loads the net40 WinForms
         # assembly, and PowerShell 7 runs on .NET and cannot host it.

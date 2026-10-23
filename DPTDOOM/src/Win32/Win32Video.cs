@@ -74,6 +74,12 @@ namespace DPTDOOM.Win32
         /// <summary>Enables the per-frame render/present split in the fps log.</summary>
         public bool Profiling { get; set; }
 
+        /// <summary>Writes the last rendered frame to a BMP file.</summary>
+        public void SaveFrame(string path)
+        {
+            BmpWriter.Save(path, pixels, renderer.Width, renderer.Height);
+        }
+
         public double LastRenderMs { get; private set; }
 
         public double LastPresentMs { get; private set; }

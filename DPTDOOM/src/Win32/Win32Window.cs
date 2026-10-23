@@ -65,6 +65,28 @@ namespace DPTDOOM.Win32
         private int surfaceWidth;
         private int surfaceHeight;
 
+        private GameMenu menu;
+        private bool fullscreenActive;
+        private NativeMethods.RECT windowedRect;
+
+        private bool trayAdded;
+        private NativeMethods.NOTIFYICONDATA trayData;
+
+        private IntPtr overlayFont;
+
+        public event Action<MenuCommand> Command;
+
+        /// <summary>Shows a small text overlay in the top-left corner.</summary>
+        public bool ShowOverlay { get; set; }
+
+        public string OverlayText { get; set; }
+
+        /// <summary>
+        /// When set, minimising hides the window and leaves the tray icon, the
+        /// way Windows 3.x applications lived in the background.
+        /// </summary>
+        public bool MinimizeToTray { get; set; }
+
         public Win32Window(string title, int width, int height, bool fullscreen)
         {
             this.title = title;
@@ -177,54 +199,172 @@ namespace DPTDOOM.Win32
                 throw new Exception("CreateWindowEx failed: " + Marshal.GetLastWin32Error());
             }
 
-            clientWidth = fullscreen ? width : requestedWidth;
-            clientHeight = fullscreen ? height : requestedHeight;
-
-            NativeMethods.ShowWindow(hWnd, NativeMethods.SW_SHOW);
-
+            // The menu bar is part of the window frame, so it must exist before
+            // the client area is measured; otherwise the game is squeezed by
+            // the height of the menu.
             if (!fullscreen)
             {
-                // Make the client area exactly the framebuffer size. Otherwise
-                // every frame goes through GDI's generic stretch path, which is
-                // several times slower than a plain blit and was measured as a
-                // large part of the frame budget.
-                NativeMethods.RECT client;
-                if (NativeMethods.GetClientRect(hWnd, out client))
-                {
-                    var actualWidth = client.right - client.left;
-                    var actualHeight = client.bottom - client.top;
-
-                    if (actualWidth != requestedWidth || actualHeight != requestedHeight)
-                    {
-                        var frame = new NativeMethods.RECT();
-                        frame.right = requestedWidth;
-                        frame.bottom = requestedHeight;
-                        NativeMethods.AdjustWindowRectEx(ref frame, style, false, exStyle);
-
-                        NativeMethods.SetWindowPos(
-                            hWnd,
-                            IntPtr.Zero,
-                            0,
-                            0,
-                            frame.right - frame.left,
-                            frame.bottom - frame.top,
-                            NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOZORDER);
-
-                        NativeMethods.GetClientRect(hWnd, out client);
-                        actualWidth = client.right - client.left;
-                        actualHeight = client.bottom - client.top;
-                    }
-
-                    clientWidth = actualWidth;
-                    clientHeight = actualHeight;
-                }
+                menu = new GameMenu(hWnd);
+                menu.Attach();
             }
 
             ApplyWindowIcon();
+            FitClientArea();
 
+            NativeMethods.ShowWindow(hWnd, NativeMethods.SW_SHOW);
             NativeMethods.UpdateWindow(hWnd);
             NativeMethods.SetForegroundWindow(hWnd);
             NativeMethods.SetFocus(hWnd);
+        }
+
+        /// <summary>
+        /// Resizes the window so the client area is exactly the framebuffer
+        /// size. Without this every frame goes through GDI's generic stretch
+        /// path, which is several times slower than a plain blit.
+        /// </summary>
+        private void FitClientArea()
+        {
+            var style = (uint)NativeMethods.GetWindowLong(hWnd, NativeMethods.GWL_STYLE);
+            var exStyle = (uint)NativeMethods.GetWindowLong(hWnd, NativeMethods.GWL_EXSTYLE);
+
+            var frame = new NativeMethods.RECT();
+            frame.right = requestedWidth;
+            frame.bottom = requestedHeight;
+
+            var hasMenu = NativeMethods.GetMenu(hWnd) != IntPtr.Zero;
+            NativeMethods.AdjustWindowRectEx(ref frame, style, hasMenu, exStyle);
+
+            NativeMethods.SetWindowPos(
+                hWnd,
+                IntPtr.Zero,
+                0,
+                0,
+                frame.right - frame.left,
+                frame.bottom - frame.top,
+                NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOZORDER);
+
+            NativeMethods.RECT client;
+            if (NativeMethods.GetClientRect(hWnd, out client))
+            {
+                clientWidth = client.right - client.left;
+                clientHeight = client.bottom - client.top;
+            }
+        }
+
+        /// <summary>
+        /// Changes the window size. The framebuffer keeps its own resolution and
+        /// GDI scales it, which is what makes this cheap enough to put in a menu.
+        /// </summary>
+        public void SetClientSize(int width, int height)
+        {
+            if (hWnd == IntPtr.Zero || fullscreen)
+            {
+                return;
+            }
+
+            var style = (uint)NativeMethods.GetWindowLong(hWnd, NativeMethods.GWL_STYLE);
+            var exStyle = (uint)NativeMethods.GetWindowLong(hWnd, NativeMethods.GWL_EXSTYLE);
+
+            var frame = new NativeMethods.RECT();
+            frame.right = width;
+            frame.bottom = height;
+
+            var hasMenu = NativeMethods.GetMenu(hWnd) != IntPtr.Zero;
+            NativeMethods.AdjustWindowRectEx(ref frame, style, hasMenu, exStyle);
+
+            NativeMethods.SetWindowPos(
+                hWnd,
+                IntPtr.Zero,
+                0,
+                0,
+                frame.right - frame.left,
+                frame.bottom - frame.top,
+                NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOZORDER);
+
+            NativeMethods.RECT client;
+            if (NativeMethods.GetClientRect(hWnd, out client))
+            {
+                clientWidth = client.right - client.left;
+                clientHeight = client.bottom - client.top;
+            }
+        }
+
+        /// <summary>
+        /// Switches between a normal window and a borderless full-screen one.
+        /// The window is recreated in neither case: only the style and size
+        /// change, so the renderer and the input state survive.
+        /// </summary>
+        public void SetFullscreen(bool value)
+        {
+            if (hWnd == IntPtr.Zero || value == fullscreenActive)
+            {
+                return;
+            }
+
+            fullscreenActive = value;
+
+            var exStyle = (uint)NativeMethods.GetWindowLong(hWnd, NativeMethods.GWL_EXSTYLE);
+
+            if (value)
+            {
+                NativeMethods.GetWindowRect(hWnd, out windowedRect);
+
+                var style = (uint)NativeMethods.GetWindowLong(hWnd, NativeMethods.GWL_STYLE);
+                style &= ~(NativeMethods.WS_CAPTION | NativeMethods.WS_THICKFRAME |
+                           NativeMethods.WS_MINIMIZEBOX | NativeMethods.WS_MAXIMIZEBOX |
+                           NativeMethods.WS_SYSMENU);
+                NativeMethods.SetWindowLong(hWnd, NativeMethods.GWL_STYLE, (int)style);
+                NativeMethods.SetMenu(hWnd, IntPtr.Zero);
+
+                NativeMethods.SetWindowPos(
+                    hWnd,
+                    NativeMethods.HWND_TOP,
+                    0,
+                    0,
+                    NativeMethods.GetSystemMetrics(NativeMethods.SM_CXSCREEN),
+                    NativeMethods.GetSystemMetrics(NativeMethods.SM_CYSCREEN),
+                    NativeMethods.SWP_FRAMECHANGED | NativeMethods.SWP_NOZORDER);
+            }
+            else
+            {
+                var style = (uint)NativeMethods.GetWindowLong(hWnd, NativeMethods.GWL_STYLE);
+                style |= NativeMethods.WS_CAPTION | NativeMethods.WS_THICKFRAME |
+                         NativeMethods.WS_MINIMIZEBOX | NativeMethods.WS_MAXIMIZEBOX |
+                         NativeMethods.WS_SYSMENU;
+                NativeMethods.SetWindowLong(hWnd, NativeMethods.GWL_STYLE, (int)style);
+
+                if (menu != null)
+                {
+                    NativeMethods.SetMenu(hWnd, menu.Handle);
+                }
+
+                // The menu is back, so the frame is taller than it was before
+                // full screen. Restoring the old outer rect would leave the
+                // client area shorter than the framebuffer, so the size is
+                // computed again from the framebuffer size and only the
+                // position is kept.
+                var frame = new NativeMethods.RECT();
+                frame.right = requestedWidth;
+                frame.bottom = requestedHeight;
+                NativeMethods.AdjustWindowRectEx(ref frame, style, menu != null, exStyle);
+
+                NativeMethods.SetWindowPos(
+                    hWnd,
+                    NativeMethods.HWND_TOP,
+                    windowedRect.left,
+                    windowedRect.top,
+                    frame.right - frame.left,
+                    frame.bottom - frame.top,
+                    NativeMethods.SWP_FRAMECHANGED | NativeMethods.SWP_NOZORDER);
+            }
+
+            NativeMethods.DrawMenuBar(hWnd);
+            NativeMethods.RECT client;
+            if (NativeMethods.GetClientRect(hWnd, out client))
+            {
+                clientWidth = client.right - client.left;
+                clientHeight = client.bottom - client.top;
+            }
         }
 
         /// <summary>
@@ -268,6 +408,153 @@ namespace DPTDOOM.Win32
                 NativeMethods.WM_SETICON,
                 new IntPtr(NativeMethods.ICON_SMALL),
                 windowIcon);
+        }
+
+        ////////////////////////////////////////////////////////////
+        // Tray icon
+        ////////////////////////////////////////////////////////////
+
+        private const int TrayCallbackMessage = NativeMethods.WM_APP + 1;
+
+        private void ShowTrayIcon()
+        {
+            if (trayAdded || windowIcon == IntPtr.Zero)
+            {
+                return;
+            }
+
+            if (menu != null)
+            {
+                menu.BuildTrayMenu();
+            }
+
+            trayData = new NativeMethods.NOTIFYICONDATA();
+            trayData.cbSize = Marshal.SizeOf(typeof(NativeMethods.NOTIFYICONDATA));
+            trayData.hWnd = hWnd;
+            trayData.uID = 1;
+            trayData.uFlags = NativeMethods.NIF_MESSAGE | NativeMethods.NIF_ICON | NativeMethods.NIF_TIP;
+            trayData.uCallbackMessage = TrayCallbackMessage;
+            trayData.hIcon = windowIcon;
+            trayData.szTip = title;
+
+            trayAdded = NativeMethods.Shell_NotifyIcon(NativeMethods.NIM_ADD, ref trayData);
+
+            if (!trayAdded)
+            {
+                // Some shells need the icon re-added after Explorer restarts;
+                // not fatal, the window is still reachable from the taskbar.
+                Console.WriteLine("Could not add the tray icon.");
+            }
+        }
+
+        public void HideTrayIcon()
+        {
+            if (!trayAdded)
+            {
+                return;
+            }
+
+            NativeMethods.Shell_NotifyIcon(NativeMethods.NIM_DELETE, ref trayData);
+            trayAdded = false;
+        }
+
+        /// <summary>Hides the window and leaves the tray icon behind.</summary>
+        public void HideToTray()
+        {
+            if (hWnd == IntPtr.Zero)
+            {
+                return;
+            }
+
+            ShowTrayIcon();
+            NativeMethods.ShowWindow(hWnd, NativeMethods.SW_HIDE);
+        }
+
+        public void RestoreFromTray()
+        {
+            if (hWnd == IntPtr.Zero)
+            {
+                return;
+            }
+
+            NativeMethods.ShowWindow(hWnd, NativeMethods.SW_SHOWNORMAL);
+            NativeMethods.SetForegroundWindow(hWnd);
+            NativeMethods.SetFocus(hWnd);
+            HideTrayIcon();
+        }
+
+        private void ShowTrayMenu()
+        {
+            if (menu == null || menu.TrayMenu == IntPtr.Zero)
+            {
+                return;
+            }
+
+            NativeMethods.POINT point;
+            NativeMethods.GetCursorPos(out point);
+
+            // Without the SetForegroundWindow / WM_NULL pair the menu can stay
+            // on screen after a click elsewhere; this is a long standing Win32
+            // quirk with TrackPopupMenu on a tray icon.
+            NativeMethods.SetForegroundWindow(hWnd);
+
+            var id = NativeMethods.TrackPopupMenu(
+                menu.TrayMenu,
+                NativeMethods.TPM_RIGHTBUTTON | NativeMethods.TPM_RETURNCMD,
+                point.x,
+                point.y,
+                0,
+                hWnd,
+                IntPtr.Zero);
+
+            NativeMethods.PostMessage(hWnd, (uint)NativeMethods.WM_NULL, IntPtr.Zero, IntPtr.Zero);
+
+            if (id == 0)
+            {
+                return;
+            }
+
+            var handler = Command;
+            if (handler != null && menu.Handles(id))
+            {
+                handler((MenuCommand)id);
+            }
+        }
+
+        ////////////////////////////////////////////////////////////
+        // Overlay
+        ////////////////////////////////////////////////////////////
+
+        /// <summary>
+        /// Draws the debug overlay over the frame with GDI. Deliberately not
+        /// part of the software renderer: it must stay out of the framebuffer
+        /// that gets saved to BMP and compared by tests.
+        /// </summary>
+        private void DrawOverlay(IntPtr dc)
+        {
+            if (overlayFont == IntPtr.Zero)
+            {
+                overlayFont = NativeMethods.CreateFont(
+                    14, 0, 0, 0, NativeMethods.FW_BOLD,
+                    0, 0, 0, NativeMethods.DEFAULT_CHARSET,
+                    0, 0, 0, 0, "Consolas");
+            }
+
+            var previous = NativeMethods.SelectObject(dc, overlayFont);
+
+            NativeMethods.SetBkMode(dc, NativeMethods.TRANSPARENT);
+            NativeMethods.SetTextColor(dc, NativeMethods.Rgb(0xE6, 0xE6, 0x50));
+
+            var lines = (OverlayText ?? "").Split('\n');
+            var y = 6;
+
+            foreach (var line in lines)
+            {
+                NativeMethods.TextOut(dc, 8, y, line, line.Length);
+                y += 16;
+            }
+
+            NativeMethods.SelectObject(dc, previous);
         }
 
         public void PumpMessages()
@@ -439,9 +726,14 @@ namespace DPTDOOM.Win32
             // WM_PAINT. Without this, a partly covered window asks for a repaint
             // every frame and the frame is blitted twice.
             NativeMethods.ValidateRect(hWnd, IntPtr.Zero);
+
+            if (ShowOverlay && !string.IsNullOrEmpty(OverlayText))
+            {
+                DrawOverlay(dc);
+            }
         }
 
-        [DllImport("kernel32.dll", EntryPoint = "RtlMoveMemory")]
+        [DllImport("kernel32.dll", ExactSpelling = true, EntryPoint = "RtlMoveMemory")]
         private static extern void CopyMemory(IntPtr destination, IntPtr source, IntPtr length);
 
         public void SetTitle(string value)
@@ -562,6 +854,59 @@ namespace DPTDOOM.Win32
                 case NativeMethods.WM_ERASEBKGND:
                     return new IntPtr(1);
 
+                case NativeMethods.WM_COMMAND:
+                {
+                    // Low word is the command id; notifications use the high
+                    // word, which is zero for menu items.
+                    var id = (int)(wParam.ToInt64() & 0xFFFF);
+                    if (menu != null && menu.Handles(id))
+                    {
+                        var handler = Command;
+                        if (handler != null)
+                        {
+                            handler((MenuCommand)id);
+                        }
+
+                        return IntPtr.Zero;
+                    }
+
+                    break;
+                }
+
+                case NativeMethods.WM_SIZE:
+                {
+                    clientWidth = (int)(lParam.ToInt64() & 0xFFFF);
+                    clientHeight = (int)((lParam.ToInt64() >> 16) & 0xFFFF);
+
+                    var sizeType = wParam.ToInt32();
+                    if (sizeType == NativeMethods.SIZE_MINIMIZED && MinimizeToTray)
+                    {
+                        NativeMethods.ShowWindow(hWnd, NativeMethods.SW_HIDE);
+                        ShowTrayIcon();
+                    }
+
+                    return IntPtr.Zero;
+                }
+
+                case TrayCallbackMessage:
+                {
+                    var mouseMessage = (int)(lParam.ToInt64() & 0xFFFF);
+
+                    if (mouseMessage == NativeMethods.WM_LBUTTONDBLCLK)
+                    {
+                        RestoreFromTray();
+                        return IntPtr.Zero;
+                    }
+
+                    if (mouseMessage == NativeMethods.WM_RBUTTONUP)
+                    {
+                        ShowTrayMenu();
+                        return IntPtr.Zero;
+                    }
+
+                    break;
+                }
+
                 case NativeMethods.WM_SYSCOMMAND:
                     if ((wParam.ToInt64() & 0xFFF0) == NativeMethods.SC_KEYMENU)
                     {
@@ -618,12 +963,8 @@ namespace DPTDOOM.Win32
                     ReleaseMouse();
                     break;
 
-                case NativeMethods.WM_SIZE:
-                    clientWidth = (int)(lParam.ToInt64() & 0xFFFF);
-                    clientHeight = (int)((lParam.ToInt64() >> 16) & 0xFFFF);
                     break;
             }
-
             return NativeMethods.DefWindowProc(hWnd, msg, wParam, lParam);
         }
 
@@ -708,6 +1049,19 @@ namespace DPTDOOM.Win32
 
             ReleaseMouse();
             ReleaseSurface();
+            HideTrayIcon();
+
+            if (overlayFont != IntPtr.Zero)
+            {
+                NativeMethods.DeleteObject(overlayFont);
+                overlayFont = IntPtr.Zero;
+            }
+
+            if (menu != null)
+            {
+                menu.Dispose();
+                menu = null;
+            }
 
             if (hWnd != IntPtr.Zero)
             {
@@ -717,6 +1071,11 @@ namespace DPTDOOM.Win32
         }
 
         public bool HasFocus => focused;
+
+        /// <summary>The menu bar, or null in full-screen mode.</summary>
+        public GameMenu Menu => menu;
+
+        public bool IsFullscreen => fullscreenActive;
 
         public bool Closed => quit;
 

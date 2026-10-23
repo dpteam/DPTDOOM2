@@ -50,6 +50,12 @@ namespace DPTDOOM.Video
         private double worstLateness;
         private double totalInterval;
 
+        private const int RecentWindow = 60;
+        private readonly double[] recent = new double[RecentWindow];
+        private int recentIndex;
+        private int recentCount;
+        private double recentTotal;
+
         private StreamWriter log;
         private StringBuilder line;
 
@@ -66,14 +72,67 @@ namespace DPTDOOM.Video
 
         /// <summary>
         /// Opens a per-frame timing log. Columns: frame, nominal time, measured
-        /// interval, whether the game advanced, interpolation fraction.
+        /// interval, render, present, wait, update flag, interpolation fraction.
         /// </summary>
         public void OpenLog(string path)
         {
+            CloseLog();
+
+            var directory = Path.GetDirectoryName(Path.GetFullPath(path));
+            if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
             line = new StringBuilder(128);
             log = new StreamWriter(path, false, Encoding.UTF8);
             log.WriteLine("frame\tnominal_ms\tinterval_ms\trender_ms\tpresent_ms\twait_ms\tupdate\tfrac");
             log.AutoFlush = true;
+
+            LogPath = path;
+        }
+
+        /// <summary>Stops logging. The file is complete at this point.</summary>
+        public void CloseLog()
+        {
+            if (log == null)
+            {
+                return;
+            }
+
+            try
+            {
+                log.Dispose();
+            }
+            catch
+            {
+            }
+
+            log = null;
+        }
+
+        public bool IsLogging
+        {
+            get { return log != null; }
+        }
+
+        public string LogPath { get; private set; }
+
+        /// <summary>
+        /// Recent frame rate, averaged over the last second or so. A single
+        /// frame interval is far too noisy to display.
+        /// </summary>
+        public double CurrentFps
+        {
+            get
+            {
+                if (recentCount < 2 || recentTotal <= 0)
+                {
+                    return 0;
+                }
+
+                return 1000.0 / (recentTotal / recentCount);
+            }
         }
 
         /// <summary>
@@ -152,6 +211,20 @@ namespace DPTDOOM.Video
             if (interval > 0)
             {
                 totalInterval += interval;
+
+                // Rolling window for the on-screen counter.
+                if (recentCount == RecentWindow)
+                {
+                    recentTotal -= recent[recentIndex];
+                }
+                else
+                {
+                    recentCount++;
+                }
+
+                recent[recentIndex] = interval;
+                recentTotal += interval;
+                recentIndex = (recentIndex + 1) % RecentWindow;
             }
 
             if (log == null)
