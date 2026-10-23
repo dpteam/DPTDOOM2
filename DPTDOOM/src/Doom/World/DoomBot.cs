@@ -81,8 +81,28 @@ namespace DPTDOOM
         /// <summary>Below this health a cautious bot backs off instead of advancing.</summary>
         private const int CautiousRetreatHealth = 70;
 
+        /// <summary>
+        /// Below this health every other style backs off too.
+        ///
+        /// Measured on MAP01: at skill 3 the bots finish with 0 deaths, at
+        /// Ultra-Violence none of the four finishes and Rush dies ten times. The
+        /// difference is not the route - it is that a style which never gives
+        /// ground trades blows with everything it meets, and on UV that trade is
+        /// lost. Backing off while still firing is the cheapest way to survive a
+        /// fight the bot picked by walking past.
+        ///
+        /// The threshold is lower than the cautious one on purpose: a Rush bot
+        /// that breaks off at 70 would spend the level retreating, which is the
+        /// opposite of what the style is for. At 40 it only does so when the fight
+        /// has actually gone wrong.
+        /// </summary>
+        private const int RetreatHealth = 40;
+
         /// <summary>How close a monster has to be to make a cautious bot retreat.</summary>
         private const int CautiousThreatRange = 256;
+
+        /// <summary>How close a monster has to be to make any style retreat.</summary>
+        private const int RetreatThreatRange = 192;
 
         /// <summary>
         /// How close a monster has to be to count as "the thing blocking the
@@ -397,17 +417,23 @@ namespace DPTDOOM
 
             SelectWeapon();
 
-            // A cautious bot gives ground when it is hurt instead of trading
-            // blows. It keeps facing the threat while backing away, so it can
-            // still shoot: turning tail would only get it shot in the back.
+            // A bot gives ground when it is hurt instead of trading blows. It
+            // keeps facing the threat while backing away, so it can still shoot:
+            // turning tail would only get it shot in the back.
             //
             // This has to come **before** shooting. Shooting returns as soon as
             // it has a target, so a retreat check placed after it never ran
-            // while a monster was visible — which is exactly when a cautious bot
-            // needs it. The style used to stand and duel until it died.
-            if (style == BotStyle.Cautious && player.Health < CautiousRetreatHealth)
+            // while a monster was visible — which is exactly when a bot needs it.
+            //
+            // Every style does this now, not only Cautious. The cautious threshold
+            // is high because retreating *is* that style; the others only break off
+            // once the fight has gone wrong. See RetreatHealth.
+            var retreatHealth = style == BotStyle.Cautious ? CautiousRetreatHealth : RetreatHealth;
+            var retreatRange = style == BotStyle.Cautious ? CautiousThreatRange : RetreatThreatRange;
+
+            if (player.Health < retreatHealth)
             {
-                var threat = NearestThreat(mobj, CautiousThreatRange);
+                var threat = NearestThreat(mobj, retreatRange);
 
                 if (threat != null && HasRoomToRetreat(mobj, threat))
                 {
