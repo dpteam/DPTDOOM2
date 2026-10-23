@@ -63,6 +63,7 @@ dotnet build DPTDOOM\DPTDOOM.csproj -f net40 -c Release
 | `-sfx <NAME,...>` | какие звуки рендерить (`PISTOL,SHOTGN`); по умолчанию набор |
 | `-fpslog <file.tsv>` | лог тайминга каждого кадра |
 | `-bots` | вместо клавиатуры играет бот |
+| `-coopbots <1..3>` | локальный кооп: ты и N ботов в одном мире |
 | `-wireframe`, `-freeze`, `-maponly` | отладочные режимы (в т.ч. headless) |
 | `-net host\|join` | сетевая сессия |
 | `-players <2..4>` | размер сессии (хост) |

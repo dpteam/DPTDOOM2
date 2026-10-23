@@ -71,6 +71,7 @@ namespace DPTDOOM
         public readonly Arg freeze;
         public readonly Arg maponly;
         public readonly Arg bots;
+        public readonly Arg<int> coopbots;
 
         public CommandLineArgs(string[] args)
         {
@@ -121,6 +122,7 @@ namespace DPTDOOM
             freeze = new Arg(args.Contains("-freeze"));
             maponly = new Arg(args.Contains("-maponly"));
             bots = new Arg(args.Contains("-bots"));
+            coopbots = GetInt(args, "-coopbots");
 
             // Check for drag & drop.
             if (args.Length > 0 && args.All(arg => arg.FirstOrDefault() != '-'))

@@ -52,7 +52,6 @@ namespace DPTDOOM
         private int pathIndex;
         private int noProgressTics;
         private float bestDistance = float.MaxValue;
-        private int turnTics;
         private int turnDirection = 1;
         private int detourCount;
 
@@ -60,15 +59,23 @@ namespace DPTDOOM
         private bool headingToExit;
         private readonly int exitNode;
 
-        public DoomBot(World world, Player player)
+        public DoomBot(World world, Player player) : this(world, player, null)
+        {
+        }
+
+        /// <summary>
+        /// Bots in the same game share one navigation graph: it depends only on
+        /// the map, and rebuilding it per bot would waste memory and load time
+        /// for no benefit.
+        /// </summary>
+        public DoomBot(World world, Player player, NavGraph sharedNav)
         {
             this.world = world;
             this.player = player;
 
-            nav = new NavGraph(world.Map);
+            nav = sharedNav ?? new NavGraph(world.Map);
             path = new int[nav.NodeCount];
             visitedSector = new bool[world.Map.Sectors.Length];
-
 
             exitNode = FindExitNode();
             PlanExplore();

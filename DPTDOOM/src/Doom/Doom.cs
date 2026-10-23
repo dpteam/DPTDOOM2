@@ -70,6 +70,11 @@ namespace DPTDOOM
         private DoomBot bot;
         private bool botMode;
 
+        // Local co-op bots: extra players in the same world, driven by the same
+        // DoomBot, so one person can test a co-op session alone.
+        private DoomBot[] coopBots;
+        private int coopBotCount;
+
         public Doom(CommandLineArgs args, Config config, GameContent content, IVideo video, ISound sound, IMusic music, IUserInput userInput)
             : this(args, config, content, video, sound, music, userInput, null)
         {
@@ -100,6 +105,23 @@ namespace DPTDOOM
             this.netDriver = netDriver;
 
             botMode = args.bots.Present;
+
+            if (args.coopbots.Present)
+            {
+                coopBotCount = MathEx.Clamp(args.coopbots.Value, 1, Player.MaxPlayerCount - 1);
+
+                if (netDriver != null)
+                {
+                    // Networked bots would have to be driven by the host and
+                    // sent as tic commands; that is not implemented.
+                    throw new Exception("-coopbots cannot be combined with a network game.");
+                }
+
+                if (botMode)
+                {
+                    throw new Exception("-bots and -coopbots cannot be combined.");
+                }
+            }
 
             if (args.record.Present)
             {
@@ -157,6 +179,35 @@ namespace DPTDOOM
                 netDriver.Configure(options);
 
                 nextState = DoomState.Game;
+                game.DeferedInitNew();
+                return;
+            }
+
+            if (coopBotCount > 0)
+            {
+                // Extra players have to exist before the level is built: the
+                // spawn pass only creates a body for a player already marked as
+                // in the game.
+                for (var i = 1; i <= coopBotCount; i++)
+                {
+                    options.Players[i].InGame = true;
+                }
+
+                options.NetGame = false;
+
+                nextState = DoomState.Game;
+
+                if (args.warp.Present)
+                {
+                    options.Episode = args.warp.Value.Item1;
+                    options.Map = args.warp.Value.Item2;
+                }
+                else if (args.episode.Present)
+                {
+                    options.Episode = args.episode.Value;
+                    options.Map = 1;
+                }
+
                 game.DeferedInitNew();
                 return;
             }
@@ -437,6 +488,24 @@ namespace DPTDOOM
                         // A new level invalidates the bot's map knowledge.
                         bot = new DoomBot(game.World, game.World.ConsolePlayer);
                     }
+
+                    if (currentState == DoomState.Game && coopBotCount > 0 && game.World != null)
+                    {
+                        // One graph for the level, shared by every bot: it depends
+                        // only on the map.
+                        var nav = new NavGraph(game.World.Map);
+
+                        coopBots = new DoomBot[Player.MaxPlayerCount];
+
+                        for (var i = 1; i <= coopBotCount; i++)
+                        {
+                            var player = options.Players[i];
+                            if (player.InGame)
+                            {
+                                coopBots[i] = new DoomBot(game.World, player, nav);
+                            }
+                        }
+                    }
                 }
 
                 if (quit)
@@ -514,6 +583,20 @@ namespace DPTDOOM
                         else
                         {
                             userInput.BuildTicCmd(cmds[options.ConsolePlayer]);
+                        }
+
+                        if (coopBots != null)
+                        {
+                            // Every extra player is driven by its own bot, from
+                            // the same world state, so the co-op session behaves
+                            // exactly as if those players were present.
+                            for (var i = 0; i < coopBots.Length; i++)
+                            {
+                                if (coopBots[i] != null)
+                                {
+                                    coopBots[i].BuildTicCmd(cmds[i]);
+                                }
+                            }
                         }
                         if (sendPause)
                         {
