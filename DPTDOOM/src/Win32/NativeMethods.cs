@@ -267,6 +267,25 @@ namespace DPTDOOM.Win32
         [DllImport("user32.dll")]
         public static extern IntPtr LoadCursor(IntPtr instance, IntPtr cursorName);
 
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, EntryPoint = "LoadIconW")]
+        public static extern IntPtr LoadIcon(IntPtr instance, IntPtr iconName);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, EntryPoint = "SendMessageW")]
+        public static extern IntPtr SendMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+        [DllImport("user32.dll")]
+        public static extern bool DestroyIcon(IntPtr icon);
+
+        // The C# compiler stores the ApplicationIcon as resource id 32512,
+        // which is also the value of IDI_APPLICATION.
+        public static readonly IntPtr IconResourceId = new IntPtr(32512);
+
+        public const uint WM_GETICON = 0x007F;
+        public const uint WM_SETICON = 0x0080;
+        public const int ICON_SMALL = 0;
+        public const int ICON_BIG = 1;
+        public const int ICON_SMALL2 = 2;
+
         [DllImport("user32.dll")]
         public static extern IntPtr SetCursor(IntPtr cursor);
 

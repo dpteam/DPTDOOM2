@@ -35,6 +35,7 @@ namespace DPTDOOM.Win32
         private readonly bool[] mousePressed;
 
         private NativeMethods.WndProc wndProcDelegate;
+        private IntPtr windowIcon;
         private IntPtr hWnd;
         private IntPtr hInstance;
 
@@ -106,6 +107,14 @@ namespace DPTDOOM.Win32
             wndClass.hInstance = hInstance;
             wndClass.hCursor = NativeMethods.LoadCursor(IntPtr.Zero, new IntPtr(NativeMethods.IDC_ARROW));
             wndClass.lpszClassName = WindowClassName;
+
+            // The exe carries the DPT.DOOM icon (ApplicationIcon in the project
+            // file), but a window class does not pick it up on its own: without
+            // these two fields the title bar and the taskbar show the generic
+            // application icon.
+            windowIcon = LoadWindowIcon();
+            wndClass.hIcon = windowIcon;
+            wndClass.hIconSm = windowIcon;
 
             if (NativeMethods.RegisterClassEx(ref wndClass) == 0)
             {
@@ -211,9 +220,54 @@ namespace DPTDOOM.Win32
                 }
             }
 
+            ApplyWindowIcon();
+
             NativeMethods.UpdateWindow(hWnd);
             NativeMethods.SetForegroundWindow(hWnd);
             NativeMethods.SetFocus(hWnd);
+        }
+
+        /// <summary>
+        /// Loads the application icon from this executable's resources.
+        ///
+        /// Falls back to the system icon rather than leaving the field null:
+        /// a null icon means the window gets a blank one, which looks broken.
+        /// </summary>
+        private IntPtr LoadWindowIcon()
+        {
+            var icon = NativeMethods.LoadIcon(hInstance, NativeMethods.IconResourceId);
+
+            if (icon == IntPtr.Zero)
+            {
+                icon = NativeMethods.LoadIcon(IntPtr.Zero, NativeMethods.IconResourceId);
+            }
+
+            return icon;
+        }
+
+        /// <summary>
+        /// Sets the icon after creation as well. The window class covers the
+        /// normal case; setting it per window also covers the taskbar entry and
+        /// Alt+Tab, which some shells take from the window rather than the class.
+        /// </summary>
+        private void ApplyWindowIcon()
+        {
+            if (windowIcon == IntPtr.Zero || hWnd == IntPtr.Zero)
+            {
+                return;
+            }
+
+            NativeMethods.SendMessage(
+                hWnd,
+                NativeMethods.WM_SETICON,
+                new IntPtr(NativeMethods.ICON_BIG),
+                windowIcon);
+
+            NativeMethods.SendMessage(
+                hWnd,
+                NativeMethods.WM_SETICON,
+                new IntPtr(NativeMethods.ICON_SMALL),
+                windowIcon);
         }
 
         public void PumpMessages()

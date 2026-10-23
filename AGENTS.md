@@ -58,6 +58,12 @@ powershell -NoProfile -File tools\test-launcher.ps1
 - Вывод кадра — через DIB-секцию и `BitBlt`/`StretchBlt`; `StretchDIBits`
   напрямую в окно был в разы медленнее. Клиентская область окна приводится к
   размеру кадра, иначе GDI масштабирует каждый кадр.
+- P/Invoke: при `CharSet.Unicode` + `ExactSpelling = true` указывать `EntryPoint`
+  с суффиксом `W` обязательно (`SendMessageW`, `DefWindowProcW`, `LoadIconW`).
+  Без него рантайм ищет функцию без суффикса и падает в рантайме, а не при
+  сборке. Это ловит `PInvokeDeclarationTest` — не отключать.
+- Иконка: только DIB-кадры в `.ico`, PNG внутри не понимает Windows XP.
+  Пересборка — `tools/fix-icon.ps1`, проверка — `tools/test-icon.ps1`.
 - CI: `.github/workflows/ci.yml`, описание — `docs/CI.md`.
 
 ## Архитектурные ограничения

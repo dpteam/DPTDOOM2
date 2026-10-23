@@ -59,6 +59,10 @@ jobs:
         shell: pwsh
         run: ./tools/check-standalone.ps1
 
+      - name: Icon is usable on Windows XP
+        shell: pwsh
+        run: ./tools/test-icon.ps1
+
       - name: Window and input regression
         shell: pwsh
         run: ./tools/test-window.ps1 -Exe ./DPTDOOM/bin/Release/net40/dptdoom.exe

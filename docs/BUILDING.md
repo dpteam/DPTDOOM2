@@ -95,8 +95,26 @@ dotnet test DPTDOOMTest\DPTDOOMTest.csproj -c Release
 powershell -NoProfile -File tools\test-master.ps1     # протокол master
 powershell -NoProfile -File tools\test-launcher.ps1   # мост HTML-лаунчера
 powershell -NoProfile -File tools\check-standalone.ps1 # нет сторонних зависимостей
-powershell -NoProfile -File tools\test-window.ps1      # заголовок окна (нужен IWAD)
+powershell -NoProfile -File tools\test-icon.ps1       # иконка совместима с XP
+powershell -NoProfile -File tools\test-window.ps1     # заголовок окна (нужен IWAD)
 ```
+
+## Иконка
+
+`resources/dptdoom.ico` содержит только классические DIB-кадры (16, 24, 32, 48,
+64, 128). PNG внутри `.ico` Windows XP не понимает, поэтому исходный файл был
+пересобран:
+
+```powershell
+powershell -NoProfile -File tools\fix-icon.ps1
+```
+
+Скрипт декодирует каждый кадр и пишет `BITMAPINFOHEADER` + BGRA-строки снизу
+вверх + AND-маску, как ждёт XP. Прозрачность берётся из альфа-канала.
+
+Окну иконка назначается дважды: в `WNDCLASSEX` (`hIcon`, `hIconSm`) и через
+`WM_SETICON` после создания — часть оболочек берёт иконку задачи из окна, а не
+из класса.
 
 Упаковка для тестировщиков:
 
