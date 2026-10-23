@@ -823,6 +823,13 @@ namespace DPTDOOM
 					ActivateInStasis(line.Tag);
 					break;
 
+				case PlatformType.ToggleUpDown:
+					// Boom 212 reactivates a toggle that is parked in stasis rather
+					// than starting a second one; without this the line would only
+					// ever work once.
+					ActivateInStasis(line.Tag);
+					break;
+
 				default:
 					break;
 			}
@@ -870,6 +877,20 @@ namespace DPTDOOM
 						plat.Wait = 0;
 						plat.Status = PlatformState.Up;
 						world.StartSound(sector.SoundOrigin, Sfx.STNMOV, SfxType.Misc);
+						break;
+
+					case PlatformType.ToggleUpDown:
+						// Boom 212: the floor flips between its own height and the
+						// ceiling, crushing anything in the way. "Down" here means
+						// "toward Low", and Low is the ceiling, so the first trigger
+						// sends it up — which is why the pair of fields looks
+						// inverted.
+						plat.Speed = platformSpeed;
+						plat.Wait = 0;
+						plat.Crush = true;
+						plat.Low = sector.CeilingHeight;
+						plat.High = sector.FloorHeight;
+						plat.Status = PlatformState.Down;
 						break;
 
 					case PlatformType.DownWaitUpStay:
@@ -934,7 +955,21 @@ namespace DPTDOOM
 					activePlatforms[i].Tag == tag &&
 					activePlatforms[i].Status == PlatformState.InStasis)
 				{
-					activePlatforms[i].Status = activePlatforms[i].OldStatus;
+					// A toggle platform flips to the other end; everything else
+					// resumes where it stopped. Boom does the same, and without the
+					// flip a 212 line would jump to the same place every time.
+					if (activePlatforms[i].Type == PlatformType.ToggleUpDown)
+					{
+						activePlatforms[i].Status =
+							activePlatforms[i].OldStatus == PlatformState.Up
+								? PlatformState.Down
+								: PlatformState.Up;
+					}
+					else
+					{
+						activePlatforms[i].Status = activePlatforms[i].OldStatus;
+					}
+
 					activePlatforms[i].ThinkerState = ThinkerState.Active;
 				}
 			}
@@ -1590,6 +1625,13 @@ namespace DPTDOOM
 						floor.FloorDestHeight = FindLowestFloorSurrounding(sector);
 						break;
 
+					case FloorMoveType.LowerFloorToNearest:
+						floor.Direction = -1;
+						floor.Sector = sector;
+						floor.Speed = floorSpeed;
+						floor.FloorDestHeight = FindNextLowestFloor(sector, sector.FloorHeight);
+						break;
+
 					case FloorMoveType.TurboLower:
 						floor.Direction = -1;
 						floor.Sector = sector;
@@ -1905,6 +1947,18 @@ namespace DPTDOOM
 					case CeilingMoveType.RaiseToHighest:
 						ceiling.TopHeight = FindHighestCeilingSurrounding(sector);
 						ceiling.Direction = 1;
+						ceiling.Speed = CeilingSpeed;
+						break;
+
+					case CeilingMoveType.LowerToLowest:
+						ceiling.BottomHeight = FindLowestCeilingSurrounding(sector);
+						ceiling.Direction = -1;
+						ceiling.Speed = CeilingSpeed;
+						break;
+
+					case CeilingMoveType.LowerToMaxFloor:
+						ceiling.BottomHeight = FindHighestFloorSurrounding(sector);
+						ceiling.Direction = -1;
 						ceiling.Speed = CeilingSpeed;
 						break;
 				}

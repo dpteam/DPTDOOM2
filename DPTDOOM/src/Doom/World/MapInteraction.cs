@@ -1085,6 +1085,110 @@ namespace DPTDOOM
 					// Raise floor turbo.
 					sa.DoFloor(line, FloorMoveType.RaiseFloorTurbo);
 					break;
+
+				// Boom's walk-over additions. Boom ran out of vanilla numbers, so
+				// these are the "missing" cases between the ones Doom defined. Each
+				// pair is the same action once and repeatable, which is why they
+				// look duplicated: 142 fires once and clears itself, 147 every time.
+				case 142:
+					sa.DoFloor(line, FloorMoveType.RaiseFloor512);
+					line.Special = 0;
+					break;
+
+				case 147:
+					sa.DoFloor(line, FloorMoveType.RaiseFloor512);
+					break;
+
+				case 143:
+					sa.DoPlatform(line, PlatformType.RaiseAndChange, 24);
+					line.Special = 0;
+					break;
+
+				case 148:
+					sa.DoPlatform(line, PlatformType.RaiseAndChange, 24);
+					break;
+
+				case 144:
+					sa.DoPlatform(line, PlatformType.RaiseAndChange, 32);
+					line.Special = 0;
+					break;
+
+				case 149:
+					sa.DoPlatform(line, PlatformType.RaiseAndChange, 32);
+					break;
+
+				case 145:
+					sa.DoCeiling(line, CeilingMoveType.LowerToFloor);
+					line.Special = 0;
+					break;
+
+				case 152:
+					sa.DoCeiling(line, CeilingMoveType.LowerToFloor);
+					break;
+
+				case 146:
+					sa.DoDonut(line);
+					line.Special = 0;
+					break;
+
+				case 155:
+					sa.DoDonut(line);
+					break;
+
+				case 150:
+					// Slow silent crusher.
+					sa.DoCeiling(line, CeilingMoveType.SilentCrushAndRaise);
+					break;
+
+				case 151:
+					// Raise ceiling to the highest neighbouring ceiling.
+					sa.DoCeiling(line, CeilingMoveType.RaiseToHighest);
+					break;
+
+				case 199:
+					sa.DoCeiling(line, CeilingMoveType.LowerToLowest);
+					line.Special = 0;
+					break;
+
+				case 201:
+					sa.DoCeiling(line, CeilingMoveType.LowerToLowest);
+					break;
+
+				case 200:
+					// Lower ceiling to the highest neighbouring floor: a ceiling
+					// that stops at a ledge instead of at its own floor.
+					sa.DoCeiling(line, CeilingMoveType.LowerToMaxFloor);
+					line.Special = 0;
+					break;
+
+				case 202:
+					sa.DoCeiling(line, CeilingMoveType.LowerToMaxFloor);
+					break;
+
+				case 212:
+					// Toggle the floor between its height and the ceiling.
+					sa.DoPlatform(line, PlatformType.ToggleUpDown, 0);
+					break;
+
+				case 219:
+					sa.DoFloor(line, FloorMoveType.LowerFloorToNearest);
+					line.Special = 0;
+					break;
+
+				case 220:
+					// Lower floor to the next lower neighbour, not the lowest.
+					sa.DoFloor(line, FloorMoveType.LowerFloorToNearest);
+					break;
+
+				case 256:
+					// Build stairs slowly by 8.
+					sa.BuildStairs(line, StairType.Build8);
+					break;
+
+				case 257:
+					// Build stairs quickly by 16.
+					sa.BuildStairs(line, StairType.Turbo16);
+					break;
 			}
 		}
 

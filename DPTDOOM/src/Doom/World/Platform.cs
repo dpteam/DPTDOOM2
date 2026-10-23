@@ -70,6 +70,15 @@ namespace DPTDOOM
 					{
 						if (result == SectorActionResult.PastDestination)
 						{
+							if (type == PlatformType.ToggleUpDown)
+							{
+								// The other half of the toggle: park in stasis so
+								// the next trigger sends it back.
+								oldStatus = status;
+								status = PlatformState.InStasis;
+								break;
+							}
+
 							count = wait;
 							status = PlatformState.Waiting;
 							world.StartSound(sector.SoundOrigin, Sfx.PSTOP, SfxType.Misc);
@@ -101,9 +110,21 @@ namespace DPTDOOM
 
 					if (result == SectorActionResult.PastDestination)
 					{
-						count = wait;
-						status = PlatformState.Waiting;
-						world.StartSound(sector.SoundOrigin, Sfx.PSTOP, SfxType.Misc);
+						if (type == PlatformType.ToggleUpDown)
+						{
+							// Boom 212 is silent, instant and has no waiting: it
+							// jumps to the other position and parks in stasis until
+							// the line is triggered again. Waiting here would make
+							// it drift back on its own, which is a different effect.
+							oldStatus = status;
+							status = PlatformState.InStasis;
+						}
+						else
+						{
+							count = wait;
+							status = PlatformState.Waiting;
+							world.StartSound(sector.SoundOrigin, Sfx.PSTOP, SfxType.Misc);
+						}
 					}
 
 					break;

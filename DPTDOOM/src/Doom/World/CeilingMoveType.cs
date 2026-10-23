@@ -28,6 +28,16 @@ namespace DPTDOOM
         FastCrushAndRaise,
         SilentCrushAndRaise,
 
+        /// <summary>Lower the ceiling to the lowest neighbouring ceiling (199, 201).</summary>
+        LowerToLowest,
+
+        /// <summary>
+        /// Lower the ceiling to the highest neighbouring floor (200, 202). Used for
+        /// a ceiling that should come down to a ledge rather than to the floor of
+        /// its own sector.
+        /// </summary>
+        LowerToMaxFloor,
+
         /// <summary>
         /// A Boom generalized ceiling: destination, speed and crush flag come from
         /// the line's bit fields.

@@ -53,6 +53,14 @@ namespace DPTDOOM
         RaiseFloor512,
 
         /// <summary>
+        /// Lower the floor to the next lower neighbouring floor, not the lowest
+        /// one. Boom added it for 219 and 220; vanilla has no equivalent, because
+        /// "lower to the highest neighbour" and "lower to the lowest neighbour"
+        /// skip the step in between.
+        /// </summary>
+        LowerFloorToNearest,
+
+        /// <summary>
         /// A Boom generalized floor: the destination, speed and crush flag were
         /// computed from the line's bit fields, so the type only says "move".
         /// </summary>

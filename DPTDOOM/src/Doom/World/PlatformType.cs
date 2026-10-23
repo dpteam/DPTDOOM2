@@ -25,6 +25,12 @@ namespace DPTDOOM
         DownWaitUpStay,
         RaiseAndChange,
         RaiseToNearestAndChange,
-        BlazeDwus
+        BlazeDwus,
+
+        /// <summary>
+        /// Boom 212: a floor that flips between its own height and its ceiling,
+        /// crushing anything in the way. Two states, no waiting.
+        /// </summary>
+        ToggleUpDown
     }
 }

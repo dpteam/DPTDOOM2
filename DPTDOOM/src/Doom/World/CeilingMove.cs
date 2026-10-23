@@ -149,6 +149,8 @@ namespace DPTDOOM
 
 							case CeilingMoveType.LowerAndCrush:
 							case CeilingMoveType.LowerToFloor:
+							case CeilingMoveType.LowerToLowest:
+							case CeilingMoveType.LowerToMaxFloor:
 							case CeilingMoveType.Generalized:
 								sa.RemoveActiveCeiling(this);
 								sector.DisableFrameInterpolationForOneFrame();
