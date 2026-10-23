@@ -61,6 +61,12 @@ namespace DPTDOOM
         private Fixed oldFloorHeight;
         private Fixed oldCeilingHeight;
 
+        // Boom flat scrolling, in map units. Presentation only.
+        private Fixed floorFlatOffsetX;
+        private Fixed floorFlatOffsetY;
+        private Fixed ceilingFlatOffsetX;
+        private Fixed ceilingFlatOffsetY;
+
         public Sector(
             int number,
             Fixed floorHeight,
@@ -228,6 +234,40 @@ namespace DPTDOOM
         {
             get => lightLevel;
             set => lightLevel = value;
+        }
+
+        /// <summary>
+        /// Scrolling offset of the floor flat, in map units.
+        ///
+        /// Boom scrolls flats by moving the texture, not the sector: no geometry
+        /// changes and nothing is simulated differently, so this is presentation
+        /// state and is deliberately **not** part of DoomDebug's sector hash -
+        /// adding it there would invalidate every recorded reference hash for a
+        /// change that cannot affect gameplay.
+        /// </summary>
+        public Fixed FloorFlatOffsetX
+        {
+            get => floorFlatOffsetX;
+            set => floorFlatOffsetX = value;
+        }
+
+        public Fixed FloorFlatOffsetY
+        {
+            get => floorFlatOffsetY;
+            set => floorFlatOffsetY = value;
+        }
+
+        /// <summary>Scrolling offset of the ceiling flat, in map units.</summary>
+        public Fixed CeilingFlatOffsetX
+        {
+            get => ceilingFlatOffsetX;
+            set => ceilingFlatOffsetX = value;
+        }
+
+        public Fixed CeilingFlatOffsetY
+        {
+            get => ceilingFlatOffsetY;
+            set => ceilingFlatOffsetY = value;
         }
 
         public SectorSpecial Special

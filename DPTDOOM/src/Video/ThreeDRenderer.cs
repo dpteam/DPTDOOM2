@@ -2020,6 +2020,11 @@ namespace DPTDOOM.Video
             int y2,
             Fixed ceilingHeight)
         {
+            // Boom flat scrolling: the texture moves under a stationary sector, so
+            // the offset belongs to the sampling origin, not to the geometry.
+            var flatBaseX = viewX + sector.CeilingFlatOffsetX;
+            var flatBaseY = -(viewY + sector.CeilingFlatOffsetY);
+
             if (DebugSettings.Wireframe)
             {
                 // No fill in wireframe mode: the wall outlines alone read as a
@@ -2055,8 +2060,8 @@ namespace DPTDOOM.Video
 
                     var length = distance * planeDistScale[x];
                     var angle = viewAngle + xToAngle[x];
-                    var xFrac = viewX + Trig.Cos(angle) * length;
-                    var yFrac = -viewY - Trig.Sin(angle) * length;
+                    var xFrac = flatBaseX + Trig.Cos(angle) * length;
+                    var yFrac = flatBaseY - Trig.Sin(angle) * length;
                     ceilingXFrac[y] = xFrac;
                     ceilingYFrac[y] = yFrac;
 
@@ -2089,8 +2094,8 @@ namespace DPTDOOM.Video
 
                     var length = distance * planeDistScale[x];
                     var angle = viewAngle + xToAngle[x];
-                    var xFrac = viewX + Trig.Cos(angle) * length;
-                    var yFrac = -viewY - Trig.Sin(angle) * length;
+                    var xFrac = flatBaseX + Trig.Cos(angle) * length;
+                    var yFrac = flatBaseY - Trig.Sin(angle) * length;
                     ceilingXFrac[y] = xFrac;
                     ceilingYFrac[y] = yFrac;
 
@@ -2114,8 +2119,8 @@ namespace DPTDOOM.Video
 
                     var length = distance * planeDistScale[x];
                     var angle = viewAngle + xToAngle[x];
-                    var xFrac = viewX + Trig.Cos(angle) * length;
-                    var yFrac = -viewY - Trig.Sin(angle) * length;
+                    var xFrac = flatBaseX + Trig.Cos(angle) * length;
+                    var yFrac = flatBaseY - Trig.Sin(angle) * length;
                     ceilingXFrac[y] = xFrac;
                     ceilingYFrac[y] = yFrac;
 
@@ -2143,6 +2148,11 @@ namespace DPTDOOM.Video
             int y2,
             Fixed floorHeight)
         {
+            // Same as the ceiling: the offset moves the sample origin, so the flat
+            // appears to slide without the sector moving.
+            var flatBaseX = viewX + sector.FloorFlatOffsetX;
+            var flatBaseY = -(viewY + sector.FloorFlatOffsetY);
+
             if (DebugSettings.Wireframe)
             {
                 // No fill in wireframe mode: the wall outlines alone read as a
@@ -2178,8 +2188,8 @@ namespace DPTDOOM.Video
 
                     var length = distance * planeDistScale[x];
                     var angle = viewAngle + xToAngle[x];
-                    var xFrac = viewX + Trig.Cos(angle) * length;
-                    var yFrac = -viewY - Trig.Sin(angle) * length;
+                    var xFrac = flatBaseX + Trig.Cos(angle) * length;
+                    var yFrac = flatBaseY - Trig.Sin(angle) * length;
                     floorXFrac[y] = xFrac;
                     floorYFrac[y] = yFrac;
 
@@ -2212,8 +2222,8 @@ namespace DPTDOOM.Video
 
                     var length = distance * planeDistScale[x];
                     var angle = viewAngle + xToAngle[x];
-                    var xFrac = viewX + Trig.Cos(angle) * length;
-                    var yFrac = -viewY - Trig.Sin(angle) * length;
+                    var xFrac = flatBaseX + Trig.Cos(angle) * length;
+                    var yFrac = flatBaseY - Trig.Sin(angle) * length;
                     floorXFrac[y] = xFrac;
                     floorYFrac[y] = yFrac;
 
@@ -2237,8 +2247,8 @@ namespace DPTDOOM.Video
 
                     var length = distance * planeDistScale[x];
                     var angle = viewAngle + xToAngle[x];
-                    var xFrac = viewX + Trig.Cos(angle) * length;
-                    var yFrac = -viewY - Trig.Sin(angle) * length;
+                    var xFrac = flatBaseX + Trig.Cos(angle) * length;
+                    var yFrac = flatBaseY - Trig.Sin(angle) * length;
                     floorXFrac[y] = xFrac;
                     floorYFrac[y] = yFrac;
 
