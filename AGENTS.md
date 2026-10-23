@@ -27,21 +27,28 @@
   Код из `refs/` не становится своим от того, что лежит рядом: сначала
   проверять происхождение и лицензию.
 
-## Сборка и тесты
+## Тесты
 
 ```powershell
 dotnet build DPTDOOM.slnx -c Release
 dotnet test DPTDOOMTest\DPTDOOMTest.csproj -c Release
+powershell -NoProfile -File tools\check-standalone.ps1
 powershell -NoProfile -File tools\test-master.ps1
 powershell -NoProfile -File tools\test-launcher.ps1
 ```
 
 - `net40` — поставляемая сборка. `net9.0` существует только чтобы гонять тесты
   на современном SDK. Не добавлять в net40 API, которых нет в 4.0.
+- `tools/check-standalone.ps1` проверяет обещание «без сторонних библиотек»:
+  нет `PackageReference` в поставляемых проектах, нет лишних DLL рядом с exe,
+  цель действительно `net40`. Не отключать и не ослаблять эту проверку.
+- `test-launcher.ps1` запускать через Windows PowerShell 5.1: он грузит сборку
+  net40 с WinForms, которую PowerShell 7 не хостит.
 - Тесты совместимости без IWAD помечаются `Inconclusive`, а не падают.
 - Геймплейные тесты сравнивают хеши мира с эталонами Managed Doom. Не обновлять
   эталоны молча при расхождении — это признак регрессии.
 - Headless — тестовый бэкенд, **не** dedicated server.
+- CI: `.github/workflows/ci.yml`, описание — `docs/CI.md`.
 
 ## Архитектурные ограничения
 

@@ -1,0 +1,105 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  # The unit and compatibility tests run on both platforms. The game project
+  # has no Windows-only API outside its P/Invoke layer, so the net9.0 build and
+  # the whole test suite work on Linux too. Compatibility tests skip themselves
+  # when no IWAD is present instead of failing.
+  tests:
+    name: Tests / ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Test
+        run: dotnet test DPTDOOMTest/DPTDOOMTest.csproj -c Release --nologo --logger "console;verbosity=normal"
+
+  # The shipped build is net40, and the launcher and the Win32 front end are
+  # Windows-only, so the full solution is built on Windows.
+  build:
+    name: Build / Windows
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Build solution
+        run: dotnet build DPTDOOM.slnx -c Release --nologo
+
+      - name: Verify the shipped build is standalone
+        shell: pwsh
+        run: ./tools/check-standalone.ps1
+
+      - name: Window and input regression
+        shell: pwsh
+        run: ./tools/test-window.ps1 -Exe ./DPTDOOM/bin/Release/net40/dptdoom.exe
+
+      - name: Master directory protocol
+        shell: pwsh
+        run: |
+          $master = Start-Process -FilePath ./DPTDOOM.Master/bin/Release/net40/dptdoom-master.exe `
+            -ArgumentList '--port', '25145', '--log', 'master-ci.log' -PassThru
+          try {
+            Start-Sleep -Seconds 2
+            ./tools/test-master.ps1 -Port 25145
+          } finally {
+            if (-not $master.HasExited) { $master.Kill() }
+          }
+
+      - name: Launcher bridge
+        # Windows PowerShell 5.1, not pwsh: the test loads the net40 WinForms
+        # assembly, and PowerShell 7 runs on .NET and cannot host it.
+        shell: powershell
+        run: ./tools/test-launcher.ps1
+
+      - name: Package build
+        shell: pwsh
+        run: ./tools/package-build.ps1 -Version "0.1.0-${{ github.sha }}"
+
+      - name: Upload build
+        uses: actions/upload-artifact@v4
+        with:
+          name: dptdoom-windows-${{ github.sha }}
+          path: artifacts/*.zip
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-logs-${{ github.sha }}
+          path: |
+            master-ci.log
+            DPTDOOM.Launcher/bin/Release/net40/launcher-debug.txt
+          if-no-files-found: ignore
+          retention-days: 7

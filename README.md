@@ -101,11 +101,21 @@ DPTDOOMTest/        unit и compatibility тесты
 dotnet test DPTDOOMTest\DPTDOOMTest.csproj -c Release
 powershell -NoProfile -File tools/test-master.ps1
 powershell -NoProfile -File tools/test-launcher.ps1
+powershell -NoProfile -File tools/check-standalone.ps1
 ```
 
 Тесты совместимости требуют IWAD; без него они помечаются как пропущенные, а не
 падают. Геймплейные тесты сравнивают хеши состояния мира с эталонами Managed Doom,
 то есть проверяют, что порт остался демо-совместимым.
+
+## CI
+
+`.github/workflows/ci.yml`: тесты на Windows и Linux, сборка `net40`, проверка
+обещания «без сторонних библиотек», тесты master-протокола и лаунчера, и ZIP в
+артефактах. Подробности: [docs/CI.md](docs/CI.md).
+
+Артефакт `dptdoom-windows-<commit>.zip` — готовая сборка для друзей: игра, master,
+лаунчер, лицензия и исходники этого коммита. IWAD в него не входит.
 
 ## Переносимость
 
@@ -122,4 +132,4 @@ GPL v2 или новее, см. [LICENSE](licenses/LICENSE_DPTDOOM.txt). Про�
 
 Подробности: [docs/ROADMAP.md](docs/ROADMAP.md), [docs/BUILDING.md](docs/BUILDING.md),
 [docs/LAUNCHER.md](docs/LAUNCHER.md), [docs/MASTER.md](docs/MASTER.md),
-[docs/NETWORK.md](docs/NETWORK.md), [PROMPT.md](PROMPT.md).
+[docs/NETWORK.md](docs/NETWORK.md), [docs/CI.md](docs/CI.md), [PROMPT.md](PROMPT.md).

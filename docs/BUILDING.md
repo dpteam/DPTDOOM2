@@ -88,9 +88,20 @@ dotnet test DPTDOOMTest\DPTDOOMTest.csproj -c Release
 Проверки вне MSTest:
 
 ```powershell
-powershell -NoProfile -File tools\test-master.ps1    # протокол master
-powershell -NoProfile -File tools\test-launcher.ps1  # мост HTML-лаунчера
+powershell -NoProfile -File tools\test-master.ps1     # протокол master
+powershell -NoProfile -File tools\test-launcher.ps1   # мост HTML-лаунчера
+powershell -NoProfile -File tools\check-standalone.ps1 # нет сторонних зависимостей
+powershell -NoProfile -File tools\test-window.ps1      # заголовок окна (нужен IWAD)
 ```
+
+Упаковка для тестировщиков:
+
+```powershell
+powershell -NoProfile -File tools\package-build.ps1 -Version 0.1.0-local
+# -> artifacts/dptdoom-windows-x64-0.1.0-local.zip
+```
+
+Всё это же выполняется в CI: [CI.md](CI.md).
 
 ## Скриншоты
 

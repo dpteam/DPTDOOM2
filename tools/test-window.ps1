@@ -14,6 +14,14 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Without an IWAD the game exits before it creates a window, so this check
+# cannot run. CI has no game data; the unit test Win32WindowTest covers the same
+# bug without needing one.
+if (-not (Test-Path $Iwad)) {
+    Write-Host "Skipped: no IWAD at $Iwad (see DPTDOOMTest/src/UnitTests/Win32WindowTest.cs)."
+    exit 0
+}
+
 Add-Type @"
 using System;
 using System.Runtime.InteropServices;

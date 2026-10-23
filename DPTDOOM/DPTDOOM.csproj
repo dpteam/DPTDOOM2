@@ -14,7 +14,9 @@
     <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
     <PlatformTarget>AnyCPU</PlatformTarget>
     <Prefer32Bit>false</Prefer32Bit>
-    <ApplicationIcon>..\resources\dptdoom.ico</ApplicationIcon>
+    <!-- The icon is a Windows PE resource. Skipping it elsewhere keeps the
+         net9.0 test build working on Linux, where CI also runs. -->
+    <ApplicationIcon Condition="'$(OS)' == 'Windows_NT'">..\resources\dptdoom.ico</ApplicationIcon>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
     <AssemblyTitle>DPT.DOOM</AssemblyTitle>
     <Product>DPT.DOOM</Product>
