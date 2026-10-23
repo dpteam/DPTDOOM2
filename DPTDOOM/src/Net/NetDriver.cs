@@ -46,16 +46,11 @@ namespace DPTDOOM.Net
 
     public sealed class NetDriver : INetDriver
     {
-        // Commands are sampled every frame; this caps the input backlog when a
-        // peer stalls so that control does not drift seconds behind.
-        private const int MaxLocalBacklog = 4;
-
         private readonly NetSession session;
-        private readonly Queue<NetTic> localQueue = new Queue<NetTic>();
+        private readonly Dictionary<int, NetTic> localCommands = new Dictionary<int, NetTic>();
 
         private int tic;
-        private NetTic pendingLocal;
-        private bool localSent;
+        private int sendTic;
 
         public NetDriver(NetSession session)
         {
@@ -92,48 +87,33 @@ namespace DPTDOOM.Net
                 return false;
             }
 
-            if (DeterministicInput)
+            var delay = session.Delay;
+
+            // Keep Delay commands in hand: the one being simulated now, plus
+            // delay-1 more already sent to the peer.
+            //
+            // This is what makes a high-ping session playable. Without it the
+            // tic cannot advance until the peer's command for that same tic
+            // arrives, and the peer only produces it when it reaches that tic -
+            // so the session runs at one tic per round trip. At 100 ms of ping
+            // that is about 17 tics per second against the 35 the game wants:
+            // the world visibly runs at half speed. Generating ahead decouples
+            // the two, at the cost of `delay` tics of input latency.
+            //
+            // Generating only when the lead is short also bounds the damage of a
+            // stall: while a peer is late the tic does not advance, so nothing
+            // more is generated, and the backlog cannot grow into seconds of
+            // input lag.
+            if (sendTic < tic + delay + 1)
             {
-                if (!localSent)
-                {
-                    pendingLocal = BuildDeterministicCommand(tic, session.LocalPlayer);
-                    pendingLocal.Number = tic;
-                    session.SendTic(session.LocalPlayer, pendingLocal);
-                    localSent = true;
-                }
+                GenerateAndSend(input, ref pause);
             }
-            else
+
+            if (sendTic < tic + delay + 1)
             {
-                var local = new TicCmd();
-                input.BuildTicCmd(local);
-
-                if (pause)
-                {
-                    pause = false;
-                    local.Buttons |= (byte)(TicCmdButtons.Special | TicCmdButtons.Pause);
-                }
-
-                localQueue.Enqueue(NetTic.From(local));
-                while (localQueue.Count > MaxLocalBacklog)
-                {
-                    localQueue.Dequeue();
-                }
-
-                if (localQueue.Count == 0)
-                {
-                    return false;
-                }
-
-                // Announce the local command for this tic as early as possible.
-                // Waiting for every remote command before sending our own would
-                // deadlock the very first tic.
-                if (!localSent)
-                {
-                    pendingLocal = localQueue.Dequeue();
-                    pendingLocal.Number = tic;
-                    session.SendTic(session.LocalPlayer, pendingLocal);
-                    localSent = true;
-                }
+                // Still warming up. The first simulation step waits a few tics,
+                // which happens inside "GET READY" and is not visible.
+                return false;
             }
 
             var count = session.ExpectedPlayers;
@@ -151,7 +131,13 @@ namespace DPTDOOM.Net
                 }
             }
 
-            pendingLocal.CopyTo(cmds[session.LocalPlayer]);
+            NetTic local;
+            if (!localCommands.TryGetValue(tic, out local))
+            {
+                return false;
+            }
+
+            local.CopyTo(cmds[session.LocalPlayer]);
 
             for (var player = 0; player < count; player++)
             {
@@ -179,11 +165,53 @@ namespace DPTDOOM.Net
             return true;
         }
 
+        /// <summary>
+        /// Samples one local command and sends it immediately, stamped with the
+        /// tic it belongs to. Sending at generation time, not at simulation
+        /// time, is the whole point: the peer needs it Delay tics before it
+        /// simulates that tic, not when we get there.
+        /// </summary>
+        private void GenerateAndSend(IUserInput input, ref bool pause)
+        {
+            NetTic command;
+
+            if (DeterministicInput)
+            {
+                command = BuildDeterministicCommand(sendTic, session.LocalPlayer);
+            }
+            else
+            {
+                var local = new TicCmd();
+                input.BuildTicCmd(local);
+
+                if (pause)
+                {
+                    pause = false;
+                    local.Buttons |= (byte)(TicCmdButtons.Special | TicCmdButtons.Pause);
+                }
+
+                command = NetTic.From(local);
+            }
+
+            command.Number = sendTic;
+
+            lock (localCommands)
+            {
+                localCommands[sendTic] = command;
+            }
+
+            session.SendTic(session.LocalPlayer, command);
+            sendTic++;
+        }
+
         public void Commit()
         {
+            lock (localCommands)
+            {
+                localCommands.Remove(tic);
+            }
+
             tic++;
-            pendingLocal = null;
-            localSent = false;
         }
 
         public void Dispose()

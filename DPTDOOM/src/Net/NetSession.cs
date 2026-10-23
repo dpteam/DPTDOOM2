@@ -14,6 +14,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
@@ -140,11 +141,20 @@ namespace DPTDOOM.Net
         private int connectedPlayers;
         private SessionSettings settings;
 
+        private int delay;
+        private readonly int delayOverride;
+
         private NetSession(bool isHost, int expectedPlayers, string localName)
+            : this(isHost, expectedPlayers, localName, -1)
+        {
+        }
+
+        private NetSession(bool isHost, int expectedPlayers, string localName, int delayOverride)
         {
             this.isHost = isHost;
             this.expectedPlayers = MathEx.Clamp(expectedPlayers, 2, NetProtocol.MaxPlayers);
             this.localName = localName;
+            this.delayOverride = delayOverride;
 
             for (var i = 0; i < NetProtocol.MaxPlayers; i++)
             {
@@ -156,7 +166,17 @@ namespace DPTDOOM.Net
 
         public static NetSession StartHost(int port, int players, string name, SessionSettings settings)
         {
-            var session = new NetSession(true, players, name);
+            return StartHost(port, players, name, settings, -1);
+        }
+
+        /// <summary>
+        /// <paramref name="delayOverride"/> forces the input delay in tics. -1
+        /// measures the round trip and decides, which is right for players; a
+        /// fixed value is right for tests that must be reproducible.
+        /// </summary>
+        public static NetSession StartHost(int port, int players, string name, SessionSettings settings, int delayOverride)
+        {
+            var session = new NetSession(true, players, name, delayOverride);
             session.settings = settings;
             session.localPlayer = 0;
             session.connectedPlayers = 1;
@@ -166,7 +186,7 @@ namespace DPTDOOM.Net
 
         public static NetSession Join(string address, int port, string name, int timeoutMs)
         {
-            var session = new NetSession(false, 2, name);
+            var session = new NetSession(false, 2, name, -1);
 
             try
             {
@@ -283,6 +303,19 @@ namespace DPTDOOM.Net
                 peer.PlayerIndex = playerIndex;
                 peer.Name = guestName;
 
+                // Measure the round trip before the welcome goes out, and put
+                // the result in it. Both ends then start with the same input
+                // delay, which they must: a delay that differs between host and
+                // guest shifts tic numbering on one side and desyncs the game.
+                //
+                // A fixed override skips the probe entirely, so a test can pin
+                // the delay and stay reproducible.
+                var measured = delayOverride >= 0
+                    ? delayOverride
+                    : DelayFromRoundTrip(MeasureRoundTrip(stream, reader), delayOverride);
+
+                delay = Math.Max(delay, measured);
+
                 SendWelcome(stream, playerIndex, guestName);
 
                 peers.Add(peer);
@@ -293,8 +326,119 @@ namespace DPTDOOM.Net
                 peer.Thread = thread;
                 thread.Start();
 
-                Console.WriteLine("Net: '" + guestName + "' joined as player " + (playerIndex + 1) + ".");
+                Console.WriteLine("Net: '" + guestName + "' joined as player " + (playerIndex + 1) +
+                                  (Delay > 0 ? ", input delay " + Delay + " tics" : "") + ".");
             }
+        }
+
+        /// <summary>
+        /// Round-trip time in milliseconds, best of three attempts.
+        ///
+        /// This runs before the welcome so the number can travel inside it. The
+        /// guest answers pings while it is still waiting for the welcome, which
+        /// is why it cannot simply be measured later: the game would already be
+        /// running and the delay would have to change mid-session.
+        ///
+        /// Returns -1 when the peer does not answer, and the caller then keeps
+        /// the conservative default.
+        /// </summary>
+        private static int MeasureRoundTrip(Stream stream, BinaryReader reader)
+        {
+            var previousTimeout = stream.CanTimeout ? stream.ReadTimeout : 0;
+            var watch = new Stopwatch();
+            var best = long.MaxValue;
+
+            try
+            {
+                if (stream.CanTimeout)
+                {
+                    stream.ReadTimeout = 3000;
+                }
+
+                for (var attempt = 0; attempt < 3; attempt++)
+                {
+                    var payload = new byte[4];
+                    NetProtocol.WriteUInt32(payload, 0, (uint)attempt);
+
+                    watch.Restart();
+                    SendFrame(stream, NetProtocol.TypePing, payload, null);
+
+                    var reply = ReadFrame(reader);
+                    if (reply == null || reply.Value.Type != NetProtocol.TypePong)
+                    {
+                        break;
+                    }
+
+                    watch.Stop();
+
+                    if (watch.ElapsedMilliseconds < best)
+                    {
+                        best = watch.ElapsedMilliseconds;
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                // A slow or silent peer just means no measurement.
+            }
+            finally
+            {
+                if (stream.CanTimeout)
+                {
+                    try
+                    {
+                        stream.ReadTimeout = previousTimeout;
+                    }
+                    catch
+                    {
+                    }
+                }
+            }
+
+            return best == long.MaxValue ? -1 : (int)best;
+        }
+
+        /// <summary>
+        /// How many tics of input to keep in hand.
+        ///
+        /// Lockstep advances one tic per network round trip: the tic cannot be
+        /// simulated until the peer's command for it has arrived, and the peer
+        /// only generates that command when it gets to the same tic. At 100 ms of
+        /// ping that caps the session at roughly 17 tics per second while the
+        /// game asks for 35, so the world runs at half speed and every action
+        /// feels late.
+        ///
+        /// Sending commands a few tics ahead breaks that coupling: by the time
+        /// tic N is simulated, the peer's command for N was sent N-delay tics ago
+        /// and has long arrived. The price is delay tics of input latency, which
+        /// is the trade every lockstep game makes.
+        ///
+        /// One tic of margin is added for jitter, because a buffer that exactly
+        /// matches the measured round trip stalls on the first busy moment.
+        /// </summary>
+        private static int DelayFromRoundTrip(int roundTripMs, int overrideTics)
+        {
+            if (overrideTics >= 0)
+            {
+                return MathEx.Clamp(overrideTics, 0, 10);
+            }
+
+            if (roundTripMs < 0)
+            {
+                // No measurement. Four tics covers about 115 ms, which is a
+                // better guess for the internet than assuming a LAN.
+                return 4;
+            }
+
+            var ticMs = 1000 / NetProtocol.TicsPerSecond;
+
+            if (roundTripMs < ticMs / 2)
+            {
+                // Same machine or a fast LAN: no buffer, no added latency.
+                return 0;
+            }
+
+            return MathEx.Clamp((roundTripMs + ticMs - 1) / ticMs + 1, 1, 10);
         }
 
         private static void CloseGuest(TcpClient client, Stream stream)
@@ -327,6 +471,7 @@ namespace DPTDOOM.Net
                 writer.Write((byte)playerIndex);
                 writer.Write((byte)expectedPlayers);
                 writer.Write(settings.Serialize());
+                writer.Write((byte)Delay);
 
                 lock (sync)
                 {
@@ -447,32 +592,19 @@ namespace DPTDOOM.Net
                 SendFrame(stream, NetProtocol.TypeHello, payload.ToArray(), null);
             }
 
-            var reply = ReadFrame(reader);
-            if (reply == null)
-            {
-                throw new Exception("The host closed the connection.");
-            }
+            var reply = awaitWelcome(reader, stream);
 
-            if (reply.Value.Type == NetProtocol.TypeReject)
-            {
-                using (var payload = new MemoryStream(reply.Value.Payload))
-                using (var payloadReader = new BinaryReader(payload))
-                {
-                    throw new Exception("Host refused the connection: " + NetProtocol.ReadString(payloadReader));
-                }
-            }
-
-            if (reply.Value.Type != NetProtocol.TypeWelcome)
-            {
-                throw new Exception("Unexpected reply from host.");
-            }
-
-            using (var payload = new MemoryStream(reply.Value.Payload))
+            using (var payload = new MemoryStream(reply.Payload))
             using (var payloadReader = new BinaryReader(payload))
             {
                 localPlayer = payloadReader.ReadByte();
                 var playerCount = payloadReader.ReadByte();
                 settings = SessionSettings.Deserialize(payloadReader);
+
+                // The host measured the round trip and decided how far ahead to
+                // send commands. Both ends must use the same number or their tic
+                // numbering diverges.
+                delay = payloadReader.ReadByte();
 
                 var count = payloadReader.ReadByte();
                 lock (sync)
@@ -500,6 +632,77 @@ namespace DPTDOOM.Net
             thread.Name = "DPTDOOM net host";
             peer.Thread = thread;
             thread.Start();
+        }
+
+        /// <summary>
+        /// Waits for the welcome while answering the host's round-trip probes.
+        ///
+        /// The host measures the round trip before it sends the welcome, because
+        /// the measurement has to travel inside it: both ends must start with the
+        /// same input delay. That means the guest has to reply to pings from
+        /// inside this wait - the read loop does not exist yet at this point.
+        /// </summary>
+        private Frame awaitWelcome(BinaryReader reader, Stream stream)
+        {
+            var previousTimeout = stream.CanTimeout ? stream.ReadTimeout : 0;
+
+            try
+            {
+                if (stream.CanTimeout)
+                {
+                    stream.ReadTimeout = 15000;
+                }
+
+                while (true)
+                {
+                    var reply = ReadFrame(reader);
+
+                    if (reply == null)
+                    {
+                        throw new Exception("The host closed the connection.");
+                    }
+
+                    var frame = reply.Value;
+
+                    if (frame.Type == NetProtocol.TypePing)
+                    {
+                        SendFrame(stream, NetProtocol.TypePong, frame.Payload, null);
+                        continue;
+                    }
+
+                    if (frame.Type == NetProtocol.TypeReject)
+                    {
+                        var reason = "";
+                        using (var payload = new MemoryStream(frame.Payload))
+                        using (var payloadReader = new BinaryReader(payload))
+                        {
+                            reason = NetProtocol.ReadString(payloadReader);
+                        }
+
+                        throw new Exception("Host refused the connection: " + reason);
+                    }
+
+                    if (frame.Type != NetProtocol.TypeWelcome)
+                    {
+                        throw new Exception("Unexpected reply from host.");
+                    }
+
+                    return frame;
+                }
+            }
+            finally
+            {
+                if (stream.CanTimeout)
+                {
+                    try
+                    {
+                        stream.ReadTimeout = previousTimeout;
+                    }
+                    catch
+                    {
+                    }
+                }
+            }
         }
 
         ////////////////////////////////////////////////////////////
@@ -906,6 +1109,11 @@ namespace DPTDOOM.Net
 
         public int ExpectedPlayers => expectedPlayers;
         public SessionSettings Settings => settings;
+
+        /// <summary>
+        /// Input delay in tics, agreed during the handshake. Zero on a LAN.
+        /// </summary>
+        public int Delay => delay;
         public bool Faulted => faulted;
         public string FaultReason => faultReason;
         public bool Finished => finished;

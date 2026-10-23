@@ -32,6 +32,13 @@ namespace DPTDOOM.Net
     {
         public const int DefaultPort = 5029;
 
+        /// <summary>
+        /// Doom's simulation runs at 35 tics per second. Named here because the
+        /// network layer has to size its input buffer in tics, and a second copy
+        /// of this constant would quietly disagree with the game loop.
+        /// </summary>
+        public const int TicsPerSecond = 35;
+
         public const int Version = 1;
 
         public const int HeaderSize = 12;

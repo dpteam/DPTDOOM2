@@ -52,6 +52,7 @@ namespace DPTDOOM.Net
             var players = args.players.Present ? args.players.Value : 2;
             var settings = BuildSettings(args, content);
             var relay = args.relay.Present;
+            var delayOverride = args.netdelay.Present ? args.netdelay.Value : -1;
 
             string masterHost = null;
             var masterPort = MasterProtocol.DefaultPort;
@@ -119,11 +120,16 @@ namespace DPTDOOM.Net
                 lines.Add("RELAY ON");
             }
 
+            if (delayOverride >= 0)
+            {
+                lines.Add("INPUT DELAY " + delayOverride + " TICS");
+            }
+
             lines.Add("WAITING FOR PLAYER 1/" + (players - 1));
 
             status("HOSTING", lines.ToArray());
 
-            var session = NetSession.StartHost(port, players, name, settings);
+            var session = NetSession.StartHost(port, players, name, settings, delayOverride);
 
             if (presence != null)
             {

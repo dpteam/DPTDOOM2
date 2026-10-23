@@ -40,6 +40,7 @@ dotnet test DPTDOOMTest\DPTDOOMTest.csproj -c Release
 powershell -NoProfile -File tools\check-standalone.ps1
 powershell -NoProfile -File tools\test-master.ps1
 powershell -NoProfile -File tools\test-relay.ps1
+powershell -NoProfile -File tools\test-net-latency.ps1
 powershell -NoProfile -File tools\test-launcher.ps1
 ```
 
@@ -99,6 +100,13 @@ powershell -NoProfile -File tools\test-launcher.ps1
 - Сеть: lockstep, состояние мира не передаётся. Любое изменение, влияющее на
   детерминизм симуляции (RNG, порядок тиков, физика), ломает совместимость —
   проверять `-botinput` soak-тестом и хешами мира.
+- Задержка ввода (`NetSession.Delay`) обязана быть **одинаковой** у хоста и
+  гостя: она сдвигает нумерацию тиков. Хост измеряет round-trip и передаёт число
+  внутри welcome; не считать его отдельно на каждой стороне. Без упреждения
+  lockstep идёт «тик на round-trip» — при 100 мс пинга мир замедляется вдвое
+  (см. `docs/NETWORK.md`, проверка `tools/test-net-latency.ps1`). Больше трафика
+  это не требует: сессия занимает ~1.5 КБ/с, поэтому «уменьшать пакеты» не
+  помогает и не нужно.
 - Сохранения в сети не поддерживаются. Не добавлять заглушки, выглядящие
   рабочими.
 

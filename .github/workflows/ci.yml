@@ -95,6 +95,14 @@ jobs:
         shell: pwsh
         run: ./tools/test-relay.ps1
 
+      - name: Full speed at high ping
+        # Lockstep used to advance one tic per round trip, so a 100 ms ping
+        # halved the tic rate and made the game run at half speed - which read
+        # as a network problem and was not one: the session uses about 1.5 KB/s.
+        # The input delay buffer fixed it, and this keeps it fixed.
+        shell: pwsh
+        run: ./tools/test-net-latency.ps1
+
       - name: Window menu and tray
         shell: pwsh
         run: ./tools/test-menu.ps1

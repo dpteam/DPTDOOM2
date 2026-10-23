@@ -18,6 +18,7 @@
   музыка — MUS → MIDI через системный синтезатор. Никаких DLL рядом с EXE.
 - **Headless** — прогон без окна, с дампом кадра и хешами мира (для тестов).
 - **Кооператив по сети** — lockstep TCP-сессия host/join на 2–4 игроков.
+  Ввод отправляется с упреждением, поэтому 100 мс пинга не замедляют игру.
 - **Relay** — игра без проброса порта: хост и гость подключаются наружу к master,
   он соединяет их потоки. Снимает и NAT hairpin.
 - **Кооп-боты** — `-coopbots 1..3` добавляет ботов в одиночную игру.
@@ -190,6 +191,7 @@ DPTDOOMTest/        unit и compatibility тесты
 dotnet test DPTDOOMTest\DPTDOOMTest.csproj -c Release
 powershell -NoProfile -File tools/test-master.ps1
 powershell -NoProfile -File tools/test-relay.ps1
+powershell -NoProfile -File tools/test-net-latency.ps1
 powershell -NoProfile -File tools/test-launcher.ps1
 powershell -NoProfile -File tools/check-standalone.ps1
 ```

@@ -70,6 +70,11 @@ dotnet build DPTDOOM\DPTDOOM.csproj -f net40 -c Release
 | `-port <n>` | TCP-порт сессии |
 | `-address <host:port>` | адрес хоста |
 | `-name <nick>` | имя игрока |
+| `-master <host:port>` | master: список сессий и relay |
+| `-relay` | хост через relay, без проброса порта |
+| `-relay-master <host:port>` | master для relay (гость) |
+| `-relay-session <hex32>` | id сессии, который печатает хост |
+| `-netdelay <0..10>` | упреждение ввода в тиках; по умолчанию измеряется |
 | `-userdir <dir>` | каталог конфига и сохранений |
 | `-botinput` | детерминированный ввод (автотесты сети) |
 | `-version` | версия и выход |
@@ -102,6 +107,7 @@ powershell -NoProfile -File tools\check-standalone.ps1 # нет сторонни
 powershell -NoProfile -File tools\test-icon.ps1       # иконка совместима с XP
 powershell -NoProfile -File tools\test-window.ps1     # заголовок окна (нужен IWAD)
 powershell -NoProfile -File tools\test-relay.ps1      # игра через relay (нужен IWAD)
+powershell -NoProfile -File tools\test-net-latency.ps1 # скорость при пинге (нужен IWAD)
 ```
 
 Отдельно, это не тест: открыть порты в файрволе для хоста и master —

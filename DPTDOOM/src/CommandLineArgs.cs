@@ -65,6 +65,7 @@ namespace DPTDOOM
         public readonly Arg relay;
         public readonly Arg<string> relayMaster;
         public readonly Arg<string> relaySession;
+        public readonly Arg<int> netdelay;
         public readonly Arg botinput;
         public readonly Arg<string> userdir;
         public readonly Arg<string> soundtest;
@@ -122,6 +123,7 @@ namespace DPTDOOM
             relay = new Arg(args.Contains("-relay"));
             relayMaster = GetString(args, "-relay-master");
             relaySession = GetString(args, "-relay-session");
+            netdelay = GetInt(args, "-netdelay");
             botinput = new Arg(args.Contains("-botinput"));
             userdir = GetString(args, "-userdir");
             soundtest = GetString(args, "-soundtest");
