@@ -131,6 +131,12 @@ namespace DPTDOOMTest.CompatibilityTests
                       .Append(" sectors ").Append(front).Append("->").Append(back)
                       .Append(" step=").Append(step.ToString("0"))
                       .Append(" clearance=").Append((ceiling - floor).ToString("0"))
+                      .Append(" front floor/ceil=")
+                      .Append(line.FrontSector.FloorHeight.ToFloat().ToString("0")).Append('/')
+                      .Append(line.FrontSector.CeilingHeight.ToFloat().ToString("0"))
+                      .Append(" back floor/ceil=")
+                      .Append(line.BackSector.FloorHeight.ToFloat().ToString("0")).Append('/')
+                      .Append(line.BackSector.CeilingHeight.ToFloat().ToString("0"))
                       .Append('\n');
 
                 if (++reported >= 12)
