@@ -27,6 +27,9 @@ param(
     # Port the master listens on. Matches MasterProtocol.DefaultPort.
     [int]$MasterPort = 25135,
 
+    # Relay port. Matches the master's --relay default of "control port + 1".
+    [int]$RelayPort = 25136,
+
     # Also open the master port. Only needed on the machine running the master.
     [switch]$IncludeMaster,
 
@@ -44,6 +47,7 @@ $ErrorActionPreference = "Stop"
 
 $GameRule = "DPT.DOOM game host (TCP $GamePort)"
 $MasterRule = "DPT.DOOM master (TCP $MasterPort)"
+$RelayRule = "DPT.DOOM master relay (TCP $RelayPort)"
 
 function Test-Elevated {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -57,6 +61,7 @@ function Show-Plan {
     Write-Host "  game  : TCP $GamePort inbound   (rule '$GameRule')"
     if ($IncludeMaster) {
         Write-Host "  master: TCP $MasterPort inbound (rule '$MasterRule')"
+        Write-Host "  relay : TCP $RelayPort inbound  (rule '$RelayRule')"
     } else {
         Write-Host "  master: not opened (add -IncludeMaster on the machine running it)"
     }
@@ -78,6 +83,7 @@ if (-not (Test-Elevated)) {
 
     $reRun = "-NoProfile -ExecutionPolicy Bypass -File `"$($MyInvocation.MyCommand.Path)`" -GamePort $GamePort"
     if ($IncludeMaster) { $reRun += " -IncludeMaster" }
+    if ($IncludeMaster -and $RelayPort -ne 25136) { $reRun += " -RelayPort $RelayPort" }
     if ($Remove) { $reRun += " -Remove" }
 
     Write-Host "  powershell $reRun"
@@ -128,6 +134,7 @@ if ($Remove) {
     Remove-PortRule $GameRule $GamePort
     if ($IncludeMaster) {
         Remove-PortRule $MasterRule $MasterPort
+        Remove-PortRule $RelayRule $RelayPort
     }
     Write-Host ""
     Write-Host "Firewall rules removed."
@@ -139,19 +146,25 @@ Add-PortRule $GameRule $GamePort
 
 if ($IncludeMaster) {
     Add-PortRule $MasterRule $MasterPort
+    Add-PortRule $RelayRule $RelayPort
 }
 
 Write-Host ""
 Write-Host "Done. The firewall now allows inbound TCP $GamePort."
 
 if ($IncludeMaster) {
-    Write-Host "The master port $MasterPort is open too."
+    Write-Host "The master port $MasterPort is open too, and the relay port $RelayPort."
 }
 
 Write-Host ""
 Write-Host "The firewall is only half of it: a router still has to forward the port"
 Write-Host "to this machine, or nobody outside your network can connect. See"
 Write-Host "docs/NETWORK.md, section 'Проброс портов'."
+
+if ($IncludeMaster) {
+    Write-Host "The relay needs its own forward as well: external $RelayPort ->"
+    Write-Host "internal $RelayPort, TCP. Without it hosts can list but nobody can join."
+}
 
 # A program rule as well, so a non-default -port still works without editing
 # this script. Windows Firewall matches an inbound connection against any
