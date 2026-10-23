@@ -220,6 +220,63 @@ namespace DPTDOOMTest.CompatibilityTests
         }
 
         [TestMethod]
+        public void Pk3FlatOverridesTheIwadFlat()
+        {
+            if (!File.Exists(WadPath.Doom2))
+            {
+                Assert.Inconclusive("doom2.wad not available.");
+            }
+
+            var path = Path.Combine(folder, "flats.pk3");
+
+            // FLOOR0_1 exists in Doom 2, so this is the real override case.
+            using (var archive = ZipFile.Open(path, ZipArchiveMode.Create))
+            {
+                var entry = archive.CreateEntry("flats/FLOOR0_1.png", CompressionLevel.Optimal);
+
+                using (var stream = entry.Open())
+                {
+                    var png = PngBuilder.SolidRgb(64, 64, 255, 0, 255);
+                    stream.Write(png, 0, png.Length);
+                }
+            }
+
+            using (var wad = new Wad(WadPath.Doom2, path))
+            {
+                var original = new FlatLookup(new Wad(WadPath.Doom2));
+                var patched = new FlatLookup(wad);
+
+                var originalFlat = original["FLOOR0_1"];
+                var patchedFlat = patched["FLOOR0_1"];
+
+                Assert.AreEqual(4096, patchedFlat.Data.Length, "a flat is 4096 bytes");
+
+                var differs = false;
+
+                for (var i = 0; i < 4096; i++)
+                {
+                    if (originalFlat.Data[i] != patchedFlat.Data[i])
+                    {
+                        differs = true;
+                        break;
+                    }
+                }
+
+                Assert.IsTrue(differs, "the PK3 flat must replace the IWAD's flat of the same name");
+
+                // Every pixel of the source was the same colour, so the flat must
+                // be one palette index repeated: proof the conversion ran rather
+                // than the bytes being copied.
+                var first = patchedFlat.Data[0];
+
+                foreach (var index in patchedFlat.Data)
+                {
+                    Assert.AreEqual(first, index, "a solid image must convert to a solid flat");
+                }
+            }
+        }
+
+        [TestMethod]
         public void GameModeIsDetectedFromMapsNotFromTheFileName()
         {
             // A container has no useful name: "my-stuff.pk3" says nothing. The

@@ -135,6 +135,16 @@ namespace DPTDOOM
                     continue;
                 }
 
+                if (entryExtension == ".png")
+                {
+                    // Kept as a graphic, not as a lump: the pixels need decoding
+                    // and converting to the palette first, which the flat lookup
+                    // does. Registering the raw PNG as a lump would only put
+                    // something the renderer cannot use into the lump list.
+                    graphics.Add(new Graphic { Path = entry.Name, Data = archive.ReadEntry(entry) });
+                    continue;
+                }
+
                 var lumpName = Path.GetFileNameWithoutExtension(entry.Name).ToUpperInvariant();
 
                 if (lumpName.Length == 0 || lumpName.Length > 8)
@@ -235,6 +245,20 @@ namespace DPTDOOM
 
             return GameMode.Shareware;
         }
+
+        /// <summary>
+        /// Raw bytes of a PK3 entry that is a graphic, keyed by its path inside
+        /// the archive. Filled by the ZIP loader and read by the graphic lookups.
+        /// </summary>
+        public sealed class Graphic
+        {
+            public string Path;
+            public byte[] Data;
+        }
+
+        private readonly List<Graphic> graphics = new List<Graphic>();
+
+        public IList<Graphic> Graphics { get { return graphics; } }
 
         public int GetLumpNumber(string name)
         {

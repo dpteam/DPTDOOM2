@@ -105,13 +105,97 @@ namespace DPTDOOM
                 skyFlatNumber = nameToNumber["F_SKY1"];
                 skyFlat = nameToFlat["F_SKY1"];
 
-                Console.WriteLine("OK (" + nameToFlat.Count + " flats)");
+                var added = AddPk3Flats(wad);
+
+                Console.WriteLine("OK (" + nameToFlat.Count + " flats" +
+                                  (added > 0 ? ", " + added + " from PK3" : "") + ")");
             }
             catch (Exception e)
             {
                 Console.WriteLine("Failed");
                 ExceptionDispatchInfo.Throw(e);
             }
+        }
+
+        /// <summary>
+        /// Adds flats from PNG files inside a PK3, replacing same-named ones.
+        ///
+        /// This is the other half of PK3 support: the container loader finds the
+        /// files, and this turns them into something the renderer can draw. A PNG
+        /// carries RGB while Doom stores palette indices, so each image is
+        /// decoded and mapped back into PLAYPAL — see <see cref="Pk3Graphics"/>.
+        ///
+        /// A flat in a PK3 overrides the IWAD's flat of the same name, which is
+        /// the whole point of loading a mod.
+        /// </summary>
+        private int AddPk3Flats(Wad wad)
+        {
+            if (wad.Graphics == null || wad.Graphics.Count == 0)
+            {
+                return 0;
+            }
+
+            var playpal = wad.ReadLump("PLAYPAL");
+            var added = 0;
+
+            foreach (var graphic in wad.Graphics)
+            {
+                if (!Pk3Graphics.IsFlatPath(graphic.Path))
+                {
+                    continue;
+                }
+
+                var name = Pk3Graphics.LumpNameOf(graphic.Path);
+
+                if (name == null)
+                {
+                    continue;
+                }
+
+                byte[] data;
+
+                try
+                {
+                    var image = PngImage.Decode(graphic.Data);
+                    data = Pk3Graphics.ToFlat(image, playpal);
+                }
+                catch (Exception e)
+                {
+                    // A broken PNG in a mod must not stop the game from starting:
+                    // the rest of the level is still playable, and the IWAD flat
+                    // stays in place.
+                    Console.WriteLine();
+                    Console.WriteLine("  skipping " + graphic.Path + ": " + e.Message);
+                    continue;
+                }
+
+                var flat = new Flat(name, data);
+
+                int number;
+
+                if (nameToNumber.TryGetValue(name, out number))
+                {
+                    flats[number] = flat;
+                }
+                else
+                {
+                    number = flats.Length;
+                    Array.Resize(ref flats, flats.Length + 1);
+                    flats[number] = flat;
+                    nameToNumber[name] = number;
+                }
+
+                nameToFlat[name] = flat;
+                added++;
+            }
+
+            if (nameToFlat.ContainsKey("F_SKY1"))
+            {
+                skyFlatNumber = nameToNumber["F_SKY1"];
+                skyFlat = nameToFlat["F_SKY1"];
+            }
+
+            return added;
         }
 
         private void InitDeuTexMerge(Wad wad)
