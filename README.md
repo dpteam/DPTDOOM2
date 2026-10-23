@@ -177,4 +177,5 @@ GPL v2 или новее, см. [LICENSE](licenses/LICENSE_DPTDOOM.txt). Про�
 
 Подробности: [docs/ROADMAP.md](docs/ROADMAP.md), [docs/BUILDING.md](docs/BUILDING.md),
 [docs/LAUNCHER.md](docs/LAUNCHER.md), [docs/MASTER.md](docs/MASTER.md),
-[docs/NETWORK.md](docs/NETWORK.md), [docs/CI.md](docs/CI.md), [PROMPT.md](PROMPT.md).
+[docs/NETWORK.md](docs/NETWORK.md), [docs/BOTS.md](docs/BOTS.md), [docs/CI.md](docs/CI.md),
+[docs/REFERENCE-SOURCES.md](docs/REFERENCE-SOURCES.md), [PROMPT.md](PROMPT.md).
