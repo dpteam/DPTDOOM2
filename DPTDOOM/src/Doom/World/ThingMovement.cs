@@ -434,7 +434,7 @@ namespace DPTDOOM
 
             crossedSpecialCount = 0;
 
-            if ((currentFlags & MobjFlags.NoClip) != 0)
+            if ((currentFlags & MobjFlags.NoClip) != 0 || HasNoClipCheat(thing))
             {
                 return true;
             }
@@ -488,6 +488,21 @@ namespace DPTDOOM
         /// Attempt to move to a new position, crossing special lines unless
         /// MobjFlags.Teleport is set.
         /// </summary>
+        /// <summary>
+        /// True when this thing is the player using IDCLIP.
+        ///
+        /// The cheat is read here rather than mirrored onto a MobjFlag so that it
+        /// survives death and respawn: a respawned player is a new Mobj built from
+        /// PlayerInfo, and a copied flag would be silently lost while the cheat
+        /// stayed on. Reading the player's own state has no such gap.
+        /// </summary>
+        private static bool HasNoClipCheat(Mobj thing)
+        {
+            var player = thing.Player;
+
+            return player != null && (player.Cheats & CheatFlags.NoClip) != 0;
+        }
+
         public bool TryMove(Mobj thing, Fixed x, Fixed y)
         {
             floatOk = false;

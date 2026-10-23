@@ -57,6 +57,21 @@ namespace DPTDOOM
 
         public bool DoEvent(DoomEvent e)
         {
+            // Cheats change the world, and in a lockstep network game the other
+            // end never learns about the change: the session desyncs. During demo
+            // playback it corrupts what is being checked. Neither is fixable by
+            // sending the cheat over the wire - it is a debugging tool, not a
+            // game feature - so it is refused instead of quietly breaking things.
+            if (world.Options.NetGame || world.Options.DemoPlayback)
+            {
+                if (e.Type == EventType.KeyDown)
+                {
+                    Console.WriteLine("Cheats are disabled in a network game and during demo playback.");
+                }
+
+                return true;
+            }
+
             if (e.Type == EventType.KeyDown)
             {
                 buffer[p] = e.Key.GetChar();

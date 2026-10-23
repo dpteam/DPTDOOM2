@@ -161,6 +161,13 @@ namespace DPTDOOM.Net
         private int delay;
         private readonly int delayOverride;
 
+        private Thread pingThread;
+        private readonly object pingLock = new object();
+        private readonly Stopwatch pingWatch = new Stopwatch();
+        private bool pingOutstanding;
+        private int pingMs;
+        private int pingSequence;
+
         private NetSession(bool isHost, int expectedPlayers, string localName)
             : this(isHost, expectedPlayers, localName, -1)
         {
@@ -351,8 +358,16 @@ namespace DPTDOOM.Net
                 peer.Thread = thread;
                 thread.Start();
 
-                Console.WriteLine("Net: '" + guestName + "' joined as player " + (playerIndex + 1) +
-                                  (Delay > 0 ? ", input delay " + Delay + " tics" : "") + ".");
+                StartPingMonitor();
+
+                // Always report the link, not only when a buffer was needed. A
+                // player who says "it feels laggy" needs a number to look at, and
+                // this is the one number that explains the whole feel of a
+                // lockstep session: the tics of input delay it cost to keep the
+                // world running at full speed.
+                Console.WriteLine("Net: '" + guestName + "' joined as player " + (playerIndex + 1) + " (" +
+                                  (rtt >= 0 ? "ping " + rtt + " ms" : "ping not measured") +
+                                  ", input delay " + Delay + " tics = " + (Delay * 1000 / NetProtocol.TicsPerSecond) + " ms).");
             }
         }
 
@@ -708,6 +723,90 @@ namespace DPTDOOM.Net
             thread.Name = "DPTDOOM net host";
             peer.Thread = thread;
             thread.Start();
+
+            StartPingMonitor();
+        }
+
+        /// <summary>
+        /// Keeps a live round-trip figure for the on-screen overlay.
+        ///
+        /// The handshake measures the link once, which is enough to size the input
+        /// buffer but not enough to answer "is it laggy right now". A player who
+        /// suspects a bad connection should be able to look at a number instead of
+        /// guessing, and one 16-byte exchange every two seconds costs nothing next
+        /// to the 1.5 KB/s the session already uses.
+        ///
+        /// It never touches the simulation, so it cannot affect determinism.
+        /// </summary>
+        private void StartPingMonitor()
+        {
+            if (pingThread != null)
+            {
+                return;
+            }
+
+            pingThread = new Thread(PingLoop);
+            pingThread.IsBackground = true;
+            pingThread.Name = "DPTDOOM net ping";
+            pingThread.Start();
+        }
+
+        private void PingLoop()
+        {
+            var watch = new Stopwatch();
+
+            while (!disposed)
+            {
+                Thread.Sleep(2000);
+
+                if (disposed)
+                {
+                    return;
+                }
+
+                Peer peer = null;
+
+                lock (sync)
+                {
+                    // Only one peer is probed: with a small co-op session they are
+                    // all on the same link, and probing every one of them would
+                    // multiply the traffic for a number nobody reads twice.
+                    if (peers.Count > 0)
+                    {
+                        peer = peers[0];
+                    }
+                }
+
+                if (peer == null || peer.Stream == null)
+                {
+                    continue;
+                }
+
+                var payload = new byte[4];
+                NetProtocol.WriteUInt32(payload, 0, (uint)pingSequence++);
+
+                lock (pingLock)
+                {
+                    // Start the clock at send time. Reading a stopwatch before
+                    // restarting it measured the previous probe's age, which
+                    // produced a number that grew by two seconds per round trip.
+                    pingWatch.Restart();
+                    pingOutstanding = true;
+                }
+
+                SendFrame(peer.Stream, NetProtocol.TypePing, payload, peer);
+            }
+        }
+
+        private void CompletePing(int roundTripMs)
+        {
+            // A gentle average: the raw figure jumps with every hiccup, and a
+            // number that flickers between 60 and 400 reads as noise rather than
+            // information.
+            lock (pingLock)
+            {
+                pingMs = pingMs <= 0 ? roundTripMs : (pingMs * 3 + roundTripMs) / 4;
+            }
         }
 
         /// <summary>
@@ -826,8 +925,31 @@ namespace DPTDOOM.Net
                     break;
 
                 case NetProtocol.TypePing:
-                    SendFrame(peer.Stream, NetProtocol.TypePong, new byte[0], peer);
+                    // Echo the sequence number so the sender can match the reply
+                    // to the probe, and so a stale pong cannot be mistaken for a
+                    // fresh measurement.
+                    SendFrame(peer.Stream, NetProtocol.TypePong, payload, peer);
                     break;
+
+                case NetProtocol.TypePong:
+                    HandlePong(payload);
+                    break;
+            }
+        }
+
+        private void HandlePong(byte[] payload)
+        {
+            lock (pingLock)
+            {
+                if (!pingOutstanding)
+                {
+                    return;
+                }
+
+                // Any pong answers the outstanding probe; the sequence number is
+                // carried so the protocol can grow into per-probe timing later.
+                pingOutstanding = false;
+                CompletePing((int)pingWatch.ElapsedMilliseconds);
             }
         }
 
@@ -1190,6 +1312,21 @@ namespace DPTDOOM.Net
         /// Input delay in tics, agreed during the handshake. Zero on a LAN.
         /// </summary>
         public int Delay => delay;
+
+        /// <summary>
+        /// Live round-trip time in milliseconds, averaged over the last probes.
+        /// Zero until the first reply arrives, or when the session has no peers.
+        /// </summary>
+        public int PingMs
+        {
+            get
+            {
+                lock (pingLock)
+                {
+                    return pingMs;
+                }
+            }
+        }
         public bool Faulted => faulted;
         public string FaultReason => faultReason;
         public bool Finished => finished;

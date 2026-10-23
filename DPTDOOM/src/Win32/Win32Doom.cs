@@ -355,6 +355,19 @@ namespace DPTDOOM.Win32
                 text += "\n" + bots;
             }
 
+            // Network state, because "it feels laggy" is unanswerable without a
+            // number. Ping is the live round trip; delay is how far ahead input
+            // is sent, which is what a lockstep session actually costs the player.
+            if (netSession != null)
+            {
+                var ping = netSession.PingMs;
+                text += "\n" + (netSession.IsHost ? "host" : "client") +
+                        (netSession.Relayed ? " relay" : " direct") +
+                        "   ping " + (ping > 0 ? ping + " ms" : "--") +
+                        "   input delay " + netSession.Delay + " tics (" +
+                        (netSession.Delay * 1000 / 35) + " ms)";
+            }
+
             return text;
         }
 
