@@ -48,6 +48,9 @@ namespace DPTDOOM.Scripting
         public readonly List<KeyValuePair<string, string>> Unsupported =
             new List<KeyValuePair<string, string>>();
 
+        /// <summary>The line each unsupported property was written on, parallel to it.</summary>
+        public readonly List<int> UnsupportedLines = new List<int>();
+
         /// <summary>Whether the block carried a States section.</summary>
         public bool HasStates;
 
@@ -201,9 +204,16 @@ namespace DPTDOOM.Scripting
                     continue;
                 }
 
-                foreach (var property in actor.Unsupported)
+                for (var i = 0; i < actor.Unsupported.Count; i++)
                 {
-                    problems.Add(actor.Name + " line " + actor.Line + ": '" + property.Key +
+                    var property = actor.Unsupported[i];
+                    var propertyLine = i < actor.UnsupportedLines.Count
+                        ? actor.UnsupportedLines[i]
+                        : actor.Line;
+
+                    // The property's own line, not the actor's: a block with four refused
+                    // properties all reported at line 1 makes the reader find them by hand.
+                    problems.Add(actor.Name + " line " + propertyLine + ": '" + property.Key +
                                  " " + property.Value + "' has no counterpart in this engine, so it " +
                                  "is left as it was");
                 }
@@ -687,6 +697,7 @@ namespace DPTDOOM.Scripting
                 // Everything else is recorded rather than dropped: silence is what makes a
                 // modder believe a property took effect.
                 actor.Unsupported.Add(new KeyValuePair<string, string>(token.Text, value.Text));
+                actor.UnsupportedLines.Add(token.Line);
             }
         }
 

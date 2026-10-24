@@ -486,6 +486,32 @@ namespace DPTDOOMTest.UnitTests
         }
 
         [TestMethod]
+        public void AnUnsupportedPropertyIsReportedAtItsOwnLine()
+        {
+            // A block with four refused properties all reported at line 1 makes the reader
+            // find them by hand, and a modder with a two-hundred-line file will not.
+            using (var content = GameContent.CreateDummy(WadPath.Doom2))
+            {
+                var problems = new List<string>();
+
+                DecorateConverter.Convert(
+                    "ACTOR TestImp 3001\n" +
+                    "{\n" +
+                    "  Health 100\n" +
+                    "  Scale 1.5\n" +
+                    "  Alpha 0.5\n" +
+                    "}", DoomInfo.MobjInfos, problems);
+
+                Assert.AreEqual(2, problems.Count);
+
+                var text = string.Join("; ", problems.ToArray());
+
+                StringAssert.Contains(text, "line 4", "Scale is on line 4");
+                StringAssert.Contains(text, "line 5", "Alpha is on line 5");
+            }
+        }
+
+        [TestMethod]
         public void AnActorWithNothingToSayProducesNoPatch()
         {
             // An empty Thing_ body would still be an entry in the report and would look like
