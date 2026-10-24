@@ -268,8 +268,8 @@ namespace DPTDOOM.Net
                 {
                     if (relaySession == null)
                     {
-                        status("CONNECTION FAILED", new[] { e.Message.ToUpper() });
-                        Thread.Sleep(1500);
+                        status("CONNECTION FAILED", new[] { DescribeFailure(directHost, directPort, e) });
+                        Thread.Sleep(2500);
                         throw;
                     }
 
@@ -294,8 +294,8 @@ namespace DPTDOOM.Net
                 }
                 catch (Exception e)
                 {
-                    status("CONNECTION FAILED", new[] { e.Message.ToUpper() });
-                    Thread.Sleep(1500);
+                    status("CONNECTION FAILED", new[] { DescribeFailure(masterHost, masterPort, e) });
+                    Thread.Sleep(2500);
                     throw;
                 }
             }
@@ -317,6 +317,61 @@ namespace DPTDOOM.Net
             });
 
             return session;
+        }
+
+        /// <summary>
+        /// A short, ASCII-only reason for the status screen.
+        ///
+        /// The screen draws with Doom's own font, which has no Cyrillic and nothing
+        /// below 0x20, so the exception's message came out as a smear of stray
+        /// punctuation - the player saw "1 -- 127.0.0.1:5999" and learned nothing.
+        /// The full message still goes to the console and the log, where a person
+        /// debugging can read it; the screen gets what is readable and actionable.
+        /// </summary>
+        private static string DescribeFailure(string host, int port, Exception error)
+        {
+            // The socket error can be wrapped: NetSession turns a connect timeout
+            // into a plain Exception and leaves the SocketException underneath.
+            System.Net.Sockets.SocketException socket = null;
+
+            for (var e = error; e != null && socket == null; e = e.InnerException)
+            {
+                socket = e as System.Net.Sockets.SocketException;
+            }
+
+            if (socket != null)
+            {
+                switch (socket.SocketErrorCode)
+                {
+                    case System.Net.Sockets.SocketError.ConnectionRefused:
+                        return host.ToUpper() + ":" + port + " REFUSED - IS THE HOST RUNNING?";
+
+                    case System.Net.Sockets.SocketError.TimedOut:
+                        return host.ToUpper() + ":" + port + " NO ANSWER - FIREWALL OR WRONG ADDRESS?";
+
+                    case System.Net.Sockets.SocketError.HostNotFound:
+                    case System.Net.Sockets.SocketError.NoData:
+                        return host.ToUpper() + " NOT FOUND IN DNS";
+
+                    case System.Net.Sockets.SocketError.NetworkUnreachable:
+                    case System.Net.Sockets.SocketError.HostUnreachable:
+                        return "NETWORK TO " + host.ToUpper() + " UNREACHABLE";
+                }
+            }
+
+            // No socket error at all: the timeout we raise ourselves, or a refusal
+            // from the host's own handshake.
+            if (error.Message.IndexOf("timed out", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return host.ToUpper() + ":" + port + " NO ANSWER - FIREWALL OR WRONG ADDRESS?";
+            }
+
+            if (error.Message.IndexOf("refused", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return host.ToUpper() + ":" + port + " REFUSED - IS THE HOST RUNNING?";
+            }
+
+            return host.ToUpper() + ":" + port + " FAILED - SEE THE LOG";
         }
 
         /// <summary>
