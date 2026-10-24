@@ -36,6 +36,10 @@ var DPT = (function () {
     var slot = 1;
     var timer = null;
     var running = false;
+
+    // Last listing received from the host, so the filter can re-render instantly
+    // instead of triggering another master query.
+    var lastServers = '';
     var hostAvailable = false;
 
     // -------------------------------------------------------------
@@ -266,6 +270,14 @@ var DPT = (function () {
     // -------------------------------------------------------------
 
     function renderServers(payload) {
+        // Kept so the filter can re-render without asking the master again: the
+        // listing is the same data, only the view changes.
+        if (payload !== undefined) {
+            lastServers = payload;
+        }
+
+        payload = lastServers;
+
         var list = $('serverList');
 
         while (list.firstChild) {
@@ -273,20 +285,49 @@ var DPT = (function () {
         }
 
         var rows = payload ? String(payload).split('\n') : [];
+        var filter = ($('serverFilter').value || '').toLowerCase();
+        var parsed = [];
+        var i;
 
-        if (rows.length === 0 || rows[0] === '') {
-            list.appendChild(document.createTextNode(
-                'Нет объявлений. Хост мог ещё не опубликоваться или уже начать игру.'));
-            return;
-        }
-
-        for (var i = 0; i < rows.length; i++) {
+        for (i = 0; i < rows.length; i++) {
             var f = rows[i].split('\t');
             if (f.length < 6) {
                 continue;
             }
 
-            list.appendChild(serverCard(f));
+            // Filter on what a player actually types: the session name, or the
+            // map because that is the other thing people look for.
+            if (filter.length > 0 &&
+                f[0].toLowerCase().indexOf(filter) < 0 &&
+                f[3].toLowerCase().indexOf(filter) < 0) {
+                continue;
+            }
+
+            parsed.push(f);
+        }
+
+        if (parsed.length === 0) {
+            list.appendChild(document.createTextNode(
+                rows.length > 0
+                    ? 'Ничего не подходит под фильтр.'
+                    : 'Нет объявлений. Хост мог ещё не опубликоваться или уже начать игру.'));
+            return;
+        }
+
+        // Nearest first: an unreachable server (ping -1) sorts last, because the
+        // only thing worse than a distant host is one that cannot be reached.
+        parsed.sort(function (a, b) {
+            var pa = parseInt(a[8], 10);
+            var pb = parseInt(b[8], 10);
+
+            if (pa < 0) { pa = 999999; }
+            if (pb < 0) { pb = 999999; }
+
+            return pa - pb;
+        });
+
+        for (i = 0; i < parsed.length; i++) {
+            list.appendChild(serverCard(parsed[i]));
         }
     }
 
@@ -301,10 +342,18 @@ var DPT = (function () {
         var session = f.length > 6 ? f[6] : '';
         var relay = f.length > 7 && f[7] === '1';
 
+        // The probe is a TCP handshake to the game port, so it measures the same
+        // round trip a tic will take. "--" means the port did not answer at all,
+        // which is information too: the listing is worth nothing if nobody can
+        // reach the host.
+        var ping = f.length > 8 ? parseInt(f[8], 10) : -1;
+        var pingText = ping > 0 ? ping + ' ms' : '-- нет ответа';
+
         var detail = document.createElement('p');
         detail.appendChild(document.createTextNode(
             f[1] + ':' + f[2] + ' · ' + f[3] + ' · skill ' + f[4] +
-            ' · TTL ' + f[5] + 's · ' + (relay ? 'DIRECT + RELAY' : 'DIRECT') + ' · UNVERIFIED'));
+            ' · ' + pingText + ' · TTL ' + f[5] + 's · ' +
+            (relay ? 'DIRECT + RELAY' : 'DIRECT') + ' · UNVERIFIED'));
         card.appendChild(detail);
 
         var address = f[1] + ':' + f[2];
@@ -424,6 +473,15 @@ var DPT = (function () {
             $(extras[i]).onchange = changed;
             $(extras[i]).onkeyup = changed;
         }
+
+        // The filter is local to the browser: it re-renders the last listing and
+        // never asks the master again.
+        $('serverFilter').onkeyup = function () {
+            renderServers();
+        };
+        $('serverFilter').onchange = function () {
+            renderServers();
+        };
 
         var buttons = document.querySelectorAll('[data-mode]');
         for (i = 0; i < buttons.length; i++) {

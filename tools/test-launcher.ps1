@@ -202,6 +202,61 @@ Pump 500
 $clampedPreview = Invoke-Page "document.getElementById('preview').innerHTML"
 Assert-True ($clampedPreview -like "*-coopbots 1*") "bots are clamped so a guest slot always remains"
 
+# 14. The server browser shows a round trip and sorts by it.
+#
+# The ping is measured by the host as a TCP handshake to the game port, so what is
+# checked here is only that it reaches the page and orders the list: a row with no
+# answer must sort last, because a listed host nobody can reach is the worst case,
+# not the best.
+#
+# Delivered through dptReceive, which is the page's only exported entry point - the
+# render functions live inside the page's closure and cannot be called by name.
+$tab = [char]9
+$nl = [char]10
+
+$rows = @(
+    "Far host${tab}10.0.0.5${tab}5029${tab}MAP07${tab}3${tab}40${tab}aaaa0000bbbb1111cccc2222dddd3333${tab}0${tab}180",
+    "Near host${tab}127.0.0.1${tab}5029${tab}MAP01${tab}3${tab}40${tab}eeee4444ffff5555aaaa6666bbbb7777${tab}1${tab}3",
+    "Dead host${tab}10.0.0.9${tab}5029${tab}MAP02${tab}3${tab}40${tab}11112222333344445555666677778888${tab}0${tab}-1"
+)
+
+$browser.Document.InvokeScript("dptReceive", @("servers", ($rows -join $nl))) | Out-Null
+Pump 300
+
+$cards = Invoke-Page "document.getElementById('serverList').children.length"
+Assert-True ($cards -eq 3) "three listings render as three cards"
+
+$first = Invoke-Page "document.getElementById('serverList').children[0].textContent"
+Assert-True ($first -like "*NEAR*") "the nearest host sorts first"
+
+$last = Invoke-Page "document.getElementById('serverList').children[2].textContent"
+Assert-True ($last -like "*DEAD*") "a host that does not answer sorts last"
+
+$pingShown = Invoke-Page "document.getElementById('serverList').children[0].textContent.indexOf('3 ms') >= 0"
+Assert-True ($pingShown -eq "True") "the round trip is displayed for a reachable host"
+
+# Compared with an ASCII marker rather than the Russian words: this file is UTF-8
+# without a BOM, and Windows PowerShell 5.1 reads it as ANSI, so a literal Cyrillic
+# string in the script does not match the same text in the page.
+$noAnswer = Invoke-Page "var t=document.getElementById('serverList').children[2].textContent;String(t.indexOf('--') >= 0 && t.indexOf(' ms') < 0)"
+Assert-True ($noAnswer -eq "True") "an unreachable host says so instead of showing a fake number"
+
+# 15. The filter narrows the list without asking the master again.
+Invoke-Page "document.getElementById('serverFilter').value='map01';document.getElementById('serverFilter').onkeyup();" | Out-Null
+Pump 300
+
+$filtered = Invoke-Page "document.getElementById('serverList').children.length"
+Assert-True ($filtered -eq 1) "the filter shows only the matching map"
+
+$filteredText = Invoke-Page "document.getElementById('serverList').children[0].textContent"
+Assert-True ($filteredText -like "*NEAR*") "the filtered card is the one that matched"
+
+Invoke-Page "document.getElementById('serverFilter').value='';document.getElementById('serverFilter').onkeyup();" | Out-Null
+Pump 300
+
+$restored = Invoke-Page "document.getElementById('serverList').children.length"
+Assert-True ($restored -eq 3) "clearing the filter restores every row"
+
 # Reset, so a leftover rule cannot leak into the next check.
 Invoke-Page "document.getElementById('noblock').checked=false;document.getElementById('noblock').onclick();document.getElementById('coopweapons').checked=false;document.getElementById('coopweapons').onclick();document.getElementById('nosharedkeys').checked=false;document.getElementById('nosharedkeys').onclick();" | Out-Null
 Pump 400

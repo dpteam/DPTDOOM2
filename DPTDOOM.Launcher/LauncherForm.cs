@@ -622,9 +622,15 @@ namespace DPTDOOM.Launcher
 
                     Log("  ok: " + servers.Count + " session(s) in " + elapsed + " ms");
 
+                    // Probed after the listing, on this worker thread: the page
+                    // stays responsive and the numbers arrive with the rows.
+                    var pings = MeasurePings(servers);
+
+                    Log("  probed " + servers.Count + " game port(s)");
+
                     BeginInvoke((MethodInvoker)(() =>
                     {
-                        Send("servers", EncodeServers(servers));
+                        Send("servers", EncodeServers(servers, pings));
                         SendStatus(servers.Count == 0
                             ? "Список пуст. Хост мог ещё не опубликоваться."
                             : "Получено сессий: " + servers.Count + " (" + elapsed + " мс).", false);
@@ -686,12 +692,112 @@ namespace DPTDOOM.Launcher
             return "Master " + host + ":" + port + ": " + error.Message;
         }
 
-        private static string EncodeServers(List<MasterServerEntry> servers)
+        /// <summary>
+        /// How long to wait for one game port to answer a probe, in milliseconds.
+        ///
+        /// Short on purpose: this runs for every listed session at once while the
+        /// player watches a list, and a server that cannot complete a TCP handshake
+        /// in a second is not worth showing a number for. An unanswered probe
+        /// displays as "--" rather than as a slow server.
+        /// </summary>
+        private const int PingTimeoutMs = 1000;
+
+        /// <summary>
+        /// Measures the round trip to each listed game port.
+        ///
+        /// There is no ICMP ping here and there cannot be: a raw socket needs
+        /// administrator rights, and the game speaks TCP. What a player wants to
+        /// know is "how far does a tic have to travel", and the TCP handshake is
+        /// exactly that number - it is the same path and the same round trip the
+        /// session will use.
+        ///
+        /// Connecting and closing is harmless: the host sees a peer that sent no
+        /// handshake and closes it (HostRobustnessTest pins that), so a browser
+        /// refresh cannot disturb a running game.
+        ///
+        /// Probes run in parallel. Sequentially this would take a second per
+        /// unreachable server, and a full list would take longer than the refresh
+        /// itself.
+        /// </summary>
+        private static int[] MeasurePings(List<MasterServerEntry> servers)
+        {
+            var results = new int[servers.Count];
+
+            for (var i = 0; i < results.Length; i++)
+            {
+                results[i] = -1;
+            }
+
+            if (servers.Count == 0)
+            {
+                return results;
+            }
+
+            var threads = new Thread[servers.Count];
+
+            for (var index = 0; index < servers.Count; index++)
+            {
+                var slot = index;
+                var address = servers[slot].AddressText;
+                var port = servers[slot].Info.Port;
+
+                threads[slot] = new Thread(() =>
+                {
+                    results[slot] = Probe(address, port);
+                });
+
+                threads[slot].IsBackground = true;
+                threads[slot].Start();
+            }
+
+            foreach (var thread in threads)
+            {
+                thread.Join(PingTimeoutMs + 500);
+            }
+
+            return results;
+        }
+
+        /// <summary>Round trip in milliseconds, or -1 when the port does not answer.</summary>
+        private static int Probe(string host, int port)
+        {
+            var watch = Stopwatch.StartNew();
+
+            using (var client = new TcpClient())
+            {
+                try
+                {
+                    var result = client.BeginConnect(host, port, null, null);
+
+                    if (!result.AsyncWaitHandle.WaitOne(PingTimeoutMs, false))
+                    {
+                        return -1;
+                    }
+
+                    client.EndConnect(result);
+
+                    watch.Stop();
+
+                    // A floor of 1: zero would be indistinguishable from "not
+                    // measured" in the payload, and a local server genuinely is
+                    // about a millisecond.
+                    return Math.Max(1, (int)watch.ElapsedMilliseconds);
+                }
+                catch (Exception)
+                {
+                    return -1;
+                }
+            }
+        }
+
+        private static string EncodeServers(List<MasterServerEntry> servers, int[] pings)
         {
             var builder = new StringBuilder();
 
-            foreach (var entry in servers)
+            for (var i = 0; i < servers.Count; i++)
             {
+                var entry = servers[i];
+
                 if (builder.Length > 0)
                 {
                     builder.Append('\n');
@@ -704,7 +810,8 @@ namespace DPTDOOM.Launcher
                 builder.Append(entry.Info.Skill).Append('\t');
                 builder.Append(entry.LeaseSecondsLeft).Append('\t');
                 builder.Append(MasterProtocol.IdToHex(entry.Id)).Append('\t');
-                builder.Append(entry.RelayAvailable ? "1" : "0");
+                builder.Append(entry.RelayAvailable ? "1" : "0").Append('\t');
+                builder.Append(pings != null && i < pings.Length ? pings[i] : -1);
             }
 
             return builder.ToString();

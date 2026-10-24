@@ -262,19 +262,45 @@ namespace DPTDOOM.Net
                     return;
                 }
 
+                var handedOff = false;
+
                 try
                 {
                     AcceptGuest(client);
+                    handedOff = true;
                 }
                 catch (Exception e)
                 {
-                    Fault("guest handshake failed: " + e.Message);
-                    try
+                    // A failed guest handshake is the guest's problem, not the
+                    // session's.
+                    //
+                    // This used to call Fault, which stopped the whole game: one
+                    // stray connection that sent anything other than a valid
+                    // handshake - a port scanner, a browser pointed at the port, a
+                    // client built from a different version - killed the session for
+                    // every player already in it. Verified by sending an HTTP
+                    // request to a hosting game: the host exited with "guest
+                    // handshake failed: Bad frame magic".
+                    //
+                    // Anything a remote peer can trigger must not be able to end a
+                    // local game. The listener keeps accepting; the peer is closed.
+                    Console.WriteLine("Net: rejected a connection (" + e.Message + ").");
+                }
+                finally
+                {
+                    // Only a peer that was *not* taken over gets closed here. On
+                    // success the socket belongs to a Peer and to its read loop, and
+                    // closing it would cut the guest off the moment it joined - which
+                    // is exactly what the first version of this fix did.
+                    if (!handedOff)
                     {
-                        client.Close();
-                    }
-                    catch
-                    {
+                        try
+                        {
+                            client.Close();
+                        }
+                        catch
+                        {
+                        }
                     }
                 }
             }
