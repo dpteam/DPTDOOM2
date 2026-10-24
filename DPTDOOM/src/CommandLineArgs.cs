@@ -28,6 +28,16 @@ namespace DPTDOOM
         public readonly Arg<string[]> file;
         public readonly Arg<string[]> deh;
 
+        /// <summary>
+        /// SharpScript files, by path, or read from a <c>SCRIPTS</c> lump in the WAD.
+        ///
+        /// Separate from DeHackEd rather than folded into it: the two describe the same
+        /// kind of thing (actor properties) in different languages, and a mod may use
+        /// both. Scripts are applied after DeHackEd so a script can read what a patch
+        /// wrote, which is the order a modder expects from the newer tool.
+        /// </summary>
+        public readonly Arg<string[]> script;
+
         public readonly Arg<Tuple<int, int>> warp;
         public readonly Arg<int> episode;
         public readonly Arg<int> skill;
@@ -143,6 +153,7 @@ namespace DPTDOOM
             iwad = GetString(args, "-iwad");
             file = Check_file(args);
             deh = Check_deh(args);
+            script = Check_script(args);
 
             warp = Check_warp(args);
             episode = GetInt(args, "-episode");
@@ -237,6 +248,7 @@ namespace DPTDOOM
                 string iwadPath = null;
                 var pwadPaths = new List<string>();
                 var dehPaths = new List<string>();
+                var scriptPaths = new List<string>();
 
                 foreach (var path in args)
                 {
@@ -263,6 +275,12 @@ namespace DPTDOOM
                     {
                         dehPaths.Add(path);
                     }
+                    else if (extension == ".dpts")
+                    {
+                        // SharpScript, by extension, so "dptdoom.exe doom2.wad mod.dpts"
+                        // works the way a WAD or a .deh does: no flags to remember.
+                        scriptPaths.Add(path);
+                    }
                 }
 
                 if (iwadPath != null)
@@ -278,6 +296,11 @@ namespace DPTDOOM
                 if (dehPaths.Count > 0)
                 {
                     deh = new Arg<string[]>(dehPaths.ToArray());
+                }
+
+                if (scriptPaths.Count > 0)
+                {
+                    script = new Arg<string[]>(scriptPaths.ToArray());
                 }
             }
         }
@@ -296,6 +319,17 @@ namespace DPTDOOM
         private static Arg<string[]> Check_deh(string[] args)
         {
             var values = GetValues(args, "-deh");
+            if (values.Length >= 1)
+            {
+                return new Arg<string[]>(values);
+            }
+
+            return new Arg<string[]>();
+        }
+
+        private static Arg<string[]> Check_script(string[] args)
+        {
+            var values = GetValues(args, "-script");
             if (values.Length >= 1)
             {
                 return new Arg<string[]>(values);

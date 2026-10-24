@@ -46,7 +46,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Solid | MobjFlags.Shootable | MobjFlags.DropOff | MobjFlags.PickUp | MobjFlags.NotDeathmatch, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Possessed
@@ -72,7 +72,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.POSACT, // activeSound
                 MobjFlags.Solid | MobjFlags.Shootable | MobjFlags.CountKill, // flags
-                MobjState.PossRaise1 // raiseState
+                MobjState.PossRaise1 // RaiseState
             ),
 
             new MobjInfo( // MobjType.Shotguy
@@ -98,7 +98,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.POSACT, // activeSound
                 MobjFlags.Solid | MobjFlags.Shootable | MobjFlags.CountKill, // flags
-                MobjState.SposRaise1 // raiseState
+                MobjState.SposRaise1 // RaiseState
             ),
 
             new MobjInfo( // MobjType.Vile
@@ -124,7 +124,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.VILACT, // activeSound
                 MobjFlags.Solid | MobjFlags.Shootable | MobjFlags.CountKill, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Fire
@@ -150,7 +150,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.NoBlockMap | MobjFlags.NoGravity, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Undead
@@ -176,7 +176,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.SKEACT, // activeSound
                 MobjFlags.Solid | MobjFlags.Shootable | MobjFlags.CountKill, // flags
-                MobjState.SkelRaise1 // raiseState
+                MobjState.SkelRaise1 // RaiseState
             ),
 
             new MobjInfo( // MobjType.Tracer
@@ -202,7 +202,7 @@ namespace DPTDOOM
                 10, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.NoBlockMap | MobjFlags.Missile | MobjFlags.DropOff | MobjFlags.NoGravity, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Smoke
@@ -228,7 +228,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.NoBlockMap | MobjFlags.NoGravity, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Fatso
@@ -254,7 +254,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.POSACT, // activeSound
                 MobjFlags.Solid | MobjFlags.Shootable | MobjFlags.CountKill, // flags
-                MobjState.FattRaise1 // raiseState
+                MobjState.FattRaise1 // RaiseState
             ),
 
             new MobjInfo( // MobjType.Fatshot
@@ -280,7 +280,7 @@ namespace DPTDOOM
                 8, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.NoBlockMap | MobjFlags.Missile | MobjFlags.DropOff | MobjFlags.NoGravity, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Chainguy
@@ -306,7 +306,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.POSACT, // activeSound
                 MobjFlags.Solid | MobjFlags.Shootable | MobjFlags.CountKill, // flags
-                MobjState.CposRaise1 // raiseState
+                MobjState.CposRaise1 // RaiseState
             ),
 
             new MobjInfo( // MobjType.Troop
@@ -332,7 +332,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.BGACT, // activeSound
                 MobjFlags.Solid | MobjFlags.Shootable | MobjFlags.CountKill, // flags
-                MobjState.TrooRaise1 // raiseState
+                MobjState.TrooRaise1 // RaiseState
             ),
 
             new MobjInfo( // MobjType.Sergeant
@@ -358,7 +358,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.DMACT, // activeSound
                 MobjFlags.Solid | MobjFlags.Shootable | MobjFlags.CountKill, // flags
-                MobjState.SargRaise1 // raiseState
+                MobjState.SargRaise1 // RaiseState
             ),
 
             new MobjInfo( // MobjType.Shadows
@@ -384,7 +384,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.DMACT, // activeSound
                 MobjFlags.Solid | MobjFlags.Shootable | MobjFlags.Shadow | MobjFlags.CountKill, // flags
-                MobjState.SargRaise1 // raiseState
+                MobjState.SargRaise1 // RaiseState
             ),
 
             new MobjInfo( // MobjType.Head
@@ -410,7 +410,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.DMACT, // activeSound
                 MobjFlags.Solid | MobjFlags.Shootable | MobjFlags.Float | MobjFlags.NoGravity | MobjFlags.CountKill, // flags
-                MobjState.HeadRaise1 // raiseState
+                MobjState.HeadRaise1 // RaiseState
             ),
 
             new MobjInfo( // MobjType.Bruiser
@@ -436,7 +436,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.DMACT, // activeSound
                 MobjFlags.Solid | MobjFlags.Shootable | MobjFlags.CountKill, // flags
-                MobjState.BossRaise1 // raiseState
+                MobjState.BossRaise1 // RaiseState
             ),
 
             new MobjInfo( // MobjType.Bruisershot
@@ -462,7 +462,7 @@ namespace DPTDOOM
                 8, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.NoBlockMap | MobjFlags.Missile | MobjFlags.DropOff | MobjFlags.NoGravity, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Knight
@@ -488,7 +488,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.DMACT, // activeSound
                 MobjFlags.Solid | MobjFlags.Shootable | MobjFlags.CountKill, // flags
-                MobjState.Bos2Raise1 // raiseState
+                MobjState.Bos2Raise1 // RaiseState
             ),
 
             new MobjInfo( // MobjType.Skull
@@ -514,7 +514,7 @@ namespace DPTDOOM
                 3, // damage
                 Sfx.DMACT, // activeSound
                 MobjFlags.Solid | MobjFlags.Shootable | MobjFlags.Float | MobjFlags.NoGravity, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Spider
@@ -540,7 +540,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.DMACT, // activeSound
                 MobjFlags.Solid | MobjFlags.Shootable | MobjFlags.CountKill, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Baby
@@ -566,7 +566,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.BSPACT, // activeSound
                 MobjFlags.Solid | MobjFlags.Shootable | MobjFlags.CountKill, // flags
-                MobjState.BspiRaise1 // raiseState
+                MobjState.BspiRaise1 // RaiseState
             ),
 
             new MobjInfo( // MobjType.Cyborg
@@ -592,7 +592,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.DMACT, // activeSound
                 MobjFlags.Solid | MobjFlags.Shootable | MobjFlags.CountKill, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Pain
@@ -618,7 +618,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.DMACT, // activeSound
                 MobjFlags.Solid | MobjFlags.Shootable | MobjFlags.Float | MobjFlags.NoGravity | MobjFlags.CountKill, // flags
-                MobjState.PainRaise1 // raiseState
+                MobjState.PainRaise1 // RaiseState
             ),
 
             new MobjInfo( // MobjType.Wolfss
@@ -644,7 +644,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.POSACT, // activeSound
                 MobjFlags.Solid | MobjFlags.Shootable | MobjFlags.CountKill, // flags
-                MobjState.SswvRaise1 // raiseState
+                MobjState.SswvRaise1 // RaiseState
             ),
 
             new MobjInfo( // MobjType.Keen
@@ -670,7 +670,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Solid | MobjFlags.SpawnCeiling | MobjFlags.NoGravity | MobjFlags.Shootable | MobjFlags.CountKill, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Bossbrain
@@ -696,7 +696,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Solid | MobjFlags.Shootable, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Bossspit
@@ -722,7 +722,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.NoBlockMap | MobjFlags.NoSector, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Bosstarget
@@ -748,7 +748,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.NoBlockMap | MobjFlags.NoSector, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Spawnshot
@@ -774,7 +774,7 @@ namespace DPTDOOM
                 3, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.NoBlockMap | MobjFlags.Missile | MobjFlags.DropOff | MobjFlags.NoGravity | MobjFlags.NoClip, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Spawnfire
@@ -800,7 +800,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.NoBlockMap | MobjFlags.NoGravity, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Barrel
@@ -826,7 +826,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Solid | MobjFlags.Shootable | MobjFlags.NoBlood, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Troopshot
@@ -852,7 +852,7 @@ namespace DPTDOOM
                 3, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.NoBlockMap | MobjFlags.Missile | MobjFlags.DropOff | MobjFlags.NoGravity, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Headshot
@@ -878,7 +878,7 @@ namespace DPTDOOM
                 5, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.NoBlockMap | MobjFlags.Missile | MobjFlags.DropOff | MobjFlags.NoGravity, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Rocket
@@ -904,7 +904,7 @@ namespace DPTDOOM
                 20, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.NoBlockMap | MobjFlags.Missile | MobjFlags.DropOff | MobjFlags.NoGravity, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Plasma
@@ -930,7 +930,7 @@ namespace DPTDOOM
                 5, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.NoBlockMap | MobjFlags.Missile | MobjFlags.DropOff | MobjFlags.NoGravity, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Bfg
@@ -956,7 +956,7 @@ namespace DPTDOOM
                 100, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.NoBlockMap | MobjFlags.Missile | MobjFlags.DropOff | MobjFlags.NoGravity, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Arachplaz
@@ -982,7 +982,7 @@ namespace DPTDOOM
                 5, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.NoBlockMap | MobjFlags.Missile | MobjFlags.DropOff | MobjFlags.NoGravity, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Puff
@@ -1008,7 +1008,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.NoBlockMap | MobjFlags.NoGravity, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Blood
@@ -1034,7 +1034,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.NoBlockMap, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Tfog
@@ -1060,7 +1060,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.NoBlockMap | MobjFlags.NoGravity, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Ifog
@@ -1086,7 +1086,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.NoBlockMap | MobjFlags.NoGravity, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Teleportman
@@ -1112,7 +1112,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.NoBlockMap | MobjFlags.NoSector, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Extrabfg
@@ -1138,7 +1138,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.NoBlockMap | MobjFlags.NoGravity, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc0
@@ -1164,7 +1164,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Special, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc1
@@ -1190,7 +1190,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Special, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc2
@@ -1216,7 +1216,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Special | MobjFlags.CountItem, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc3
@@ -1242,7 +1242,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Special | MobjFlags.CountItem, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc4
@@ -1268,7 +1268,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Special | MobjFlags.NotDeathmatch, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc5
@@ -1294,7 +1294,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Special | MobjFlags.NotDeathmatch, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc6
@@ -1320,7 +1320,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Special | MobjFlags.NotDeathmatch, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc7
@@ -1346,7 +1346,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Special | MobjFlags.NotDeathmatch, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc8
@@ -1372,7 +1372,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Special | MobjFlags.NotDeathmatch, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc9
@@ -1398,7 +1398,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Special | MobjFlags.NotDeathmatch, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc10
@@ -1424,7 +1424,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Special, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc11
@@ -1450,7 +1450,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Special, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc12
@@ -1476,7 +1476,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Special | MobjFlags.CountItem, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Inv
@@ -1502,7 +1502,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Special | MobjFlags.CountItem, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc13
@@ -1528,7 +1528,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Special | MobjFlags.CountItem, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Ins
@@ -1554,7 +1554,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Special | MobjFlags.CountItem, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc14
@@ -1580,7 +1580,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Special, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc15
@@ -1606,7 +1606,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Special | MobjFlags.CountItem, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc16
@@ -1632,7 +1632,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Special | MobjFlags.CountItem, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Mega
@@ -1658,7 +1658,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Special | MobjFlags.CountItem, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Clip
@@ -1684,7 +1684,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Special, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc17
@@ -1710,7 +1710,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Special, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc18
@@ -1736,7 +1736,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Special, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc19
@@ -1762,7 +1762,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Special, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc20
@@ -1788,7 +1788,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Special, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc21
@@ -1814,7 +1814,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Special, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc22
@@ -1840,7 +1840,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Special, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc23
@@ -1866,7 +1866,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Special, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc24
@@ -1892,7 +1892,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Special, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc25
@@ -1918,7 +1918,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Special, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Chaingun
@@ -1944,7 +1944,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Special, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc26
@@ -1970,7 +1970,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Special, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc27
@@ -1996,7 +1996,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Special, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc28
@@ -2022,7 +2022,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Special, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Shotgun
@@ -2048,7 +2048,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Special, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Supershotgun
@@ -2074,7 +2074,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Special, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc29
@@ -2100,7 +2100,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Solid, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc30
@@ -2126,7 +2126,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Solid, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc31
@@ -2152,7 +2152,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Solid, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc32
@@ -2178,7 +2178,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Solid, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc33
@@ -2204,7 +2204,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Solid, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc34
@@ -2230,7 +2230,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Solid, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc35
@@ -2256,7 +2256,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Solid, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc36
@@ -2282,7 +2282,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Solid, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc37
@@ -2308,7 +2308,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Solid, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc38
@@ -2334,7 +2334,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Solid, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc39
@@ -2360,7 +2360,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Solid, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc40
@@ -2386,7 +2386,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Solid, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc41
@@ -2412,7 +2412,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Solid, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc42
@@ -2438,7 +2438,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Solid, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc43
@@ -2464,7 +2464,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Solid, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc44
@@ -2490,7 +2490,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Solid, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc45
@@ -2516,7 +2516,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Solid, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc46
@@ -2542,7 +2542,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Solid, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc47
@@ -2568,7 +2568,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Solid, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc48
@@ -2594,7 +2594,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Solid, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc49
@@ -2620,7 +2620,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 0, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc50
@@ -2646,7 +2646,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Solid, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc51
@@ -2672,7 +2672,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Solid | MobjFlags.SpawnCeiling | MobjFlags.NoGravity, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc52
@@ -2698,7 +2698,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Solid | MobjFlags.SpawnCeiling | MobjFlags.NoGravity, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc53
@@ -2724,7 +2724,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Solid | MobjFlags.SpawnCeiling | MobjFlags.NoGravity, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc54
@@ -2750,7 +2750,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Solid | MobjFlags.SpawnCeiling | MobjFlags.NoGravity, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc55
@@ -2776,7 +2776,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Solid | MobjFlags.SpawnCeiling | MobjFlags.NoGravity, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc56
@@ -2802,7 +2802,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.SpawnCeiling | MobjFlags.NoGravity, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc57
@@ -2828,7 +2828,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.SpawnCeiling | MobjFlags.NoGravity, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc58
@@ -2854,7 +2854,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.SpawnCeiling | MobjFlags.NoGravity, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc59
@@ -2880,7 +2880,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.SpawnCeiling | MobjFlags.NoGravity, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc60
@@ -2906,7 +2906,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.SpawnCeiling | MobjFlags.NoGravity, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc61
@@ -2932,7 +2932,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 0, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc62
@@ -2958,7 +2958,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 0, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc63
@@ -2984,7 +2984,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 0, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc64
@@ -3010,7 +3010,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 0, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc65
@@ -3036,7 +3036,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 0, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc66
@@ -3062,7 +3062,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 0, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc67
@@ -3088,7 +3088,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 0, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc68
@@ -3114,7 +3114,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 0, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc69
@@ -3140,7 +3140,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 0, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc70
@@ -3166,7 +3166,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Solid, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc71
@@ -3192,7 +3192,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 0, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc72
@@ -3218,7 +3218,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Solid, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc73
@@ -3244,7 +3244,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Solid, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc74
@@ -3270,7 +3270,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Solid, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc75
@@ -3296,7 +3296,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Solid, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc76
@@ -3322,7 +3322,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Solid, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc77
@@ -3348,7 +3348,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Solid, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc78
@@ -3374,7 +3374,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Solid | MobjFlags.SpawnCeiling | MobjFlags.NoGravity, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc79
@@ -3400,7 +3400,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Solid | MobjFlags.SpawnCeiling | MobjFlags.NoGravity, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc80
@@ -3426,7 +3426,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Solid | MobjFlags.SpawnCeiling | MobjFlags.NoGravity, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc81
@@ -3452,7 +3452,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Solid | MobjFlags.SpawnCeiling | MobjFlags.NoGravity, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc82
@@ -3478,7 +3478,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Solid | MobjFlags.SpawnCeiling | MobjFlags.NoGravity, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc83
@@ -3504,7 +3504,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.Solid | MobjFlags.SpawnCeiling | MobjFlags.NoGravity, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc84
@@ -3530,7 +3530,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.NoBlockMap, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc85
@@ -3556,7 +3556,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.NoBlockMap, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             ),
 
             new MobjInfo( // MobjType.Misc86
@@ -3582,7 +3582,7 @@ namespace DPTDOOM
                 0, // damage
                 Sfx.NONE, // activeSound
                 MobjFlags.NoBlockMap, // flags
-                MobjState.Null // raiseState
+                MobjState.Null // RaiseState
             )
 
         };

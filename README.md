@@ -101,6 +101,7 @@ Internet Explorer. WebView2 на Windows XP не ставится, а MSHTML е�
 | [docs/BUILDING.md](docs/BUILDING.md) | сборка, флаги командной строки, отладка, профилирование |
 | [docs/NETWORK.md](docs/NETWORK.md) | устройство lockstep, упреждение ввода, обрыв и возврат |
 | [docs/BOTS.md](docs/BOTS.md) | как устроены боты, замеры, известные ограничения |
+| [docs/SCRIPTS.md](docs/SCRIPTS.md) | SharpScript: свой язык описания актёров, API, песочница |
 | [docs/MASTER.md](docs/MASTER.md) · [docs/RELAY.md](docs/RELAY.md) | сервер списка сессий и relay |
 | [docs/LAUNCHER.md](docs/LAUNCHER.md) | лаунчер: страница, мост, темы |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | что сделано, что осталось, что не сработало и почему |
@@ -167,6 +168,7 @@ powershell -NoProfile -File tools\test-net-leave.ps1
 powershell -NoProfile -File tools\test-host-bans.ps1
 powershell -NoProfile -File tools\test-master-allow.ps1
 powershell -NoProfile -File tools\test-master-config.ps1
+powershell -NoProfile -File tools\test-scripts.ps1
 powershell -NoProfile -File tools\test-net-latency.ps1
 powershell -NoProfile -File tools\test-reconnect.ps1
 powershell -NoProfile -File tools\test-relay.ps1
@@ -174,7 +176,7 @@ powershell -NoProfile -File tools\test-launcher.ps1
 powershell -NoProfile -File tools\check-standalone.ps1
 ```
 
-506 тестов. Геймплейные сверяют хеши мира с эталонами Managed Doom — то есть
+567 тестов. Геймплейные сверяют хеши мира с эталонами Managed Doom — то есть
 проверяют, что порт остался демо-совместимым, а не только что он компилируется.
 Тесты, которым нужен IWAD, без него помечаются пропущенными, а не падают.
 

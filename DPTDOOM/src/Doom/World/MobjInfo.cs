@@ -227,7 +227,7 @@ namespace DPTDOOM
             set => flags = value;
         }
 
-        public MobjState Raisestate
+        public MobjState RaiseState
         {
             get => raiseState;
             set => raiseState = value;

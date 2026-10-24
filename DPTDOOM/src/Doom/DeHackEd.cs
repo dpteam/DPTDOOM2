@@ -224,7 +224,7 @@ namespace DPTDOOM
             info.Damage = GetInt(dic, "Missile damage", info.Damage);
             info.ActiveSound = (Sfx)GetInt(dic, "Action sound", (int)info.ActiveSound);
             info.Flags = (MobjFlags)GetInt(dic, "Bits", (int)info.Flags);
-            info.Raisestate = (MobjState)GetInt(dic, "Respawn frame", (int)info.Raisestate);
+            info.RaiseState = (MobjState)GetInt(dic, "Respawn frame", (int)info.RaiseState);
         }
 
         private static void ProcessFrameBlock(List<string> data)

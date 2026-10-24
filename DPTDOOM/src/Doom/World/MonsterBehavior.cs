@@ -1163,7 +1163,7 @@ namespace DPTDOOM
                 return true;
             }
 
-            if (thing.Info.Raisestate == MobjState.Null)
+            if (thing.Info.RaiseState == MobjState.Null)
             {
                 // Monster doesn't have a raise state.
                 return true;
@@ -1233,7 +1233,7 @@ namespace DPTDOOM
                             world.StartSound(vileTargetCorpse, Sfx.SLOP, SfxType.Misc);
 
                             var info = vileTargetCorpse.Info;
-                            vileTargetCorpse.SetState(info.Raisestate);
+                            vileTargetCorpse.SetState(info.RaiseState);
                             vileTargetCorpse.Height <<= 2;
                             vileTargetCorpse.Flags = info.Flags;
                             vileTargetCorpse.Health = info.SpawnHealth;

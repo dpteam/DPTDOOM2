@@ -1453,6 +1453,38 @@ namespace DPTDOOM
                 });
 
             commands.Register(
+                "scripts", "scripts",
+                "Which actors the loaded SharpScript files describe.",
+                call =>
+                {
+                    var library = content != null ? content.Scripts : null;
+
+                    if (library == null || library.Patches.Count == 0)
+                    {
+                        call.Write("No actor scripts loaded.");
+                        return;
+                    }
+
+                    call.Write(library.Patches.Count + " actor(s) described:");
+
+                    foreach (var patch in library.Patches)
+                    {
+                        call.Write("  " + patch.Function + " from " + patch.Source +
+                                   " (line " + patch.Line + ")");
+                    }
+
+                    if (library.Problems.Count > 0)
+                    {
+                        call.Write(library.Problems.Count + " problem(s):");
+
+                        foreach (var problem in library.Problems)
+                        {
+                            call.Write("  " + problem);
+                        }
+                    }
+                });
+
+            commands.Register(
                 "players", "players",
                 "Who is in the session.",
                 call =>
