@@ -38,6 +38,7 @@
 dotnet build DPTDOOM.slnx -c Release
 dotnet test DPTDOOMTest\DPTDOOMTest.csproj -c Release
 powershell -NoProfile -File tools\check-standalone.ps1
+powershell -NoProfile -File tools\check-xp.ps1
 powershell -NoProfile -File tools\test-master.ps1
 powershell -NoProfile -File tools\test-relay.ps1
 powershell -NoProfile -File tools\test-net-latency.ps1
@@ -71,6 +72,12 @@ powershell -NoProfile -File tools\test-launcher.ps1
   с суффиксом `W` обязательно (`SendMessageW`, `DefWindowProcW`, `LoadIconW`).
   Без него рантайм ищет функцию без суффикса и падает в рантайме, а не при
   сборке. Это ловит `PInvokeDeclarationTest` — не отключать.
+- Windows XP: любая функция новее XP (`SetProcessDPIAware`, `GetDpiForWindow`,
+  `DwmGetWindowAttribute`, `GetTickCount64`…) допустима **только** внутри
+  `catch (EntryPointNotFoundException)` / `DllNotFoundException`, иначе она
+  падает лишь на XP, после зелёных тестов на современной машине. Заголовок PE
+  тоже должен оставаться 5.01 или ниже. Проверка — `tools/check-xp.ps1`,
+  не ослаблять.
 - Иконка: только DIB-кадры в `.ico`, PNG внутри не понимает Windows XP.
   Пересборка — `tools/fix-icon.ps1`, проверка — `tools/test-icon.ps1`.
 - Меню окна — `src/Win32/GameMenu.cs`, обработка команд — `Win32Doom.Execute`.

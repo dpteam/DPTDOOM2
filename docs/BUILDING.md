@@ -121,6 +121,7 @@ powershell -NoProfile -File tools\test-master.ps1     # протокол master
 powershell -NoProfile -File tools\test-headless.ps1   # воспроизводимость headless
 powershell -NoProfile -File tools\test-launcher.ps1   # мост HTML-лаунчера
 powershell -NoProfile -File tools\check-standalone.ps1 # нет сторонних зависимостей
+powershell -NoProfile -File tools\check-xp.ps1         # сборка грузится на Windows XP
 powershell -NoProfile -File tools\test-icon.ps1       # иконка совместима с XP
 powershell -NoProfile -File tools\test-window.ps1     # заголовок окна (нужен IWAD)
 powershell -NoProfile -File tools\test-relay.ps1      # игра через relay (нужен IWAD)

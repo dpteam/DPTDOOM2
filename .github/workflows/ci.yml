@@ -59,6 +59,14 @@ jobs:
         shell: pwsh
         run: ./tools/check-standalone.ps1
 
+      - name: Verify the shipped build still runs on Windows XP
+        # Windows XP is a stated target and "it still works on XP" was an intention
+        # rather than a check. The PE header decides whether XP will load the
+        # executable at all, and a Vista-only Win32 call throws only on XP, long
+        # after every test on a modern machine has gone green.
+        shell: pwsh
+        run: ./tools/check-xp.ps1
+
       - name: Icon is usable on Windows XP
         shell: pwsh
         run: ./tools/test-icon.ps1
