@@ -165,6 +165,7 @@ powershell -NoProfile -File tools\test-bots.ps1
 powershell -NoProfile -File tools\test-net-bots.ps1
 powershell -NoProfile -File tools\test-net-leave.ps1
 powershell -NoProfile -File tools\test-host-bans.ps1
+powershell -NoProfile -File tools\test-master-allow.ps1
 powershell -NoProfile -File tools\test-net-latency.ps1
 powershell -NoProfile -File tools\test-reconnect.ps1
 powershell -NoProfile -File tools\test-relay.ps1

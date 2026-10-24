@@ -17,6 +17,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Net;
+using System.Net.Sockets;
 using System.Text;
 
 namespace DPTDOOM.Master
@@ -245,14 +246,77 @@ namespace DPTDOOM.Master
     }
 
     /// <summary>
+    /// Raised relay quotas for one trusted source.
+    ///
+    /// Zero means "not specified, use the server's value". That makes the common case
+    /// - a rule that only grants access, with no quota change - cost nothing and stay
+    /// readable: nothing in the file, nothing in the config.
+    ///
+    /// These exist because the relay's quotas are **policy, not capability**: three
+    /// guest tunnels is what a four-player co-op needs, and two sessions per address is
+    /// what a household with two machines needs. Neither number is an engine limit, and
+    /// an operator's own test rig or a family behind one router should not have to edit
+    /// the server's config to get past a guess about strangers.
+    /// </summary>
+    internal sealed class RelayLimits
+    {
+        /// <summary>Guest tunnels one session may hold. Maps to relay-guests-per-session.</summary>
+        public int GuestsPerSession;
+
+        /// <summary>Sessions one address may hold. Maps to relay-sessions-per-source.</summary>
+        public int SessionsPerSource;
+
+        /// <summary>Channels (waiting or paired) one address may hold. Maps to relay-per-source.</summary>
+        public int LinksPerSource;
+
+        /// <summary>
+        /// This source's own ceiling on total channels, past the server's global cap.
+        ///
+        /// Past, not instead of: an untrusted host still stops at the global cap, so
+        /// raising this for one address cannot let strangers use the extra room.
+        /// </summary>
+        public int SessionsTotal;
+
+        public static readonly RelayLimits None = new RelayLimits();
+
+        public bool IsEmpty
+        {
+            get
+            {
+                return GuestsPerSession == 0 && SessionsPerSource == 0 &&
+                       LinksPerSource == 0 && SessionsTotal == 0;
+            }
+        }
+
+        public string Describe()
+        {
+            var parts = new List<string>();
+
+            if (GuestsPerSession > 0) { parts.Add("guests/session=" + GuestsPerSession); }
+            if (SessionsPerSource > 0) { parts.Add("sessions/source=" + SessionsPerSource); }
+            if (LinksPerSource > 0) { parts.Add("links/source=" + LinksPerSource); }
+            if (SessionsTotal > 0) { parts.Add("sessions/total=" + SessionsTotal); }
+
+            return parts.Count == 0 ? "none" : string.Join(" ", parts.ToArray());
+        }
+    }
+
+    /// <summary>
     /// A CIDR rule with an optional UTC expiry, matched against the TCP source
     /// address only.
+    ///
+    /// An allow-list rule may also carry raised relay quotas, which is how a trusted
+    /// address gets past the relay's policy limits without the limits being removed for
+    /// everybody.
     /// </summary>
     internal sealed class AddressRule
     {
         public uint Network;
         public int Prefix;
         public long Expires; // Unix seconds, 0 = permanent
+
+        /// <summary>Raised relay quotas, or <see cref="RelayLimits.None"/>.</summary>
+        public RelayLimits Lift = RelayLimits.None;
 
         public bool Matches(uint address, long now)
         {
@@ -263,6 +327,66 @@ namespace DPTDOOM.Master
 
             var mask = Prefix == 0 ? 0u : uint.MaxValue << (32 - Prefix);
             return (address & mask) == (Network & mask);
+        }
+
+        /// <summary>
+        /// Matches an address, ignoring anything that is not IPv4.
+        ///
+        /// The rule format is IPv4-only, and treating an IPv6 address as if it were
+        /// IPv4 would compare the first four bytes of something else - so an IPv6 peer
+        /// simply never matches rather than matching by accident.
+        /// </summary>
+        public bool Matches(IPAddress address, long now)
+        {
+            if (address == null || address.AddressFamily != AddressFamily.InterNetwork)
+            {
+                return false;
+            }
+
+            return Matches(ToUInt32(address), now);
+        }
+
+        /// <summary>
+        /// The largest lift any matching rule grants, or <see cref="RelayLimits.None"/>.
+        ///
+        /// Largest, not first: overlapping rules are normal in a hand-written file - a
+        /// /8 for the family and a /32 for the one machine that needs more - and taking
+        /// the first match would make the answer depend on line order in a way nobody
+        /// could predict. The biggest grant wins, which is also the reading a person
+        /// expects.
+        /// </summary>
+        public static RelayLimits LiftFor(List<AddressRule> rules, IPAddress address, long now)
+        {
+            if (rules == null || address == null)
+            {
+                return RelayLimits.None;
+            }
+
+            RelayLimits best = RelayLimits.None;
+
+            foreach (var rule in rules)
+            {
+                if (rule.Lift.IsEmpty || !rule.Matches(address, now))
+                {
+                    continue;
+                }
+
+                if (best.IsEmpty)
+                {
+                    best = rule.Lift;
+                    continue;
+                }
+
+                best = new RelayLimits
+                {
+                    GuestsPerSession = Math.Max(best.GuestsPerSession, rule.Lift.GuestsPerSession),
+                    SessionsPerSource = Math.Max(best.SessionsPerSource, rule.Lift.SessionsPerSource),
+                    LinksPerSource = Math.Max(best.LinksPerSource, rule.Lift.LinksPerSource),
+                    SessionsTotal = Math.Max(best.SessionsTotal, rule.Lift.SessionsTotal)
+                };
+            }
+
+            return best;
         }
 
         public static List<AddressRule> Load(string path, List<string> warnings)
@@ -370,6 +494,13 @@ namespace DPTDOOM.Master
 
                     i++;
                 }
+                else if (TryParseLift(parts, ref i, rule, out error))
+                {
+                    if (error != null)
+                    {
+                        return false;
+                    }
+                }
                 else
                 {
                     error = "unexpected token '" + parts[i] + "'";
@@ -377,6 +508,70 @@ namespace DPTDOOM.Master
                 }
             }
 
+            return true;
+        }
+
+        /// <summary>
+        /// A raised quota on an allow-list rule: "guests-per-session 6" and friends.
+        ///
+        /// Names match the configuration keys on purpose. An operator who already tuned
+        /// relay-guests-per-session in the config should not have to work out that the
+        /// same number is called something else in a rule file.
+        /// </summary>
+        private static bool TryParseLift(string[] parts, ref int i, AddressRule rule, out string error)
+        {
+            error = null;
+
+            var name = parts[i];
+            var needsValue =
+                name == "guests-per-session" || name == "sessions-per-source" ||
+                name == "links-per-source" || name == "sessions-total";
+
+            if (!needsValue)
+            {
+                return false;
+            }
+
+            if (i + 1 >= parts.Length)
+            {
+                error = "'" + name + "' needs a number";
+                return true;
+            }
+
+            int value;
+
+            if (!int.TryParse(parts[i + 1], NumberStyles.Integer, CultureInfo.InvariantCulture, out value) ||
+                value < 1 || value > 1024)
+            {
+                error = "'" + name + "' must be a number from 1 to 1024";
+                return true;
+            }
+
+            if (rule.Lift.IsEmpty)
+            {
+                rule.Lift = new RelayLimits();
+            }
+
+            switch (name)
+            {
+                case "guests-per-session":
+                    rule.Lift.GuestsPerSession = value;
+                    break;
+
+                case "sessions-per-source":
+                    rule.Lift.SessionsPerSource = value;
+                    break;
+
+                case "links-per-source":
+                    rule.Lift.LinksPerSource = value;
+                    break;
+
+                default:
+                    rule.Lift.SessionsTotal = value;
+                    break;
+            }
+
+            i++;
             return true;
         }
 

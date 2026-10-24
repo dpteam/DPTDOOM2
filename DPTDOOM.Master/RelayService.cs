@@ -29,6 +29,15 @@ namespace DPTDOOM.Master
     internal delegate bool RelaySourceGuard(byte[] host);
 
     /// <summary>
+    /// The raised quotas an address is entitled to, or <see cref="RelayLimits.None"/>.
+    ///
+    /// Separate from the guard because the two answer different questions: the guard
+    /// says whether a source may use the relay at all, this says how much of it. A
+    /// source can be perfectly welcome and still be held to the ordinary limits.
+    /// </summary>
+    internal delegate RelayLimits RelayLiftLookup(IPAddress address);
+
+    /// <summary>
     /// The relay: a bounded TCP proxy between one host and one guest.
     ///
     /// This is deliberately **not** a dedicated simulation server. The engine
@@ -55,6 +64,7 @@ namespace DPTDOOM.Master
         private readonly MasterLog log;
         private readonly SessionDirectory directory;
         private readonly RelaySourceGuard guard;
+        private readonly RelayLiftLookup lift;
 
         private readonly object sync = new object();
         private readonly Dictionary<string, WaitingHost> waiting = new Dictionary<string, WaitingHost>();
@@ -67,14 +77,45 @@ namespace DPTDOOM.Master
         private int port;
 
         public RelayService(MasterConfig config, MasterLog log, SessionDirectory directory, RelaySourceGuard guard)
+            : this(config, log, directory, guard, null)
+        {
+        }
+
+        public RelayService(MasterConfig config, MasterLog log, SessionDirectory directory,
+                            RelaySourceGuard guard, RelayLiftLookup lift)
         {
             this.config = config;
             this.log = log;
             this.directory = directory;
             this.guard = guard;
+            this.lift = lift;
         }
 
         public int Port => port;
+
+        /// <summary>
+        /// The quotas this source is entitled to, or none.
+        /// </summary>
+        private RelayLimits LiftFor(IPEndPoint remote)
+        {
+            if (lift == null || remote == null)
+            {
+                return RelayLimits.None;
+            }
+
+            return lift(remote.Address) ?? RelayLimits.None;
+        }
+
+        /// <summary>
+        /// A raised limit is a permission to exceed, never a reduction: a rule that
+        /// says 1 must not lower the server's 3, because a rule in an allow list is
+        /// about granting, and an operator who wants to tighten limits does it in the
+        /// server's own configuration.
+        /// </summary>
+        private static int Raise(int configured, int granted)
+        {
+            return granted > configured ? granted : configured;
+        }
 
         public void Start()
         {
@@ -234,6 +275,7 @@ namespace DPTDOOM.Master
 
             var key = MasterProtocol.IdToHex(id);
             var now = Now();
+            var lift = LiftFor(remote);
 
             lock (sync)
             {
@@ -256,38 +298,54 @@ namespace DPTDOOM.Master
                     }
                 }
 
-                if (waiting.Count + pairs.Count >= config.RelaySessions)
+                // The global cap, unless this source is trusted with more. The raise
+                // is a ceiling of its own rather than a wider shared one, so an
+                // address given room cannot create room for strangers.
+                var total = waiting.Count + pairs.Count;
+                var totalCap = Raise(config.RelaySessions, lift.SessionsTotal);
+
+                if (total >= totalCap)
                 {
-                    log.Event(Describe(host, remote) + " relay host rejected: relay is full");
+                    log.Event(Describe(host, remote) + " relay host rejected: relay is full (" +
+                              total + "/" + totalCap + ")");
                     Reply(stream, MasterProtocol.OpRelayHost, new byte[0], MasterProtocol.StatusCapacity);
                     return false;
                 }
 
-                if (CountForSource(remote) >= config.RelayPerSource)
+                var linksCap = Raise(config.RelayPerSource, lift.LinksPerSource);
+
+                if (CountForSource(remote) >= linksCap)
                 {
-                    log.Event(Describe(host, remote) + " relay host rejected: too many from this address");
+                    log.Event(Describe(host, remote) + " relay host rejected: too many from this address (" +
+                              linksCap + ")");
                     Reply(stream, MasterProtocol.OpRelayHost, new byte[0], MasterProtocol.StatusCapacity);
                     return false;
                 }
 
-                if (CountGuestsForKey(key) >= config.RelayGuestsPerSession)
+                var guestsCap = Raise(config.RelayGuestsPerSession, lift.GuestsPerSession);
+
+                if (CountGuestsForKey(key) >= guestsCap)
                 {
                     // The session already has all the guest tunnels it is allowed;
                     // parking another waiting channel would hold a socket open for
                     // a guest that could never be admitted.
                     log.Event("relay " + key + ": host channel not needed, " +
-                              config.RelayGuestsPerSession + " guest tunnels already active");
+                              guestsCap + " guest tunnels already active");
                     Reply(stream, MasterProtocol.OpRelayHost, new byte[0], MasterProtocol.StatusCapacity);
                     return false;
                 }
 
-                if (CountSessionsForSource(remote) >= config.RelaySessionsPerSource)
+                var sessionsCap = Raise(config.RelaySessionsPerSource, lift.SessionsPerSource);
+
+                if (CountSessionsForSource(remote) >= sessionsCap)
                 {
                     // The relay is a shared resource and costs the operator both
                     // bandwidth and CPU. Two sessions per address covers a
                     // household with two machines, which is the case NAT hairpin
-                    // creates; more than that is not two people playing.
-                    log.Event(Describe(host, remote) + " relay host rejected: too many sessions from this address");
+                    // creates; more than that is not two people playing. An allow
+                    // rule can raise it for an address the operator trusts.
+                    log.Event(Describe(host, remote) + " relay host rejected: too many sessions from this address (" +
+                              sessionsCap + ")");
                     Reply(stream, MasterProtocol.OpRelayHost, new byte[0], MasterProtocol.StatusCapacity);
                     return false;
                 }
@@ -330,10 +388,18 @@ namespace DPTDOOM.Master
                     // Guests are limited per session, not per address: the relay
                     // is meant for a co-op group of up to four, and the host
                     // itself is one of them.
-                    if (CountGuestsForKey(key) >= config.RelayGuestsPerSession)
+                    // The size of a group is the host's decision, so the raise comes
+                    // from the host's own rule - not the guest's. A trusted guest
+                    // joining an untrusted session does not enlarge that session,
+                    // and that is deliberate: otherwise anybody could bring a
+                    // bigger party into somebody else's room.
+                    var guestsCap = Raise(config.RelayGuestsPerSession,
+                                          LiftFor(waitingHost.Source).GuestsPerSession);
+
+                    if (CountGuestsForKey(key) >= guestsCap)
                     {
                         log.Event("relay " + key + ": guest rejected from " + Describe(host, remote) +
-                                  ": already " + config.RelayGuestsPerSession + " guest tunnels");
+                                  ": already " + guestsCap + " guest tunnels");
                         waitingHost = null;
                     }
                     else

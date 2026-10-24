@@ -46,6 +46,7 @@ powershell -NoProfile -File tools\test-bots.ps1
 powershell -NoProfile -File tools\test-net-bots.ps1
 powershell -NoProfile -File tools\test-net-leave.ps1
 powershell -NoProfile -File tools\test-host-bans.ps1
+powershell -NoProfile -File tools\test-master-allow.ps1
 powershell -NoProfile -File tools\test-reconnect.ps1
 powershell -NoProfile -File tools\test-profile.ps1
 powershell -NoProfile -File tools\test-view.ps1
@@ -151,8 +152,17 @@ powershell -NoProfile -File tools\test-launcher.ps1
   не COM: `window.external` на части систем не отдаёт методы.
 - Страница под MSHTML: ES5, без CSS custom properties/`grid`/`flex`, разметка
   только `div`. Новые HTML5-теги ломают документ-режим.
-- Master — только directory. Не называть его игровым сервером. Relay объявлен в
-  протоколе, но не реализован: не изображать его рабочим.
+- Master — только directory. Не называть его игровым сервером. Relay реализован
+  (`docs/RELAY.md`, проверка `tools/test-relay.ps1`) и остаётся **прокси байтов**:
+  симуляции на нём нет, и «игровым сервером» он от этого не становится.
+- Квоты relay (`relay-guests-per-session`, `relay-sessions-per-source`,
+  `relay-per-source`, `relay-sessions`) — **политика, а не предел движка**: 3 гостя
+  это 4 игрока, 2 сессии с адреса это дом с двумя машинами. Правило в allow-списке
+  мастера может нести подъём (`sessions-per-source 4` и т.п.). Подъём только
+  **повышает** (меньшее число не ужесточает), гостевую квоту поднимает правило
+  **хоста**, а `sessions-total` даёт адресу собственный потолок вместо общего, не
+  расширяя общий для чужих. При пересечении правил действует наибольшее число.
+  Проверка — `tools/test-master-allow.ps1`.
 - Сеть: lockstep, состояние мира не передаётся. Любое изменение, влияющее на
   детерминизм симуляции (RNG, порядок тиков, физика), ломает совместимость —
   проверять `-botinput` soak-тестом и хешами мира.

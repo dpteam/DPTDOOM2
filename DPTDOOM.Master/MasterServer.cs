@@ -67,6 +67,31 @@ namespace DPTDOOM.Master
             {
                 throw new Exception("access-mode=allowlist needs at least one rule in the allow list");
             }
+
+            // Report the raised quotas at startup. A rule line that parses but says
+            // something other than what the operator meant is silent otherwise: the
+            // syntax error gets a warning, the wrong number does not, and the symptom
+            // is a refusal hours later with no way to tell which line caused it.
+            foreach (var rule in allowed)
+            {
+                if (!rule.Lift.IsEmpty)
+                {
+                    log.Info("allow rule " + DescribeRule(rule) + " raises relay limits: " +
+                             rule.Lift.Describe());
+                }
+            }
+        }
+
+        /// <summary>
+        /// A rule as a person would write it, for the log.
+        /// </summary>
+        private static string DescribeRule(AddressRule rule)
+        {
+            var address = new IPAddress(rule.Network);
+
+            return rule.Prefix == 32
+                ? address.ToString()
+                : address + "/" + rule.Prefix;
         }
 
         public void Run()
@@ -89,7 +114,7 @@ namespace DPTDOOM.Master
                 // is one bounded exchange. Sharing one port would mean one accept
                 // loop with two completely different lifetimes, and one slow
                 // reader would start holding up LIST replies.
-                relay = new RelayService(config, log, directory, IsRelaySourceAllowed);
+                relay = new RelayService(config, log, directory, IsRelaySourceAllowed, LiftForRelaySource);
                 relay.Start();
             }
 
@@ -419,6 +444,23 @@ namespace DPTDOOM.Master
             }
 
             return !config.AllowListOnly || IsAllowed(host);
+        }
+
+        /// <summary>
+        /// The raised relay quotas this address is entitled to, if any.
+        ///
+        /// Read from the allow list, which is the one place that already means "an
+        /// address the operator trusts". A separate quota file would be a second list
+        /// to keep in step, and the interesting question - who is trusted - is already
+        /// answered here.
+        ///
+        /// Note that this works even when access-mode is open: a rule that only raises
+        /// quotas is not an access restriction, so listing an address does not by itself
+        /// start refusing everybody else.
+        /// </summary>
+        private RelayLimits LiftForRelaySource(IPAddress address)
+        {
+            return AddressRule.LiftFor(allowed, address, Now());
         }
 
         private bool TakeRateLimit(byte[] host)
