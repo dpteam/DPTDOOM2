@@ -53,6 +53,26 @@ namespace DPTDOOM.Video
         public int Crosshair { get; set; }
 
         /// <summary>
+        /// Crosshair colours, as palette indices. -1 means "pick the nearest white
+        /// and the nearest black", which is what an unset config gets.
+        /// </summary>
+        public int CrosshairLight { get; set; }
+
+        public int CrosshairDark { get; set; }
+
+        /// <summary>
+        /// How much the on-screen counter shows; 0 is off.
+        ///
+        /// Drawn here rather than in the window's overlay because the window's
+        /// overlay is GDI text in a system font, and a Doom port that reports its
+        /// frame rate in Segoe UI looks like a program with a debug window bolted on.
+        /// </summary>
+        public int ProfilerLevel { get; set; }
+
+        /// <summary>Frame timing, filled by the window each frame.</summary>
+        public FrameStats Stats { get; set; }
+
+        /// <summary>
         /// Palette indices used for the crosshair.
         ///
         /// Found from PLAYPAL rather than hard-coded: index 4 is "dark red" in Doom
@@ -62,6 +82,10 @@ namespace DPTDOOM.Video
         /// </summary>
         private readonly int crosshairLight;
         private readonly int crosshairDark;
+
+        private readonly byte[] profilerShade;
+        private readonly byte[] profilerText;
+
 
         public ThreeDRenderer(GameContent content, DrawScreen screen, int windowSize)
         {
@@ -81,6 +105,11 @@ namespace DPTDOOM.Video
             var playpal = content.Wad.ReadLump("PLAYPAL");
             crosshairLight = NearestPaletteIndex(playpal, 255, 255, 255);
             crosshairDark = NearestPaletteIndex(playpal, 0, 0, 0);
+
+            // Row 20 of 32: dark enough for light text to read, light enough that the
+            // wall behind the counter is still there.
+            profilerShade = colorMap[20];
+            profilerText = PaletteLookup.Tint(playpal, 180, 230, 255);
 
             InitWallRendering();
             InitPlaneRendering();
@@ -290,19 +319,49 @@ namespace DPTDOOM.Video
             floorLights = new byte[screenHeight][];
         }
 
+        /// <summary>
+        /// The horizon the plane slope table was built for.
+        ///
+        /// <see cref="planeYSlope"/> is a per-row table, so it cannot follow the
+        /// horizon on its own: it is built for one value of <see cref="centerY"/> and
+        /// stays valid only for that one. When vertical look moves the horizon the
+        /// table has to be rebuilt, or the flats keep sampling as if the view were
+        /// still level - which looks like floors and ceilings sliding under the walls
+        /// while everything else tilts correctly.
+        /// </summary>
+        private int planeYSlopeCentre = int.MinValue;
+
         private void ResetPlaneRendering()
         {
-            for (int i = 0; i < windowHeight; i++)
-            {
-                var dy = Fixed.FromInt(i - windowHeight / 2) + Fixed.One / 2;
-                dy = Fixed.Abs(dy);
-                planeYSlope[i] = Fixed.FromInt(windowWidth / 2) / dy;
-            }
+            RebuildPlaneYSlope(centerY);
 
             for (var i = 0; i < windowWidth; i++)
             {
                 var cos = Fixed.Abs(Trig.Cos(xToAngle[i]));
                 planeDistScale[i] = Fixed.One / cos;
+            }
+        }
+
+        /// <summary>
+        /// Rebuilds the distance table for a given horizon.
+        ///
+        /// The +1/2 keeps the row the horizon falls on from dividing by zero: it is
+        /// half a row away from the eye, which is where the projection puts it.
+        /// </summary>
+        private void RebuildPlaneYSlope(int horizon)
+        {
+            if (planeYSlopeCentre == horizon)
+            {
+                return;
+            }
+
+            planeYSlopeCentre = horizon;
+
+            for (int i = 0; i < windowHeight; i++)
+            {
+                var dy = Fixed.FromInt(i - horizon) + Fixed.One / 2;
+                dy = Fixed.Abs(dy);
+                planeYSlope[i] = Fixed.FromInt(windowWidth / 2) / dy;
             }
         }
 
@@ -830,6 +889,71 @@ namespace DPTDOOM.Video
             // Last, so it sits over the weapon: the mark is what the player aims
             // with and must never be hidden behind their own gun.
             DrawCrosshair();
+
+            DrawProfiler();
+        }
+
+        /// <summary>
+        /// The frame counter, top right, in the game's own font.
+        ///
+        /// Right rather than left because the message line owns the top left: a
+        /// pickup message and a frame rate fighting for the same corner is how the
+        /// first version managed to make both unreadable.
+        ///
+        /// Right-aligned, so the numbers do not jitter left and right as their width
+        /// changes - a counter that shifts every time the frame rate goes from 99 to
+        /// 100 is worse than no counter.
+        /// </summary>
+        private void DrawProfiler()
+        {
+            var level = ProfilerLevel;
+
+            if (level <= 0 || Stats == null)
+            {
+                return;
+            }
+
+            var lines = Video.ProfilerLevel.Lines(level, Stats, profile);
+
+            if (lines.Length == 0)
+            {
+                return;
+            }
+
+            var scale = Math.Max(1, screenWidth / 320);
+
+            var y = windowY + 8 * scale;
+            var right = windowX + windowWidth - 4 * scale;
+
+            // A dark plate behind the text. Without it the counter is unreadable over
+            // a bright wall, and the renderer has no alpha to make it subtle.
+            var widest = 0;
+
+            foreach (var line in lines)
+            {
+                var w = screen.MeasureText(line, scale);
+
+                if (w > widest)
+                {
+                    widest = w;
+                }
+            }
+
+            var plateWidth = widest + 4 * scale;
+            var plateHeight = lines.Length * 8 * scale + 2 * scale;
+
+            // Darkened rather than filled, for the same reason as the console: a solid
+            // plate is a hole in the picture, and the game behind it is the point of
+            // having a counter at all.
+            DarkenScreen(right - plateWidth, y - 8 * scale, plateWidth, plateHeight);
+
+            foreach (var line in lines)
+            {
+                var w = screen.MeasureText(line, scale);
+                screen.DrawTextColored(line, right - w - 2 * scale, y, scale, profilerText);
+
+                y += 8 * scale;
+            }
         }
 
 
@@ -858,10 +982,18 @@ namespace DPTDOOM.Video
                 shift = -limit;
             }
 
-            // Looking up moves the horizon *down* the screen, so the sign is
-            // inverted here once instead of at every use.
-            centerYFrac = baseCenterYFrac - Fixed.FromInt(shift);
-            centerY = baseCenterY - shift;
+            // Looking up moves the horizon *down* the screen, so a positive pitch
+            // adds to the horizon's screen row. This used to subtract, which made
+            // the mouse feel inverted - reported straight away by the only person
+            // who plays it.
+            centerYFrac = baseCenterYFrac + Fixed.FromInt(shift);
+            centerY = baseCenterY + shift;
+
+            // The plane distance table is per-row and built for one horizon, so it
+            // has to follow. Without this the walls, sprites and sky tilt while the
+            // floors and ceilings keep sampling as if the view were level - which
+            // reads as the flats sliding around underneath everything else.
+            RebuildPlaneYSlope(centerY);
         }
 
         /// <summary>
@@ -926,12 +1058,16 @@ namespace DPTDOOM.Video
 
             var outline = Math.Max(1, scale / 2);
 
+            // Configured colours when set, the ones found from PLAYPAL otherwise.
+            var light = CrosshairLight >= 0 ? CrosshairLight : crosshairLight;
+            var dark = CrosshairDark >= 0 ? CrosshairDark : crosshairDark;
+
             // Cross.
             if (style == 1 || style == 3)
             {
                 // Dark backing first, inflated by the outline width.
-                CrosshairBars(cx, cy, gap, arm, thickness, outline, crosshairDark);
-                CrosshairBars(cx, cy, gap, arm, thickness, 0, crosshairLight);
+                CrosshairBars(cx, cy, gap, arm, thickness, outline, dark);
+                CrosshairBars(cx, cy, gap, arm, thickness, 0, light);
             }
 
             // Dot.
@@ -942,9 +1078,41 @@ namespace DPTDOOM.Video
 
                 screen.FillRect(
                     cx - half - outline, cy - half - outline,
-                    size + outline * 2, size + outline * 2, crosshairDark);
+                    size + outline * 2, size + outline * 2, dark);
 
-                screen.FillRect(cx - half, cy - half, size, size, crosshairLight);
+                screen.FillRect(cx - half, cy - half, size, size, light);
+            }
+        }
+
+        /// <summary>
+        /// Darkens a rectangle of what is already on screen, using the game's own
+        /// colormap.
+        ///
+        /// The counter sits over the world, so covering it with a solid plate makes a
+        /// hole in the picture. Doom's colormap already maps every palette index to a
+        /// darker one - it is what distance shading uses - so the plate reuses it and
+        /// the wall behind stays faintly visible.
+        /// </summary>
+        private void DarkenScreen(int x, int y, int w, int h)
+        {
+            var data = screenData;
+            var rowHeight = screenHeight;
+
+            for (var i = 0; i < w; i++)
+            {
+                var column = (x + i) * rowHeight;
+
+                for (var j = 0; j < h; j++)
+                {
+                    var at = column + y + j;
+
+                    if (at < 0 || at >= data.Length)
+                    {
+                        continue;
+                    }
+
+                    data[at] = profilerShade[data[at]];
+                }
             }
         }
 

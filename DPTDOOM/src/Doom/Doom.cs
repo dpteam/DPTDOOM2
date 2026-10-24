@@ -115,6 +115,13 @@ namespace DPTDOOM
         /// <summary>Configuration, which the settings screen edits in place.</summary>
         public Config Config => config;
 
+        /// <summary>
+        /// Frame timing for the on-screen counter, filled by the window each frame.
+        ///
+        /// Null in a headless run, which draws no frames to time.
+        /// </summary>
+        public FrameStats Stats { get; set; }
+
         /// <summary>Frames drawn so far. Used for blinking cursors and the like.</summary>
         public int FrameCount => frameCount;
 
@@ -205,6 +212,16 @@ namespace DPTDOOM
             {
                 config.view_freelook = true;
                 viewPitch = Fixed.FromInt(MathEx.Clamp(args.pitch.Value, -PitchLimit, PitchLimit));
+            }
+
+            if (args.profiler.Present)
+            {
+                config.hud_profiler = MathEx.Clamp(args.profiler.Value, 0, Video.ProfilerLevel.Count - 1);
+
+                if (Stats == null)
+                {
+                    RunWithProfilerStats(this);
+                }
             }
 
             showSettingsOnStart = args.showsettings.Present;
@@ -714,8 +731,18 @@ namespace DPTDOOM
                     // the sequence.
                     if (currentState == DoomState.Game || currentState == DoomState.DemoPlayback)
                     {
+                        var firstTime = overlay.LineCount == 0;
+
                         overlay.Open();
-                        overlay.Print("Type \"help\" for a list of commands.", ConsoleLineKind.Hint);
+
+                        // The greeting is printed once. Saying it on every open was
+                        // noise: after the first time the player knows, and it pushed
+                        // their own output off the panel.
+                        if (firstTime)
+                        {
+                            overlay.Print("Type \"help\" for a list of commands.", ConsoleLineKind.Hint);
+                        }
+
                         continue;
                     }
                 }
@@ -830,7 +857,7 @@ namespace DPTDOOM
                 return;
             }
 
-            overlay.Print("> " + line, ConsoleLineKind.Echo);
+            overlay.Print("] " + line, ConsoleLineKind.Echo);
             commands.Execute(line, overlay);
         }
 
@@ -974,6 +1001,23 @@ namespace DPTDOOM
         /// and it refuses to run in a network game or while a demo is playing, for
         /// the same reason cheats do: the other side would not know.
         /// </summary>
+        private void RunWithProfilerStats(Doom doom)
+        {
+            // A headless run draws no frames to time, so the counter would have
+            // nothing to show and a screenshot of it would be empty. Plausible
+            // numbers are enough here: the point of the flag in this mode is to check
+            // that the overlay draws, not to measure anything.
+            var stats = new FrameStats();
+            stats.Fps = 35;
+            stats.TicsThisFrame = 1;
+            stats.RenderMs = 2.0;
+            stats.PresentMs = 0.0;
+            stats.Fraction = 0.5;
+            stats.TicsPerSecond = 35;
+
+            doom.Stats = stats;
+        }
+
         private void RegisterConsoleCommands()
         {
             commands.Register(
@@ -1152,7 +1196,7 @@ namespace DPTDOOM
                 });
 
             commands.Register(
-                "map", "map <1..32>",
+                "map", "map <MAP01|E1M1|1..32>",
                 "Start a level. Single player only.",
                 call =>
                 {
@@ -1174,19 +1218,21 @@ namespace DPTDOOM
 
                     if (call.Args.Length == 0)
                     {
-                        call.Write("map = " + options.Map);
+                        call.Write("map = " + LevelName.Format(options.GameMode, options.Episode, options.Map));
                         return;
                     }
 
-                    int value;
-                    if (!int.TryParse(call.Args[0], out value) || value < 1 || value > 32)
+                    int episode;
+                    int map;
+
+                    if (!LevelName.TryParse(call.Args[0], options.GameMode, options.Episode, out episode, out map))
                     {
-                        call.Error("Expected a map number from 1 to 32.");
+                        call.Error("Expected MAP01..MAP32, E1M1..E4M9 or a number.");
                         return;
                     }
 
-                    NewGame(options.Skill, options.Episode, value);
-                    call.Write("map = " + value);
+                    NewGame(options.Skill, episode, map);
+                    call.Write("map = " + LevelName.Format(options.GameMode, options.Episode, options.Map));
                 });
 
             commands.Register(
@@ -1953,6 +1999,12 @@ namespace DPTDOOM
         public OpeningSequence Opening => opening;
         public DemoPlayback DemoPlayback => demoPlayback;
         public GameOptions Options => options;
+
+        /// <summary>
+        /// The loaded WAD set. Needed by anything that wants a palette or a lump the
+        /// options do not carry - the settings screen, for its crosshair colours.
+        /// </summary>
+        public GameContent Content => content;
         public DoomGame Game => game;
         public DoomMenu Menu => menu;
         public WipeEffect WipeEffect => wipeEffect;

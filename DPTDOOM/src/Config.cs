@@ -56,6 +56,26 @@ namespace DPTDOOM
         /// <summary>0 off, 1 cross, 2 dot, 3 cross with a dot.</summary>
         public int hud_crosshair;
 
+        /// <summary>
+        /// Crosshair colours, as indices into PLAYPAL.
+        ///
+        /// Indices rather than RGB because the screen is 8-bit: a colour has to be
+        /// one of the 256 the game already has, and picking the nearest entry from an
+        /// RGB triple would give a different answer in every IWAD. The settings
+        /// screen offers named presets and resolves them here at startup.
+        /// </summary>
+        public int hud_crosshair_light;
+        public int hud_crosshair_dark;
+
+        /// <summary>
+        /// How much the frame counter shows: 0 off, then a difficulty ladder.
+        ///
+        /// Named after Doom's own skill levels, because "how detailed do you want
+        /// this" is a question the game already has a vocabulary for, and a list of
+        /// numbers 0-5 says nothing about what each one adds.
+        /// </summary>
+        public int hud_profiler;
+
         public int video_screenwidth;
         public int video_screenheight;
         public bool video_fullscreen;
@@ -166,6 +186,9 @@ namespace DPTDOOM
             view_freelook = false;
 
             hud_crosshair = 1;
+            hud_crosshair_light = -1;
+            hud_crosshair_dark = -1;
+            hud_profiler = 0;
 
             video_screenwidth = 640;
             video_screenheight = 400;
@@ -222,6 +245,9 @@ namespace DPTDOOM
 
                 view_freelook = GetBool(dic, nameof(view_freelook), view_freelook);
                 hud_crosshair = GetInt(dic, nameof(hud_crosshair), hud_crosshair);
+                hud_crosshair_light = GetInt(dic, nameof(hud_crosshair_light), hud_crosshair_light);
+                hud_crosshair_dark = GetInt(dic, nameof(hud_crosshair_dark), hud_crosshair_dark);
+                hud_profiler = GetInt(dic, nameof(hud_profiler), hud_profiler);
 
                 video_screenwidth = GetInt(dic, nameof(video_screenwidth), video_screenwidth);
                 video_screenheight = GetInt(dic, nameof(video_screenheight), video_screenheight);
@@ -275,6 +301,9 @@ namespace DPTDOOM
 
                     writer.WriteLine(nameof(view_freelook) + " = " + BoolToString(view_freelook));
                     writer.WriteLine(nameof(hud_crosshair) + " = " + hud_crosshair);
+                    writer.WriteLine(nameof(hud_crosshair_light) + " = " + hud_crosshair_light);
+                    writer.WriteLine(nameof(hud_crosshair_dark) + " = " + hud_crosshair_dark);
+                    writer.WriteLine(nameof(hud_profiler) + " = " + hud_profiler);
 
                     writer.WriteLine(nameof(video_screenwidth) + " = " + video_screenwidth);
                     writer.WriteLine(nameof(video_screenheight) + " = " + video_screenheight);

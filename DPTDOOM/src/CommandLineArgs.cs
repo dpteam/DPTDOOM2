@@ -85,6 +85,7 @@ namespace DPTDOOM
         public readonly Arg<int> pitch;
         public readonly Arg showsettings;
         public readonly Arg showconsole;
+        public readonly Arg<int> profiler;
         public readonly Arg showtriggers;
         public readonly Arg showblockmap;
         public readonly Arg bots;
@@ -165,6 +166,7 @@ namespace DPTDOOM
             // the keyboard from outside the process.
             showsettings = new Arg(args.Contains("-showsettings"));
             showconsole = new Arg(args.Contains("-showconsole"));
+            profiler = GetInt(args, "-profiler");
             showtriggers = new Arg(args.Contains("-showtriggers"));
             showblockmap = new Arg(args.Contains("-showblockmap"));
             bots = new Arg(args.Contains("-bots"));

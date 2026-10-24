@@ -30,10 +30,17 @@ namespace DPTDOOM
             {
             }
 
-            Console.ForegroundColor = ConsoleColor.White;
-            Console.BackgroundColor = ConsoleColor.DarkGreen;
-            Console.WriteLine(ApplicationInfo.Title);
-            Console.ResetColor();
+            // Checked before the banner, because the banner is what the flag turns
+            // off and the flag is one of the arguments.
+            foreach (var arg in args)
+            {
+                if (string.Equals(arg, "-nobanner", StringComparison.OrdinalIgnoreCase))
+                {
+                    ConsoleUi.Disable();
+                }
+            }
+
+            ConsoleUi.Banner();
 
             try
             {

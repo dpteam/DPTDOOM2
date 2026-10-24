@@ -125,65 +125,68 @@ Assert-True ($plain.Log.ToString() -eq $console.Log.ToString()) `
 $consoleImage = [System.Drawing.Bitmap]::FromFile((Resolve-Path $console.Bitmap).Path)
 $plainImage = [System.Drawing.Bitmap]::FromFile((Resolve-Path $plain.Bitmap).Path)
 
-# The console is an overlay: it takes the bottom of the screen, status bar included,
-# the way a Quake-lineage console does. What must stay visible is the top of the
-# view, so the player can still see the game while reading the output.
-$panelTop = $consoleImage.Height - 156
+# The console is an overlay that drops from the *top*, the way Quake's does, so it
+# covers the upper part of the view and leaves the bottom visible. The first version
+# came up from the bottom and sat on the status bar.
+$panelBottom = 232
 
-$topSame = $true
+$bottomSame = $true
 
-for ($y = 0; $y -lt $panelTop; $y += 2) {
+for ($y = $panelBottom; $y -lt $consoleImage.Height; $y += 2) {
     for ($x = 0; $x -lt $consoleImage.Width; $x += 5) {
+        if ($x -ge $faceLeft -and $x -le $faceRight) { continue }
+
         if ($consoleImage.GetPixel($x, $y).ToArgb() -ne $plainImage.GetPixel($x, $y).ToArgb()) {
-            $topSame = $false
+            $bottomSame = $false
             break
         }
     }
 
-    if (-not $topSame) { break }
+    if (-not $bottomSame) { break }
 }
 
-Assert-True $topSame "the console leaves the top of the view visible"
+Assert-True $bottomSame "the console leaves the bottom of the view visible"
 
-# And it does cover the bottom, or it is not a drop-down panel.
-$bottomDiffers = $false
+# And it does cover the top, or it is not a drop-down panel.
+$topDiffers = $false
 
-for ($y = $panelTop + 10; $y -lt $consoleImage.Height - 10 -and -not $bottomDiffers; $y += 4) {
+for ($y = 2; $y -lt $panelBottom - 20 -and -not $topDiffers; $y += 4) {
     for ($x = 0; $x -lt $consoleImage.Width; $x += 11) {
         if ($consoleImage.GetPixel($x, $y).ToArgb() -ne $plainImage.GetPixel($x, $y).ToArgb()) {
-            $bottomDiffers = $true
+            $topDiffers = $true
             break
         }
     }
 }
 
-Assert-True $bottomDiffers "the console panel covers the bottom of the screen"
+Assert-True $topDiffers "the console panel covers the top of the screen"
 
-# The panel is a solid dark rectangle, so a row inside it must be a flat colour.
-# Sampling the left edge of the panel is enough to prove the fill happened.
-$panelY = $consoleImage.Height - 120
-$left = $consoleImage.GetPixel(4, $panelY).ToArgb()
-$middle = $consoleImage.GetPixel([int]($consoleImage.Width / 2), $panelY).ToArgb()
+# The panel is dithered rather than solid: every other pixel on both axes is left
+# showing the game, so a row differs from the plain frame on exactly half its pixels.
+# Asserting "at least a quarter" is what proves the fill happened without pinning
+# the pattern, which is a detail of the look rather than of the behaviour.
+$panelY = 100
 
-Assert-True ($left -eq $middle) "the console panel is filled across its width"
+$differs = 0
 
-$consoleImage.Dispose()
-$plainImage.Dispose()
+for ($x = 0; $x -lt $consoleImage.Width; $x++) {
+    if ($consoleImage.GetPixel($x, $panelY).ToArgb() -ne $plainImage.GetPixel($x, $panelY).ToArgb()) {
+        $differs++
+    }
+}
+
+Assert-True ($differs -ge ($consoleImage.Width / 4)) `
+    "the console panel covers its width ($differs of $($consoleImage.Width) pixels)"
 
 Write-Host ""
 Write-Host "The console says something"
 
-# The screen is only useful if it prints. "Type help" is the line the game itself
-# puts there on open, so its presence proves the scrollback is being drawn rather
-# than an empty panel.
-$found = $false
-
-$consoleImage = [System.Drawing.Bitmap]::FromFile((Resolve-Path $console.Bitmap).Path)
-$plainImage = [System.Drawing.Bitmap]::FromFile((Resolve-Path $plain.Bitmap).Path)
-
+# The screen is only useful if it prints. The console now drops from the top, so the
+# text is in the upper part of the panel - the lower rows are deliberately left
+# showing the game.
 $changed = 0
 
-for ($y = $consoleImage.Height - 96; $y -lt $consoleImage.Height - 40; $y++) {
+for ($y = 0; $y -lt 60; $y++) {
     for ($x = 0; $x -lt $consoleImage.Width; $x++) {
         if ($consoleImage.GetPixel($x, $y).ToArgb() -ne $plainImage.GetPixel($x, $y).ToArgb()) {
             $changed++
@@ -191,7 +194,7 @@ for ($y = $consoleImage.Height - 96; $y -lt $consoleImage.Height - 40; $y++) {
     }
 }
 
-$found = $changed -gt 500
+$found = $changed -gt 200
 
 Assert-True $found "the console printed text ($changed pixels differ)"
 

@@ -41,6 +41,13 @@ namespace DPTDOOM.Win32
         private readonly Doom doom;
 
         private FrameClock clock;
+
+        /// <summary>
+        /// Frame timing for the in-game counter. One instance for the whole run: the
+        /// renderer reads it every frame, and allocating one per frame would be a
+        /// garbage-collection pause in the middle of the thing being measured.
+        /// </summary>
+        private readonly FrameStats stats = new FrameStats();
         private int slowCounter;
 
         private bool disposed;
@@ -361,6 +368,16 @@ namespace DPTDOOM.Win32
         /// Text for the debug overlay. Kept short: it is drawn over the game
         /// and every extra line hides part of the view.
         /// </summary>
+        /// <summary>
+        /// The window's own overlay text: state that the in-game counter does not
+        /// show.
+        ///
+        /// The frame rate moved to the in-game profiler, which is drawn with Doom's
+        /// font and lives in the top-right corner of the view. What is left here is
+        /// the things that are not timing - which map, how many tics, what the bots
+        /// are doing, what the session costs - because those are text a player reads
+        /// once in a while rather than a number they watch.
+        /// </summary>
         private string BuildOverlay(FrameStep step)
         {
             var game = doom.Game;
@@ -369,22 +386,7 @@ namespace DPTDOOM.Win32
                 ? "MAP" + doom.Options.Map.ToString("00")
                 : "E" + doom.Options.Episode + "M" + doom.Options.Map;
 
-            var text = "FPS " + clock.CurrentFps.ToString("0.0") +
-                       "   " + map + "   tic " + levelTime;
-
-            if (args.fpslog.Present || clock.IsLogging)
-            {
-                text += "\nrender " + video.LastRenderMs.ToString("0.0") +
-                        " ms   present " + video.LastPresentMs.ToString("0.0") + " ms" +
-                        "   tics/frame " + step.UpdateCount;
-            }
-
-            // Only when it was asked for: the line is four numbers of noise for
-            // somebody who just wants to play.
-            if (video.Profile != null && video.Profile.Enabled)
-            {
-                text += "\n" + video.Profile.ShortLine();
-            }
+            var text = map + "   tic " + levelTime;
 
             var bots = doom.BotReport;
 
@@ -786,6 +788,8 @@ namespace DPTDOOM.Win32
 
             var pacer = new FramePacer(fpsScale);
 
+            doom.Stats = stats;
+
             using (clock = new FrameClock(pacer.TargetFps))
             {
                 if (args.fpslog.Present)
@@ -873,6 +877,16 @@ namespace DPTDOOM.Win32
                         {
                             video.Window.OverlayText = BuildOverlay(step);
                         }
+
+                        // The in-game counter reads this. Filled here, before the
+                        // render, so the number belongs to the frame it is drawn on
+                        // rather than to the one before it.
+                        stats.Fps = clock.CurrentFps;
+                        stats.TicsThisFrame = step.UpdateCount;
+                        stats.RenderMs = video.LastRenderMs;
+                        stats.PresentMs = video.LastPresentMs;
+                        stats.Fraction = step.Fraction.ToDouble();
+                        stats.TicsPerSecond = clock.TicsPerSecond;
 
                         video.Render(doom, step.Fraction);
                         clock.EndFrame(step, video.LastRenderMs, video.LastPresentMs, clock.LastWaitMs);

@@ -39,17 +39,17 @@ namespace DPTDOOM
         {
             try
             {
-                Console.Write("Load textures: ");
+                ConsoleUi.Begin("Load textures");
 
                 InitLookup(wad);
                 InitSwitchList();
 
-                Console.WriteLine("OK (" + textures.Count + " textures" +
-                                  (pk3Replaced > 0 ? ", " + pk3Replaced + " from PK3" : "") + ")");
+                ConsoleUi.Ok(textures.Count + " textures" +
+                             (pk3Replaced > 0 ? ", " + pk3Replaced + " from PK3" : ""));
             }
             catch (Exception e)
             {
-                Console.WriteLine("Failed");
+                ConsoleUi.Failed("see below");
                 ExceptionDispatchInfo.Throw(e);
             }
         }
@@ -137,8 +137,7 @@ namespace DPTDOOM
                 catch (Exception e)
                 {
                     // A broken PNG must not stop the game: the IWAD texture stays.
-                    Console.WriteLine();
-                    Console.WriteLine("  skipping " + graphic.Path + ": " + e.Message);
+                    ConsoleUi.Detail("skipping " + graphic.Path + ": " + e.Message);
                     continue;
                 }
 

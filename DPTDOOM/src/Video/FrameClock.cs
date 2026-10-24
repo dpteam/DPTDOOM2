@@ -53,6 +53,7 @@ namespace DPTDOOM.Video
 
         private const int RecentWindow = 60;
         private readonly double[] recent = new double[RecentWindow];
+        private readonly int[] recentTics = new int[RecentWindow];
         private int recentIndex;
         private int recentCount;
         private double recentTotal;
@@ -134,6 +135,34 @@ namespace DPTDOOM.Video
                 }
 
                 return 1000.0 / (recentTotal / recentCount);
+            }
+        }
+
+        /// <summary>
+        /// Tics per second over the same rolling window as the frame rate.
+        ///
+        /// Reported next to the frame rate because they are two different numbers and
+        /// the difference is the bug the log was extended for: a run can show a
+        /// healthy frame rate while the game itself runs slow, and only the tic rate
+        /// reveals it.
+        /// </summary>
+        public double TicsPerSecond
+        {
+            get
+            {
+                if (recentCount < 2 || recentTotal <= 0)
+                {
+                    return 0;
+                }
+
+                var tics = 0;
+
+                for (var i = 0; i < recentCount; i++)
+                {
+                    tics += recentTics[i];
+                }
+
+                return tics * 1000.0 / recentTotal;
             }
         }
 
@@ -239,6 +268,7 @@ namespace DPTDOOM.Video
                 }
 
                 recent[recentIndex] = interval;
+                recentTics[recentIndex] = step.UpdateCount;
                 recentTotal += interval;
                 recentIndex = (recentIndex + 1) % RecentWindow;
             }

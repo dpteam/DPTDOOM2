@@ -26,8 +26,11 @@ namespace DPTDOOM
         private SelectableMenu main;
         private SelectableMenu episodeMenu;
         private SelectableMenu skillMenu;
-        private SelectableMenu optionMenu;
         private TextMenu settings;
+        private TextMenu settingsView;
+        private TextMenu settingsAudio;
+        private TextMenu settingsInput;
+        private TextMenu settingsSystem;
         private SelectableMenu volume;
         private LoadMenu load;
         private SaveMenu save;
@@ -202,21 +205,22 @@ namespace DPTDOOM
             var video = doom.Options.Video;
             var userInput = doom.Options.UserInput;
 
-            // The settings screen, drawn with the font rather than with WAD patches.
+            // Options leads straight into the settings screen, and the old
+            // patch-based options menu is gone: everything it had is on these pages,
+            // plus everything added since 1994. Two menus for the same settings was
+            // the worst of both - a player had to remember which one held what.
             //
-            // It exists because the classic menus can only offer what id Software
-            // drew: there is no patch for a crosshair or for vertical look, and
-            // shipping our own menu graphics would mean art the project does not
-            // have. Everything added since 1994 lives here, in one screen, instead of
-            // being reachable only from the Windows menu.
+            // Paged because a single list of twenty rows does not fit on a 320x200
+            // screen, and shrinking the font to make it fit would be worse than
+            // scrolling a page.
             var config = doom.Config;
 
-            settings = new TextMenu(
-                this,
-                "SETTINGS",
-                optionMenu,
+            var crosshairColours = MakeCrosshairColours(doom.Content.Wad);
 
-                new SectionTextItem("VIEW"),
+            settingsView = new TextMenu(
+                this,
+                "VIEW",
+                null,
 
                 new ChoiceTextItem(
                     "CROSSHAIR",
@@ -224,6 +228,20 @@ namespace DPTDOOM
                     () => config.hud_crosshair,
                     value => config.hud_crosshair = value,
                     "Mark, not aiming. Shots use Doom autoaim."),
+
+                new ChoiceTextItem(
+                    "CROSS COLOUR",
+                    crosshairColours.Names,
+                    () => crosshairColours.IndexOfLight(config.hud_crosshair_light),
+                    value => config.hud_crosshair_light = crosshairColours.LightAt(value),
+                    "The mark itself."),
+
+                new ChoiceTextItem(
+                    "CROSS SHADOW",
+                    crosshairColours.Names,
+                    () => crosshairColours.IndexOfDark(config.hud_crosshair_dark),
+                    value => config.hud_crosshair_dark = crosshairColours.DarkAt(value),
+                    "The dark edge that keeps it visible."),
 
                 new ToggleTextItem(
                     "FREE LOOK",
@@ -247,9 +265,12 @@ namespace DPTDOOM
                     "GAMMA", 0, video.MaxGammaCorrectionLevel,
                     () => video.GammaCorrectionLevel,
                     value => video.GammaCorrectionLevel = value,
-                    "Brightness. Raise if too dark."),
+                    "Brightness. Raise if too dark."));
 
-                new SectionTextItem("AUDIO"),
+            settingsAudio = new TextMenu(
+                this,
+                "AUDIO",
+                null,
 
                 new SliderTextItem(
                     "SOUND VOLUME", 0, sound.MaxVolume,
@@ -261,9 +282,12 @@ namespace DPTDOOM
                     "MUSIC VOLUME", 0, music.MaxVolume,
                     () => music.Volume,
                     value => music.Volume = value,
-                    "Background music.", true),
+                    "Background music.", true));
 
-                new SectionTextItem("INPUT"),
+            settingsInput = new TextMenu(
+                this,
+                "INPUT",
+                null,
 
                 new SliderTextItem(
                     "MOUSE SPEED", 1, userInput.MaxMouseSensitivity,
@@ -275,9 +299,19 @@ namespace DPTDOOM
                     "ALWAYS RUN",
                     () => config.game_alwaysrun,
                     value => config.game_alwaysrun = value,
-                    "Run by default. Shift walks."),
+                    "Run by default. Shift walks."));
 
-                new SectionTextItem("SYSTEM"),
+            settingsSystem = new TextMenu(
+                this,
+                "SYSTEM",
+                null,
+
+                new ChoiceTextItem(
+                    "PROFILER",
+                    DPTDOOM.Video.ProfilerLevel.ShortNames,
+                    () => config.hud_profiler,
+                    value => config.hud_profiler = value,
+                    "How much the counter in the corner shows."),
 
                 new ToggleTextItem(
                     "FRAME PROFILE",
@@ -289,52 +323,47 @@ namespace DPTDOOM
                             video.Profile.Enabled = value;
                         }
                     },
-                    "Frame sections, reported on exit."));
+                    "Frame sections, reported on exit."),
 
-            // No "back" row: Escape already goes back, and the row cost more than it
-            // was worth - it was the one that pushed the list past the bottom of the
-            // screen at 640x400.
+                new InfoTextItem(
+                    "VERSION",
+                    () => ApplicationInfo.Title,
+                    "The build you are running."),
 
-            optionMenu = new SelectableMenu(
+                new ActionTextItem(
+                    "END GAME",
+                    () => doom.EndGame(),
+                    "Leave the level and go back to the title.",
+                    () => doom.State == DoomState.Game));
+
+            // The root page: navigation only. Keeping it to five rows means it never
+            // scrolls, so a player always sees where they can go.
+            settings = new TextMenu(
                 this,
-                "M_OPTTTL", 108, 15,
-                0,
+                "OPTIONS",
+                null,
 
-                new SimpleMenuItem(
-                    "M_ENDGAM", 28, 32, 60, 37,
-                    null,
-                    endGameConfirm,
-                    () => doom.State == DoomState.Game),
+                new ActionTextItem("VIEW", () => ShowPage(settingsView),
+                    "Crosshair, free look, messages, screen, gamma."),
 
-                new ToggleMenuItem(
-                    "M_MESSG", 28, 48, 60, 53, "M_MSGON", "M_MSGOFF", 180,
-                    () => video.DisplayMessage ? 0 : 1,
-                    value => video.DisplayMessage = value == 0),
+                new ActionTextItem("AUDIO", () => ShowPage(settingsAudio),
+                    "Sound and music volume."),
 
-                new SliderMenuItem(
-                    "M_SCRNSZ", 28, 80 - 16, 60, 85 - 16,
-                    video.MaxWindowSize + 1,
-                    () => video.WindowSize,
-                    size => video.WindowSize = size),
+                new ActionTextItem("INPUT", () => ShowPage(settingsInput),
+                    "Mouse speed and always-run."),
 
-                new SliderMenuItem(
-                    "M_MSENS", 28, 112 - 16, 60, 117 - 16,
-                    userInput.MaxMouseSensitivity + 1,
-                    () => userInput.MouseSensitivity,
-                    ms => userInput.MouseSensitivity = ms),
+                new ActionTextItem("SYSTEM", () => ShowPage(settingsSystem),
+                    "Profiler, frame profile, version, end game."),
 
-                new SimpleMenuItem(
-                    "M_SVOL", 28, 144 - 16, 60, 149 - 16,
-                    null,
-                    volume),
+                new ActionTextItem("BACK", () => Close(),
+                    "Return to the main menu."));
 
-                new TextLabelMenuItem(
-                    "SETTINGS", 28, 160 - 16, 60, 165 - 16,
-                    settings));
-
-            // The parent is assigned after the fact because the settings screen is
-            // built first and points at a menu that does not exist yet.
-            settings.Parent = optionMenu;
+            // The pages return to the root, not to the main menu: a player who
+            // pressed Escape to leave a page wanted the list of pages back.
+            settingsView.Parent = settings;
+            settingsAudio.Parent = settings;
+            settingsInput.Parent = settings;
+            settingsSystem.Parent = settings;
 
             load = new LoadMenu(
                 this,
@@ -367,7 +396,7 @@ namespace DPTDOOM
                 "M_DOOM", 94, 2,
                 0,
                 new SimpleMenuItem("M_NGAME", 65, 67, 97, 72, null, skillMenu),
-                new SimpleMenuItem("M_OPTION", 65, 83, 97, 88, null, optionMenu),
+                new SimpleMenuItem("M_OPTION", 65, 83, 97, 88, null, settings),
                 new SimpleMenuItem("M_LOADG", 65, 99, 97, 104, null, load),
                 new SimpleMenuItem("M_SAVEG", 65, 115, 97, 120, null, save,
                     () => !(doom.State == DoomState.Game &&
@@ -381,7 +410,7 @@ namespace DPTDOOM
                 "M_DOOM", 94, 2,
                 0,
                 new SimpleMenuItem("M_NGAME", 65, 59, 97, 64, null, episodeMenu),
-                new SimpleMenuItem("M_OPTION", 65, 75, 97, 80, null, optionMenu),
+                new SimpleMenuItem("M_OPTION", 65, 75, 97, 80, null, settings),
                 new SimpleMenuItem("M_LOADG", 65, 91, 97, 96, null, load),
                 new SimpleMenuItem("M_SAVEG", 65, 107, 97, 112, null, save,
                     () => !(doom.State == DoomState.Game &&
@@ -583,6 +612,119 @@ namespace DPTDOOM
             SetCurrent(settings);
             Open();
             StartSound(Sfx.SWTCHN);
+        }
+
+        /// <summary>
+        /// Opens one settings page and points it back at the root.
+        ///
+        /// The parent is assigned here rather than at construction because the pages
+        /// are built before the root exists, and a page that could not find its way
+        /// back would strand the player with a menu Escape cannot leave.
+        /// </summary>
+        private void ShowPage(TextMenu page)
+        {
+            page.Parent = settings;
+
+            SetCurrent(page);
+            Open();
+            StartSound(Sfx.SWTCHN);
+        }
+
+        /// <summary>
+        /// The crosshair colour presets.
+        ///
+        /// Named colours rather than a raw palette index: 256 values on a slider is
+        /// not a colour picker, it is a lottery, and the index means a different
+        /// colour in every IWAD. Each preset is resolved to the nearest palette entry
+        /// once, from this IWAD's own PLAYPAL.
+        /// </summary>
+        private sealed class CrosshairColours
+        {
+            private readonly byte[] playpal;
+
+            public readonly string[] Names =
+            {
+                "DEFAULT", "WHITE", "RED", "GREEN", "BLUE",
+                "YELLOW", "CYAN", "MAGENTA", "BRAND"
+            };
+
+            private static readonly int[][] Rgb =
+            {
+                null,                        // DEFAULT: nearest white / nearest black
+                new[] { 255, 255, 255 },
+                new[] { 235, 60, 50 },
+                new[] { 90, 230, 90 },
+                new[] { 80, 150, 255 },
+                new[] { 250, 230, 90 },
+                new[] { 110, 230, 240 },
+                new[] { 240, 110, 240 },
+                new[] { 0, 136, 255 }
+            };
+
+            public CrosshairColours(byte[] playpal)
+            {
+                this.playpal = playpal;
+            }
+
+            public int LightAt(int index)
+            {
+                return Resolve(index, 0);
+            }
+
+            public int DarkAt(int index)
+            {
+                // "DEFAULT" is the only entry that differs between the two roles: the
+                // light one becomes white and the dark one becomes black. Every named
+                // colour is used for both, and a dark shade of it is picked instead.
+                return Resolve(index, 1);
+            }
+
+            private int Resolve(int index, int role)
+            {
+                if (index <= 0 || index >= Rgb.Length)
+                {
+                    return -1;
+                }
+
+                var rgb = Rgb[index];
+
+                if (role == 0)
+                {
+                    return DPTDOOM.Video.PaletteLookup.Nearest(playpal, rgb[0], rgb[1], rgb[2]);
+                }
+
+                // A quarter of the brightness, so a red cross has a dark red shadow
+                // rather than a second bright red one behind it.
+                return DPTDOOM.Video.PaletteLookup.Nearest(playpal, rgb[0] / 4, rgb[1] / 4, rgb[2] / 4);
+            }
+
+            public int IndexOfLight(int paletteIndex)
+            {
+                return IndexOf(paletteIndex, 0);
+            }
+
+            public int IndexOfDark(int paletteIndex)
+            {
+                return IndexOf(paletteIndex, 1);
+            }
+
+            private int IndexOf(int paletteIndex, int role)
+            {
+                for (var i = 1; i < Rgb.Length; i++)
+                {
+                    if (Resolve(i, role) == paletteIndex)
+                    {
+                        return i;
+                    }
+                }
+
+                return 0;
+            }
+        }
+
+        private CrosshairColours MakeCrosshairColours(Wad wad)
+        {
+            return new CrosshairColours(wad.ReadLump("PLAYPAL"));
         }
 
         public Doom Doom => doom;

@@ -29,7 +29,7 @@ namespace DPTDOOM
         {
             try
             {
-                Console.Write("Load sprites: ");
+                ConsoleUi.Begin("Load sprites");
 
                 var temp = new Dictionary<string, List<SpriteInfo>>();
                 for (var i = 0; i < (int)Sprite.Count; i++)
@@ -77,12 +77,12 @@ namespace DPTDOOM
                     spriteDefs[i] = new SpriteDef(frames);
                 }
 
-                Console.WriteLine("OK (" + cache.Count + " sprites" +
-                                  (replaced > 0 ? ", " + replaced + " from PK3" : "") + ")");
+                ConsoleUi.Ok(cache.Count + " sprites" +
+                             (replaced > 0 ? ", " + replaced + " from PK3" : ""));
             }
             catch (Exception e)
             {
-                Console.WriteLine("Failed");
+                ConsoleUi.Failed("see below");
                 ExceptionDispatchInfo.Throw(e);
             }
         }
@@ -203,8 +203,7 @@ namespace DPTDOOM
                     {
                         // A broken PNG must not stop the game: the IWAD sprite
                         // stays in place.
-                        Console.WriteLine();
-                        Console.WriteLine("  skipping " + source.Path + ": " + e.Message);
+                        ConsoleUi.Detail("skipping " + source.Path + ": " + e.Message);
                         failed = true;
                     }
 

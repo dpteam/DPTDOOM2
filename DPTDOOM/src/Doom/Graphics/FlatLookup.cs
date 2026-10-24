@@ -75,7 +75,7 @@ namespace DPTDOOM
         {
             try
             {
-                Console.Write("Load flats: ");
+                ConsoleUi.Begin("Load flats");
 
                 var firstFlat = wad.GetLumpNumber("F_START") + 1;
                 var lastFlat = wad.GetLumpNumber("F_END") - 1;
@@ -107,12 +107,12 @@ namespace DPTDOOM
 
                 var added = AddPk3Flats(wad);
 
-                Console.WriteLine("OK (" + nameToFlat.Count + " flats" +
-                                  (added > 0 ? ", " + added + " from PK3" : "") + ")");
+                ConsoleUi.Ok(nameToFlat.Count + " flats" +
+                             (added > 0 ? ", " + added + " from PK3" : ""));
             }
             catch (Exception e)
             {
-                Console.WriteLine("Failed");
+                ConsoleUi.Failed("see below");
                 ExceptionDispatchInfo.Throw(e);
             }
         }
@@ -164,8 +164,7 @@ namespace DPTDOOM
                     // A broken PNG in a mod must not stop the game from starting:
                     // the rest of the level is still playable, and the IWAD flat
                     // stays in place.
-                    Console.WriteLine();
-                    Console.WriteLine("  skipping " + graphic.Path + ": " + e.Message);
+                    ConsoleUi.Detail("skipping " + graphic.Path + ": " + e.Message);
                     continue;
                 }
 
@@ -202,7 +201,7 @@ namespace DPTDOOM
         {
             try
             {
-                Console.Write("Load flats: ");
+                ConsoleUi.Begin("Load flats");
 
                 var allFlats = new List<int>();
                 var flatZone = false;
@@ -267,11 +266,11 @@ namespace DPTDOOM
                 skyFlatNumber = nameToNumber["F_SKY1"];
                 skyFlat = nameToFlat["F_SKY1"];
 
-                Console.WriteLine("OK (" + nameToFlat.Count + " flats)");
+                ConsoleUi.Ok(nameToFlat.Count + " flats");
             }
             catch (Exception e)
             {
-                Console.WriteLine("Failed");
+                ConsoleUi.Failed("see below");
                 ExceptionDispatchInfo.Throw(e);
             }
         }

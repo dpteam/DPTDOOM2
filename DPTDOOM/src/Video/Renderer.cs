@@ -58,6 +58,13 @@ namespace DPTDOOM.Video
         /// </summary>
         private ConsoleRenderer console;
 
+        /// <summary>
+        /// Frame timing for the on-screen counter, copied from the game at the top of
+        /// every frame. A property rather than a constructor argument because the
+        /// renderer outlives the session: it is built once and then sees many games.
+        /// </summary>
+        private FrameStats stats;
+
         private Patch pause;
 
         private int wipeBandWidth;
@@ -90,7 +97,7 @@ namespace DPTDOOM.Video
             openingSequence = new OpeningSequenceRenderer(content.Wad, screen, this);
             autoMap = new AutoMapRenderer(content.Wad, screen);
             finale = new FinaleRenderer(content, screen);
-            console = new ConsoleRenderer(content.Wad, screen);
+            console = new ConsoleRenderer(content.Wad, screen, content.ColorMap);
 
             pause = Patch.FromWad(content.Wad, "M_PAUSE");
 
@@ -194,6 +201,10 @@ namespace DPTDOOM.Video
                 else
                 {
                     threeD.Crosshair = config.hud_crosshair;
+                    threeD.CrosshairLight = config.hud_crosshair_light;
+                    threeD.CrosshairDark = config.hud_crosshair_dark;
+                    threeD.ProfilerLevel = config.hud_profiler;
+                    threeD.Stats = stats;
                     threeD.Render(displayPlayer, frameFrac, viewPitch);
 
                     var hudStart = Profile.Stamp();
@@ -244,6 +255,8 @@ namespace DPTDOOM.Video
             // counted: they draw the same world twice and would double every
             // average in the report.
             Profile.BeginFrame();
+
+            stats = doom.Stats;
 
             RenderDoom(doom, frameFrac);
             RenderMenu(doom);
