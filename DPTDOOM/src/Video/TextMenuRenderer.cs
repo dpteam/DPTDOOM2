@@ -143,6 +143,25 @@ namespace DPTDOOM.Video
             {
                 var item = menu.Items[first + i];
                 DrawRow(item, first + i == menu.Index, x, rowY, width, scale);
+
+                // A row waiting for a key says so where its value would be. Without
+                // this the screen looks frozen: the player pressed Enter, nothing
+                // moved, and nothing tells them the next key will be captured.
+                var binding = item as KeyBindingTextItem;
+
+                if (binding != null && ReferenceEquals(binding, menu.Capturing))
+                {
+                    const string prompt = "PRESS KEY";
+                    var promptWidth = screen.MeasureText(prompt, scale);
+
+                    screen.FillRect(x + width - Pad * scale - 6 * scale - promptWidth - 2 * scale,
+                                    rowY - 1 * scale, promptWidth + 4 * scale, 9 * scale, highlight);
+
+                    screen.DrawTextColored(prompt,
+                                           x + width - Pad * scale - 6 * scale - promptWidth,
+                                           rowY + 6 * scale, scale, accentText);
+                }
+
                 rowY += RowHeight * scale;
             }
 
@@ -270,6 +289,14 @@ namespace DPTDOOM.Video
         private void DrawHint(TextMenu menu, int x, int y, int width, int scale)
         {
             var hint = menu.Current != null ? menu.Current.Hint : null;
+
+            // While capturing, the hint slot explains the capture rather than the row:
+            // the row's own hint is about the action, and the question right now is
+            // what the next key press will do.
+            if (menu.Capturing != null)
+            {
+                hint = "PRESS A KEY, ESC CANCELS";
+            }
 
             if (string.IsNullOrEmpty(hint))
             {

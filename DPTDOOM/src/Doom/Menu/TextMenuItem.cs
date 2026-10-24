@@ -332,6 +332,81 @@ namespace DPTDOOM
     }
 
     /// <summary>
+    /// A key binding, changed by pressing the new key.
+    ///
+    /// Rebinding replaces the *keys* and keeps the mouse buttons. Defaults pair a key
+    /// with a mouse button - "use" is Space and the right mouse button - and a plain
+    /// replace would silently take the mouse button away from anyone who rebound the
+    /// key. The player changed the key; that is the only thing they asked to change.
+    /// </summary>
+    public sealed class KeyBindingTextItem : TextMenuItem
+    {
+        private readonly Func<KeyBinding> get;
+        private readonly Action<KeyBinding> set;
+        private readonly string hint;
+
+        public KeyBindingTextItem(string label, Func<KeyBinding> get, Action<KeyBinding> set, string hint)
+            : base(label)
+        {
+            this.get = get;
+            this.set = set;
+            this.hint = hint;
+        }
+
+        /// <summary>
+        /// The binding shown to the player.
+        ///
+        /// Only the keyboard part: the mouse buttons are not rebindable here, and
+        /// listing them would suggest they are.
+        /// </summary>
+        public override string Value
+        {
+            get
+            {
+                var binding = get();
+
+                if (binding == null || binding.Keys.Count == 0)
+                {
+                    return "NONE";
+                }
+
+                return DoomKeyEx.ToString(binding.Keys[0]).ToUpperInvariant();
+            }
+        }
+
+        public override bool Adjustable
+        {
+            get { return true; }
+        }
+
+        public override string Hint
+        {
+            get { return hint; }
+        }
+
+        /// <summary>
+        /// Arms the capture. The menu does the waiting, because it is the thing that
+        /// sees the events.
+        /// </summary>
+        public override bool Activate()
+        {
+            return false;
+        }
+
+        /// <summary>
+        /// Applies a captured key, keeping whatever mouse buttons the binding had.
+        /// </summary>
+        public void Assign(DoomKey key)
+        {
+            var current = get();
+
+            var mouse = current != null ? current.MouseButtons : new DoomMouseButton[0];
+
+            set(new KeyBinding(new[] { key }, mouse));
+        }
+    }
+
+    /// <summary>
     /// A row that only shows something: a version number, a session id.
     ///
     /// Selectable so the player can read its hint, but nothing changes.

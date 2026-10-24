@@ -36,6 +36,16 @@ namespace DPTDOOM
 
         private int index;
 
+        /// <summary>
+        /// The row waiting for a key, if any.
+        ///
+        /// While this is set the menu is in capture mode: the next key press becomes
+        /// the binding instead of moving the highlight. Kept here rather than on the
+        /// row because the menu is what receives the events - a row cannot see a key
+        /// it is not told about.
+        /// </summary>
+        private KeyBindingTextItem capturing;
+
         public TextMenu(DoomMenu menu, string title, MenuDef parent, params TextMenuItem[] items)
             : base(menu)
         {
@@ -83,6 +93,10 @@ namespace DPTDOOM
             {
                 index = 0;
             }
+
+            // Never reopen mid-capture: a row left waiting for a key would swallow
+            // the first press made on a screen the player thought was idle.
+            capturing = null;
         }
 
         /// <summary>
@@ -117,6 +131,12 @@ namespace DPTDOOM
             return 0;
         }
 
+        /// <summary>The row waiting for a key, or null. The renderer shows "PRESS KEY".</summary>
+        public KeyBindingTextItem Capturing
+        {
+            get { return capturing; }
+        }
+
         private void Move(int direction)
         {
             index = FirstSelectable(index + direction, direction);
@@ -126,6 +146,23 @@ namespace DPTDOOM
         {
             if (e.Type != EventType.KeyDown)
             {
+                return true;
+            }
+
+            // Capture mode: the next key is the binding. Escape cancels rather than
+            // binding Escape, which is the key that leaves every other screen.
+            if (capturing != null)
+            {
+                if (e.Key == DoomKey.Escape)
+                {
+                    capturing = null;
+                    Menu.StartSound(Sfx.SWTCHX);
+                    return true;
+                }
+
+                capturing.Assign(e.Key);
+                capturing = null;
+                Menu.StartSound(Sfx.PISTOL);
                 return true;
             }
 
@@ -142,7 +179,7 @@ namespace DPTDOOM
                     return true;
 
                 case DoomKey.Left:
-                    if (Current.Adjust(-1))
+                    if (Adjust(-1))
                     {
                         Menu.StartSound(Sfx.STNMOV);
                     }
@@ -150,7 +187,7 @@ namespace DPTDOOM
                     return true;
 
                 case DoomKey.Right:
-                    if (Current.Adjust(1))
+                    if (Adjust(1))
                     {
                         Menu.StartSound(Sfx.STNMOV);
                     }
@@ -161,14 +198,21 @@ namespace DPTDOOM
                 case DoomKey.Space:
                     if (Current.Enabled)
                     {
-                        // The sound plays before the action, so a row that opens
-                        // another screen still clicks, and a row that changes
-                        // something clicks once rather than not at all.
                         Menu.StartSound(Sfx.PISTOL);
+
+                        // A key binding arms the capture instead of acting: pressing
+                        // the row means "I want to change this", and the change is the
+                        // key that follows.
+                        var binding = Current as KeyBindingTextItem;
+
+                        if (binding != null)
+                        {
+                            capturing = binding;
+                            return true;
+                        }
 
                         if (Current.Activate())
                         {
-                            // Activate returning true means "this menu is done".
                             Back();
                         }
                     }
@@ -181,6 +225,21 @@ namespace DPTDOOM
             }
 
             return true;
+        }
+
+        /// <summary>
+        /// Left/right on the selected row. Key bindings are not stepped: there is no
+        /// order to cycle through, so the arrows do nothing and Enter starts the
+        /// capture.
+        /// </summary>
+        private bool Adjust(int direction)
+        {
+            if (Current as KeyBindingTextItem != null)
+            {
+                return false;
+            }
+
+            return Current.Adjust(direction);
         }
 
         private void Back()

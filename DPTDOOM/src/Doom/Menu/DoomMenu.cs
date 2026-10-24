@@ -30,6 +30,7 @@ namespace DPTDOOM
         private TextMenu settingsView;
         private TextMenu settingsAudio;
         private TextMenu settingsInput;
+        private TextMenu settingsKeys;
         private TextMenu settingsSystem;
         private SelectableMenu volume;
         private TextMenu about;
@@ -300,7 +301,83 @@ namespace DPTDOOM
                     "ALWAYS RUN",
                     () => config.game_alwaysrun,
                     value => config.game_alwaysrun = value,
-                    "Run by default. Shift walks."));
+                    "Run by default. Shift walks."),
+
+                new ActionTextItem(
+                    "KEYS", () => ShowPage(settingsKeys),
+                    "Change which key does what."));
+
+            // Key bindings, one row per action.
+            //
+            // The defaults are what id Software chose in 1994, and they are what most
+            // people expect on arrival - so they stay. What changes here is the player's
+            // own copy: Space for "use" is a fine default and a poor fit for anyone
+            // whose hand is already on E.
+            //
+            // Escape is not offered as a binding: it leaves every screen, and a player
+            // who bound it to something would have no way back out of a menu.
+            settingsKeys = new TextMenu(
+                this,
+                "KEYS",
+                null,
+
+                new SectionTextItem("MOVEMENT"),
+
+                new KeyBindingTextItem("FORWARD",
+                    () => config.key_forward, value => config.key_forward = value,
+                    "Walk forward."),
+
+                new KeyBindingTextItem("BACKWARD",
+                    () => config.key_backward, value => config.key_backward = value,
+                    "Walk backward."),
+
+                new KeyBindingTextItem("STRAFE LEFT",
+                    () => config.key_strafeleft, value => config.key_strafeleft = value,
+                    "Step sideways to the left."),
+
+                new KeyBindingTextItem("STRAFE RIGHT",
+                    () => config.key_straferight, value => config.key_straferight = value,
+                    "Step sideways to the right."),
+
+                new KeyBindingTextItem("TURN LEFT",
+                    () => config.key_turnleft, value => config.key_turnleft = value,
+                    "Turn without moving."),
+
+                new KeyBindingTextItem("TURN RIGHT",
+                    () => config.key_turnright, value => config.key_turnright = value,
+                    "Turn without moving."),
+
+                new KeyBindingTextItem("RUN",
+                    () => config.key_run, value => config.key_run = value,
+                    "Hold to run, or to walk if always-run is on."),
+
+                new KeyBindingTextItem("STRAFE MOD",
+                    () => config.key_strafe, value => config.key_strafe = value,
+                    "Hold to turn the turn keys into strafe keys."),
+
+                new SectionTextItem("ACTION"),
+
+                new KeyBindingTextItem("FIRE",
+                    () => config.key_fire, value => config.key_fire = value,
+                    "Shoot."),
+
+                new KeyBindingTextItem("USE",
+                    () => config.key_use, value => config.key_use = value,
+                    "Open doors and press switches."),
+
+                new SectionTextItem("LOOK"),
+
+                new KeyBindingTextItem("LOOK UP",
+                    () => config.key_lookup, value => config.key_lookup = value,
+                    "Tilt the view up, when free look is on."),
+
+                new KeyBindingTextItem("LOOK DOWN",
+                    () => config.key_lookdown, value => config.key_lookdown = value,
+                    "Tilt the view down, when free look is on."),
+
+                new KeyBindingTextItem("CENTRE VIEW",
+                    () => config.key_center, value => config.key_center = value,
+                    "Level the view again."));
 
             settingsSystem = new TextMenu(
                 this,
@@ -381,9 +458,6 @@ namespace DPTDOOM
                 new InfoTextItem("ORIGINAL", () => "ID SOFTWARE",
                     "DOOM belongs to id Software. No game data is included."),
 
-                new InfoTextItem("ABOUTBOT", () => "COMING LATER",
-                    "The bot's documentation will live in refs/ and be summarised here."),
-
                 new ActionTextItem("BACK", () => Close(),
                     "Return to the game."));
 
@@ -392,6 +466,7 @@ namespace DPTDOOM
             settingsView.Parent = settings;
             settingsAudio.Parent = settings;
             settingsInput.Parent = settings;
+            settingsKeys.Parent = settingsInput;
             settingsSystem.Parent = settings;
 
             load = new LoadMenu(
