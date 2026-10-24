@@ -39,6 +39,14 @@ namespace DPTDOOM.Video
 
         private Fixed frameFrac;
 
+        /// <summary>
+        /// Where the frame time goes. Disabled unless asked for, so the hooks cost
+        /// a branch each during normal play.
+        /// </summary>
+        private readonly RenderProfile profile = new RenderProfile();
+
+        public RenderProfile Profile => profile;
+
         public ThreeDRenderer(GameContent content, DrawScreen screen, int windowSize)
         {
             colorMap = content.ColorMap;
@@ -713,6 +721,8 @@ namespace DPTDOOM.Video
         {
             this.frameFrac = frameFrac;
 
+            var setupStart = profile.Stamp();
+
             world = player.Mobj.World;
 
             viewX = player.Mobj.GetInterpolatedX(frameFrac);
@@ -740,15 +750,33 @@ namespace DPTDOOM.Video
                 Array.Clear(screenData, 0, screenData.Length);
             }
 
+            profile.Add(RenderProfile.Section.Setup, profile.Stamp() - setupStart);
+
+            var bspStart = profile.Stamp();
             RenderBspNode(world.Map.Nodes.Length - 1);
+            profile.Add(RenderProfile.Section.Bsp, profile.Stamp() - bspStart);
+            profile.Count(RenderProfile.Counter.WallRanges, visWallRangeCount);
+
+            var phaseStart = profile.Stamp();
             RenderSprites();
+            profile.Add(RenderProfile.Section.Sprites, profile.Stamp() - phaseStart);
+
+            phaseStart = profile.Stamp();
             RenderMaskedTextures();
+            profile.Add(RenderProfile.Section.Masked, profile.Stamp() - phaseStart);
+
+            phaseStart = profile.Stamp();
             DrawPlayerSprites(player);
+            profile.Add(RenderProfile.Section.PlayerSprites, profile.Stamp() - phaseStart);
+
+            phaseStart = profile.Stamp();
 
             if (windowSize < 7)
             {
                 FillBackScreen();
             }
+
+            profile.Add(RenderProfile.Section.Sky, profile.Stamp() - phaseStart);
         }
 
 
@@ -1363,6 +1391,7 @@ namespace DPTDOOM.Video
 
             var visWallRange = visWallRanges[visWallRangeCount];
             visWallRangeCount++;
+            profile.Count(RenderProfile.Counter.Segments);
 
             visWallRange.Seg = seg;
             visWallRange.X1 = x1;
@@ -1422,7 +1451,7 @@ namespace DPTDOOM.Video
                         }
 
                         var invScale = new Fixed((int)(0xffffffffu / (uint)rwScale.Data));
-                        DrawColumn(source[0], wallLights[lightIndex], x, wy1, wy2, invScale, middleTextureAlt);
+                        DrawWallColumn(source[0], wallLights[lightIndex], x, wy1, wy2, invScale, middleTextureAlt);
                     }
                 }
 
@@ -1720,6 +1749,7 @@ namespace DPTDOOM.Video
 
             var visWallRange = visWallRanges[visWallRangeCount];
             visWallRangeCount++;
+            profile.Count(RenderProfile.Counter.Segments);
 
             visWallRange.Seg = seg;
             visWallRange.X1 = x1;
@@ -1836,7 +1866,7 @@ namespace DPTDOOM.Video
                     var source = upperWallTexture.Composite.Columns[textureColumn & upperWallWidthMask];
                     if (source.Length > 0)
                     {
-                        DrawColumn(source[0], wallLights[lightIndex], x, wy1, wy2, invScale, uperTextureAlt);
+                        DrawWallColumn(source[0], wallLights[lightIndex], x, wy1, wy2, invScale, uperTextureAlt);
                     }
 
                     if (upperClip[x] < wy2)
@@ -1868,7 +1898,7 @@ namespace DPTDOOM.Video
                     var source = lowerWallTexture.Composite.Columns[textureColumn & lowerWallWidthMask];
                     if (source.Length > 0)
                     {
-                        DrawColumn(source[0], wallLights[lightIndex], x, wy1, wy2, invScale, lowerTextureAlt);
+                        DrawWallColumn(source[0], wallLights[lightIndex], x, wy1, wy2, invScale, lowerTextureAlt);
                     }
 
                     if (drawFloor)
@@ -1950,6 +1980,7 @@ namespace DPTDOOM.Video
                 if (drawSeg.MaskedTextureColumn != -1)
                 {
                     DrawMaskedRange(drawSeg, drawSeg.X1, drawSeg.X2);
+                    profile.Count(RenderProfile.Counter.MaskedTextures);
                 }
             }
         }
@@ -2026,6 +2057,21 @@ namespace DPTDOOM.Video
 
 
         private void DrawCeilingColumn(
+            Sector sector,
+            Flat flat,
+            byte[][] planeLights,
+            int x,
+            int y1,
+            int y2,
+            Fixed ceilingHeight)
+        {
+            var start = profile.Stamp();
+            DrawCeilingColumnCore(sector, flat, planeLights, x, y1, y2, ceilingHeight);
+            profile.Add(RenderProfile.Section.Flats, profile.Stamp() - start);
+            profile.Count(RenderProfile.Counter.FlatColumns);
+        }
+
+        private void DrawCeilingColumnCore(
             Sector sector,
             Flat flat,
             byte[][] planeLights,
@@ -2162,6 +2208,21 @@ namespace DPTDOOM.Video
             int y2,
             Fixed floorHeight)
         {
+            var start = profile.Stamp();
+            DrawFloorColumnCore(sector, flat, planeLights, x, y1, y2, floorHeight);
+            profile.Add(RenderProfile.Section.Flats, profile.Stamp() - start);
+            profile.Count(RenderProfile.Counter.FlatColumns);
+        }
+
+        private void DrawFloorColumnCore(
+            Sector sector,
+            Flat flat,
+            byte[][] planeLights,
+            int x,
+            int y1,
+            int y2,
+            Fixed floorHeight)
+        {
             // Same as the ceiling: the offset moves the sample origin, so the flat
             // appears to slide without the sector moving.
             var flatBaseX = viewX + sector.FloorFlatOffsetX;
@@ -2282,6 +2343,28 @@ namespace DPTDOOM.Video
         }
 
 
+
+        /// <summary>
+        /// A wall column, timed.
+        ///
+        /// Separated from <see cref="DrawColumn"/> because the same routine also
+        /// draws sky and player-weapon columns, and counting those as wall work
+        /// would make the two sections lie about each other.
+        /// </summary>
+        private void DrawWallColumn(
+            Column column,
+            byte[] map,
+            int x,
+            int y1,
+            int y2,
+            Fixed invScale,
+            Fixed textureAlt)
+        {
+            var start = profile.Stamp();
+            DrawColumn(column, map, x, y1, y2, invScale, textureAlt);
+            profile.Add(RenderProfile.Section.Walls, profile.Stamp() - start);
+            profile.Count(RenderProfile.Counter.WallColumns);
+        }
 
         private void DrawColumn(
             Column column,
@@ -2659,6 +2742,8 @@ namespace DPTDOOM.Video
         private void RenderSprites()
         {
             Array.Sort(visSprites, 0, visSpriteCount, visSpriteComparer);
+
+            profile.Count(RenderProfile.Counter.Sprites, visSpriteCount);
 
             for (var i = visSpriteCount - 1; i >= 0; i--)
             {

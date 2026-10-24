@@ -127,6 +127,13 @@ namespace DPTDOOM.Video
             }
         }
 
+        /// <summary>
+        /// Where the frame time goes. Owned here rather than by the window
+        /// because a frame is what this class draws: the world, the HUD and the
+        /// final palette lookup all belong to the same sample.
+        /// </summary>
+        public RenderProfile Profile => threeD.Profile;
+
         public void RenderMenu(Doom doom)
         {
             if (doom.Menu.Active)
@@ -155,12 +162,16 @@ namespace DPTDOOM.Video
                 // the debug overlays was impossible to take.
                 if (game.World.AutoMap.Visible || DebugSettings.MapOnly)
                 {
+                    var hudStart = Profile.Stamp();
                     autoMap.Render(consolePlayer);
                     statusBar.Render(consolePlayer, true);
+                    Profile.Add(RenderProfile.Section.Hud, Profile.Stamp() - hudStart);
                 }
                 else
                 {
                     threeD.Render(displayPlayer, frameFrac);
+
+                    var hudStart = Profile.Stamp();
                     if (threeD.WindowSize < 8)
                     {
                         statusBar.Render(consolePlayer, true);
@@ -169,14 +180,20 @@ namespace DPTDOOM.Video
                     {
                         statusBar.Render(consolePlayer, false);
                     }
+
+                    Profile.Add(RenderProfile.Section.Hud, Profile.Stamp() - hudStart);
                 }
 
-                if (config.video_displaymessage || ReferenceEquals(consolePlayer.Message, (string)DoomInfo.Strings.MSGOFF))
+                if (config.video_displaymessage ||
+                    consolePlayer.MessageAlwaysShown ||
+                    ReferenceEquals(consolePlayer.Message, (string)DoomInfo.Strings.MSGOFF))
                 {
                     if (consolePlayer.MessageTime > 0)
                     {
+                        var hudStart = Profile.Stamp();
                         var scale = screen.Width / 320;
                         screen.DrawText(consolePlayer.Message, 0, 7 * scale, scale);
+                        Profile.Add(RenderProfile.Section.Hud, Profile.Stamp() - hudStart);
                     }
                 }
             }
@@ -197,6 +214,11 @@ namespace DPTDOOM.Video
                 RenderWipe(doom, destination);
                 return;
             }
+
+            // One frame is one sample. The wipe frames above are deliberately not
+            // counted: they draw the same world twice and would double every
+            // average in the report.
+            Profile.BeginFrame();
 
             RenderDoom(doom, frameFrac);
             RenderMenu(doom);
@@ -220,7 +242,11 @@ namespace DPTDOOM.Video
                 colors = palette[GetPaletteNumber(doom.DemoPlayback.Game.World.ConsolePlayer)];
             }
 
+            var convertStart = Profile.Stamp();
             WriteData(colors, destination);
+            Profile.Add(RenderProfile.Section.Convert, Profile.Stamp() - convertStart);
+
+            Profile.EndFrame();
         }
 
         private void RenderWipe(Doom doom, byte[] destination)

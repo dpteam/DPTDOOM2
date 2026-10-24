@@ -226,6 +226,10 @@ namespace DPTDOOM.Win32
                     ToggleFpsLog();
                     break;
 
+                case MenuCommand.DebugProfile:
+                    ToggleRenderProfile();
+                    break;
+
                 case MenuCommand.DebugSaveFrame:
                     SaveFrame();
                     break;
@@ -358,6 +362,13 @@ namespace DPTDOOM.Win32
                         "   tics/frame " + step.UpdateCount;
             }
 
+            // Only when it was asked for: the line is four numbers of noise for
+            // somebody who just wants to play.
+            if (video.Profile != null && video.Profile.Enabled)
+            {
+                text += "\n" + video.Profile.ShortLine();
+            }
+
             var bots = doom.BotReport;
 
             if (bots != null)
@@ -379,6 +390,32 @@ namespace DPTDOOM.Win32
             }
 
             return text;
+        }
+
+        /// <summary>
+        /// Turns the per-section frame profile on or off, and prints the report
+        /// when it is turned off.
+        ///
+        /// Printing on the way out rather than continuously is deliberate: the
+        /// numbers a player wants are the averages over the stretch they were
+        /// curious about, not the last frame, which happens to be whichever way
+        /// they were facing when they opened the menu.
+        /// </summary>
+        private void ToggleRenderProfile()
+        {
+            var profile = video.Profile;
+
+            if (profile == null)
+            {
+                return;
+            }
+
+            profile.Enabled = !profile.Enabled;
+
+            if (!profile.Enabled)
+            {
+                profile.WriteSummary(Console.Out);
+            }
         }
 
         private void ToggleFpsLog()
@@ -653,6 +690,7 @@ namespace DPTDOOM.Win32
             menu.SetChecked(MenuCommand.ViewMessages, video.DisplayMessage);
             menu.SetChecked(MenuCommand.ViewFps, window.ShowOverlay);
             menu.SetChecked(MenuCommand.DebugFpsLog, clock != null && clock.IsLogging);
+            menu.SetChecked(MenuCommand.DebugProfile, video.Profile != null && video.Profile.Enabled);
 
             var player = ConsolePlayer();
             menu.SetChecked(MenuCommand.DebugGod,
@@ -735,6 +773,11 @@ namespace DPTDOOM.Win32
                 {
                     clock.OpenLog(args.fpslog.Value);
                     video.Profiling = true;
+                }
+
+                if (args.profile.Present && video.Profile != null)
+                {
+                    video.Profile.Enabled = true;
                 }
 
                 if (video.Window.Menu != null)
@@ -824,6 +867,11 @@ namespace DPTDOOM.Win32
                 if (args.fpslog.Present)
                 {
                     clock.WriteSummary(Console.Out);
+                }
+
+                if (args.profile.Present && video.Profile != null)
+                {
+                    video.Profile.WriteSummary(Console.Out);
                 }
             }
         }

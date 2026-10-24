@@ -98,6 +98,7 @@ namespace DPTDOOM
         // Hint messages.
         private string message;
         private int messageTime;
+        private bool messageAlwaysShown;
 
         // For screen flashing (red or bright).
         private int damageCount;
@@ -193,6 +194,7 @@ namespace DPTDOOM
 
             message = null;
             messageTime = 0;
+            messageAlwaysShown = false;
 
             damageCount = 0;
             bonusCount = 0;
@@ -261,6 +263,7 @@ namespace DPTDOOM
 
             message = null;
             messageTime = 0;
+            messageAlwaysShown = false;
 
             damageCount = 0;
             bonusCount = 0;
@@ -314,6 +317,7 @@ namespace DPTDOOM
 
             this.message = message;
             messageTime = 4 * GameConst.TicRate;
+            messageAlwaysShown = false;
         }
 
         public void UpdateFrameInterpolationInfo()
@@ -530,6 +534,22 @@ namespace DPTDOOM
         {
             get => messageTime;
             set => messageTime = value;
+        }
+
+        /// <summary>
+        /// Set for a message that has to be shown even when the player turned
+        /// messages off in the menu.
+        ///
+        /// Only the session's own state uses this - "reconnecting, 24 seconds
+        /// left" is not a pickup notification, and hiding it because the player
+        /// silenced "you got a medikit" leaves a frozen screen with no
+        /// explanation, which is exactly the moment they most need one.
+        /// Presentation only: it is not in the save, the demo or the world hash.
+        /// </summary>
+        public bool MessageAlwaysShown
+        {
+            get => messageAlwaysShown;
+            set => messageAlwaysShown = value;
         }
 
         public int DamageCount

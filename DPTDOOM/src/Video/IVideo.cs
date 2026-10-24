@@ -35,5 +35,12 @@ namespace DPTDOOM.Video
 
         public int WipeBandCount { get; }
         public int WipeHeight { get; }
+
+        /// <summary>
+        /// Where the frame time goes. Null for a backend that draws nothing -
+        /// there is no frame to profile then, and callers have to cope with that
+        /// rather than the backend inventing an empty one.
+        /// </summary>
+        public RenderProfile Profile { get; }
     }
 }

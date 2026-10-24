@@ -191,6 +191,17 @@ try {
     Send-Command $window 1109
     $process.Refresh()
     Assert-True (-not $process.HasExited) "the frame counter toggle did not crash"
+
+    Write-Host ""
+    Write-Host "Frame profile"
+
+    # DebugProfile is 1321: appended to the enum so no existing command ID moved.
+    # Pressed twice on purpose - the second press is the one that prints the
+    # report, so a toggle that only turned it on would never be exercised.
+    Send-Command $window 1321
+    Send-Command $window 1321
+    $process.Refresh()
+    Assert-True (-not $process.HasExited) "the frame profile toggle did not crash"
 }
 finally {
     if (-not $process.HasExited) {

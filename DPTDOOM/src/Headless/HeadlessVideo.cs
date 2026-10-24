@@ -74,6 +74,8 @@ namespace DPTDOOM.Headless
         public int WipeBandCount => renderer.WipeBandCount;
         public int WipeHeight => renderer.WipeHeight;
 
+        public RenderProfile Profile => renderer.Profile;
+
         public int Width => renderer.Width;
         public int Height => renderer.Height;
 

@@ -88,5 +88,7 @@ namespace DPTDOOM.Video
 
         public int WipeBandCount => 321;
         public int WipeHeight => 200;
+
+        public RenderProfile Profile => null;
     }
 }

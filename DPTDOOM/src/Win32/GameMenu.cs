@@ -1,4 +1,4 @@
-﻿//
+//
 // Copyright (C) 2026 DartPower Team
 //
 // This program is free software; you can redistribute it and/or modify
@@ -66,6 +66,11 @@ namespace DPTDOOM.Win32
         DebugSpawnHealth,
         DebugSpawnArmor,
         DebugSpawnAmmo,
+
+        // Appended rather than inserted: these IDs travel through WM_COMMAND and
+        // are used by name everywhere, but keeping the existing numbers stable
+        // means a menu item never silently becomes a different item.
+        DebugProfile,
 
         HelpControls = 1401,
         HelpAbout,
@@ -185,6 +190,7 @@ namespace DPTDOOM.Win32
             var popup = Popup("Отладка");
 
             Item(popup, MenuCommand.DebugFpsLog, "Лог кадров в файл");
+            Item(popup, MenuCommand.DebugProfile, "Профиль кадра по секциям");
             Item(popup, MenuCommand.DebugSaveFrame, "Сохранить кадр в BMP");
             Item(popup, MenuCommand.DebugDumpState, "Сбросить состояние мира в лог");
             Item(popup, MenuCommand.DebugSoundTest, "Отрендерить звуки в WAV");

@@ -45,6 +45,7 @@ powershell -NoProfile -File tools\test-net-latency.ps1
 powershell -NoProfile -File tools\test-bots.ps1
 powershell -NoProfile -File tools\test-net-bots.ps1
 powershell -NoProfile -File tools\test-reconnect.ps1
+powershell -NoProfile -File tools\test-profile.ps1
 powershell -NoProfile -File tools\test-debug-overlays.ps1
 powershell -NoProfile -File tools\test-launcher.ps1
 ```
@@ -70,6 +71,10 @@ powershell -NoProfile -File tools\test-launcher.ps1
 - Вывод кадра — через DIB-секцию и `BitBlt`/`StretchBlt`; `StretchDIBits`
   напрямую в окно был в разы медленнее. Клиентская область окна приводится к
   размеру кадра, иначе GDI масштабирует каждый кадр.
+- Профайлер (`RenderProfile`) — только чтение счётчиков и времени. Он **не**
+  должен менять ни кадр, ни `validCount` мира: рендерер помечает линии
+  увиденными и берёт валидные счётчики, поэтому «рисовать каждый тик» способно
+  сдвинуть хеш. Проверка — `tools/test-profile.ps1` (BMP байт-в-байт, хеш мира).
 - P/Invoke: при `CharSet.Unicode` + `ExactSpelling = true` указывать `EntryPoint`
   с суффиксом `W` обязательно (`SendMessageW`, `DefWindowProcW`, `LoadIconW`).
   Без него рантайм ищет функцию без суффикса и падает в рантайме, а не при

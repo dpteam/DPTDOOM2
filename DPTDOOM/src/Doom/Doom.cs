@@ -1319,6 +1319,7 @@ namespace DPTDOOM
             // from the frame loop cannot desynchronise the session it describes.
             player.Message = status;
             player.MessageTime = 4 * GameConst.TicRate;
+            player.MessageAlwaysShown = true;
 
             reconnectMessageShown = true;
         }
@@ -1335,6 +1336,7 @@ namespace DPTDOOM
 
             world.ConsolePlayer.Message = null;
             world.ConsolePlayer.MessageTime = 0;
+            world.ConsolePlayer.MessageAlwaysShown = false;
             Console.WriteLine("Net: the session is back.");
         }
 

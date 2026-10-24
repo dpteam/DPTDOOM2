@@ -52,6 +52,11 @@ namespace DPTDOOM.Headless
             {
                 var video = new HeadlessVideo(config, content);
 
+        if (args.profile.Present && video.Profile != null)
+        {
+            video.Profile.Enabled = true;
+        }
+
                 NetSession session = null;
                 NetDriver driver = null;
 
@@ -106,6 +111,15 @@ namespace DPTDOOM.Headless
                         if (tics >= 10000000)
                         {
                             break;
+                        }
+
+                        // A profile needs frames to measure, and headless renders
+                        // none unless asked: drawing every frame would slow every
+                        // determinism run for a number nobody asked for. Opt-in, so
+                        // the numbers come from a real draw of a real world.
+                        if (args.profile.Present && doom.Game != null && doom.Game.World != null)
+                        {
+                            video.Render(doom, Fixed.One);
                         }
 
                         if (driver != null)
@@ -168,6 +182,11 @@ namespace DPTDOOM.Headless
                         video.Render(doom, Fixed.One);
                         video.SaveBmp(args.shot.Value);
                         Console.WriteLine("Wrote frame: " + args.shot.Value);
+                    }
+
+                    if (args.profile.Present && video.Profile != null)
+                    {
+                        video.Profile.WriteSummary(Console.Out);
                     }
 
                     doom.FlushBotTrace();

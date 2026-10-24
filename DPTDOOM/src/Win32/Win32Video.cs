@@ -130,6 +130,8 @@ namespace DPTDOOM.Win32
         public int WipeBandCount => renderer.WipeBandCount;
         public int WipeHeight => renderer.WipeHeight;
 
+        public RenderProfile Profile => renderer.Profile;
+
         public Win32Window Window => window;
 
         public void Dispose()

@@ -130,6 +130,13 @@ jobs:
         shell: pwsh
         run: ./tools/test-reconnect.ps1
 
+      - name: The render profiler changes nothing it measures
+        # The profiler sits inside the column routines and takes valid counts from
+        # the world, so it can plausibly shift a hash. This compares the frame and
+        # the world hash against a run without -profile.
+        shell: pwsh
+        run: ./tools/test-profile.ps1
+
       - name: Automap debug overlays actually draw
         # "-maponly" was in the command line and did nothing: it was applied only by
         # the window's own toggle, so a headless run ignored it and every screenshot
