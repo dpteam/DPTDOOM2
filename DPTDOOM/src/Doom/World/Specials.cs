@@ -202,6 +202,67 @@ namespace DPTDOOM
 
             BuildScrollers();
             BuildPushers();
+            BuildLightTransfers();
+        }
+
+        /// <summary>
+        /// Applies Boom's light transfer lines: 213 for floors, 261 for ceilings.
+        ///
+        /// The line's front sidedef names the control sector; every tagged sector then
+        /// borrows its light. Storing the index rather than the current value is what
+        /// makes a flickering control sector animate everything that borrows from it,
+        /// which is the entire reason the special exists - a lava floor is meant to
+        /// pulse with the light above it.
+        /// </summary>
+        internal void BuildLightTransfers()
+        {
+            var sectors = world.Map.Sectors;
+
+            foreach (var line in world.Map.Lines)
+            {
+                var special = (int)line.Special;
+
+                if (special != 213 && special != 261)
+                {
+                    continue;
+                }
+
+                if (line.FrontSide == null || line.FrontSide.Sector == null)
+                {
+                    continue;
+                }
+
+                var control = line.FrontSide.Sector.Number;
+
+                if (control < 0 || control >= sectors.Length)
+                {
+                    continue;
+                }
+
+                foreach (var sector in sectors)
+                {
+                    if (sector.Tag != line.Tag)
+                    {
+                        continue;
+                    }
+
+                    // A sector borrowing from itself would be a no-op that still
+                    // costs a lookup every frame.
+                    if (sector.Number == control)
+                    {
+                        continue;
+                    }
+
+                    if (special == 213)
+                    {
+                        sector.FloorLightSector = control;
+                    }
+                    else
+                    {
+                        sector.CeilingLightSector = control;
+                    }
+                }
+            }
         }
 
         /// <summary>

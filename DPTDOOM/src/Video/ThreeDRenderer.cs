@@ -1347,8 +1347,15 @@ namespace DPTDOOM.Video
             // Determine which color map is used for the plane according to the light level.
             //
 
-            var planeLightLevel = (frontSector.LightLevel >> lightSegShift) + extraLight;
-            var planeLights = zLight[MathEx.Clamp(planeLightLevel, 0, lightLevelCount - 1)];
+            // Boom light transfer: the floor and ceiling may each borrow the light
+            // of another sector (specials 213 and 261), which is how a lava floor
+            // pulses with the light above it. Without the separate arrays both
+            // planes took the room light and the special was silently ignored.
+            var mapSectors = world.Map.Sectors;
+            var ceilingLightLevel = (frontSector.CeilingLightLevel(mapSectors) >> lightSegShift) + extraLight;
+            var floorLightLevel = (frontSector.FloorLightLevel(mapSectors) >> lightSegShift) + extraLight;
+            var ceilingPlaneLights = zLight[MathEx.Clamp(ceilingLightLevel, 0, lightLevelCount - 1)];
+            var floorPlaneLights = zLight[MathEx.Clamp(floorLightLevel, 0, lightLevelCount - 1)];
 
             //
             // Prepare to record the rendering history.
@@ -1392,7 +1399,7 @@ namespace DPTDOOM.Video
                 {
                     var cy1 = upperClip[x] + 1;
                     var cy2 = Math.Min(drawWallY1 - 1, lowerClip[x] - 1);
-                    DrawCeilingColumn(frontSector, ceilingFlat, planeLights, x, cy1, cy2, frontSectorCeilingHeight);
+                    DrawCeilingColumn(frontSector, ceilingFlat, ceilingPlaneLights, x, cy1, cy2, frontSectorCeilingHeight);
                 }
 
                 if (drawWall)
@@ -1423,7 +1430,7 @@ namespace DPTDOOM.Video
                 {
                     var fy1 = Math.Max(drawWallY2 + 1, upperClip[x] + 1);
                     var fy2 = lowerClip[x] - 1;
-                    DrawFloorColumn(frontSector, floorFlat, planeLights, x, fy1, fy2, frontSectorFloorHeight);
+                    DrawFloorColumn(frontSector, floorFlat, floorPlaneLights, x, fy1, fy2, frontSectorFloorHeight);
                 }
 
                 rwScale += rwScaleStep;
@@ -1697,8 +1704,15 @@ namespace DPTDOOM.Video
             // Determine which color map is used for the plane according to the light level.
             //
 
-            var planeLightLevel = (frontSector.LightLevel >> lightSegShift) + extraLight;
-            var planeLights = zLight[MathEx.Clamp(planeLightLevel, 0, lightLevelCount - 1)];
+            // Boom light transfer: the floor and ceiling may each borrow the light
+            // of another sector (specials 213 and 261), which is how a lava floor
+            // pulses with the light above it. Without the separate arrays both
+            // planes took the room light and the special was silently ignored.
+            var mapSectors = world.Map.Sectors;
+            var ceilingLightLevel = (frontSector.CeilingLightLevel(mapSectors) >> lightSegShift) + extraLight;
+            var floorLightLevel = (frontSector.FloorLightLevel(mapSectors) >> lightSegShift) + extraLight;
+            var ceilingPlaneLights = zLight[MathEx.Clamp(ceilingLightLevel, 0, lightLevelCount - 1)];
+            var floorPlaneLights = zLight[MathEx.Clamp(floorLightLevel, 0, lightLevelCount - 1)];
 
             //
             // Prepare to record the rendering history.
@@ -1814,7 +1828,7 @@ namespace DPTDOOM.Video
                     {
                         var cy1 = upperClip[x] + 1;
                         var cy2 = Math.Min(drawWallY1 - 1, lowerClip[x] - 1);
-                        DrawCeilingColumn(frontSector, ceilingFlat, planeLights, x, cy1, cy2, frontSectorCeilingHeight);
+                        DrawCeilingColumn(frontSector, ceilingFlat, ceilingPlaneLights, x, cy1, cy2, frontSectorCeilingHeight);
                     }
 
                     var wy1 = Math.Max(drawUpperWallY1, upperClip[x] + 1);
@@ -1836,7 +1850,7 @@ namespace DPTDOOM.Video
                 {
                     var cy1 = upperClip[x] + 1;
                     var cy2 = Math.Min(drawWallY1 - 1, lowerClip[x] - 1);
-                    DrawCeilingColumn(frontSector, ceilingFlat, planeLights, x, cy1, cy2, frontSectorCeilingHeight);
+                    DrawCeilingColumn(frontSector, ceilingFlat, ceilingPlaneLights, x, cy1, cy2, frontSectorCeilingHeight);
 
                     if (upperClip[x] < cy2)
                     {
@@ -1861,7 +1875,7 @@ namespace DPTDOOM.Video
                     {
                         var fy1 = Math.Max(drawWallY2 + 1, upperClip[x] + 1);
                         var fy2 = lowerClip[x] - 1;
-                        DrawFloorColumn(frontSector, floorFlat, planeLights, x, fy1, fy2, frontSectorFloorHeight);
+                        DrawFloorColumn(frontSector, floorFlat, floorPlaneLights, x, fy1, fy2, frontSectorFloorHeight);
                     }
 
                     if (lowerClip[x] > wy1)
@@ -1875,7 +1889,7 @@ namespace DPTDOOM.Video
                 {
                     var fy1 = Math.Max(drawWallY2 + 1, upperClip[x] + 1);
                     var fy2 = lowerClip[x] - 1;
-                    DrawFloorColumn(frontSector, floorFlat, planeLights, x, fy1, fy2, frontSectorFloorHeight);
+                    DrawFloorColumn(frontSector, floorFlat, floorPlaneLights, x, fy1, fy2, frontSectorFloorHeight);
 
                     if (lowerClip[x] > drawWallY2 + 1)
                     {

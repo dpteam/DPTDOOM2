@@ -67,6 +67,10 @@ namespace DPTDOOM
         private Fixed ceilingFlatOffsetX;
         private Fixed ceilingFlatOffsetY;
 
+        // Boom light transfer (213 / 261): sector index to read the light from, or -1.
+        private int floorLightSector = -1;
+        private int ceilingLightSector = -1;
+
         public Sector(
             int number,
             Fixed floorHeight,
@@ -216,6 +220,56 @@ namespace DPTDOOM
         {
             get => ceilingHeight;
             set => ceilingHeight = value;
+        }
+
+        /// <summary>
+        /// Sector whose light level this sector's floor borrows, or -1.
+        ///
+        /// Boom's special 213: the floor of a tagged sector is lit as if it were the
+        /// control sector. It stores a *sector index*, not a number, and the light is
+        /// read at render time - so a control sector with a flickering or glowing
+        /// light makes every floor that borrows from it flicker too. Baking the
+        /// value at load time would look right for one frame and wrong forever
+        /// after.
+        /// </summary>
+        public int FloorLightSector
+        {
+            get => floorLightSector;
+            set => floorLightSector = value;
+        }
+
+        /// <summary>Sector whose light level this sector's ceiling borrows, or -1.</summary>
+        public int CeilingLightSector
+        {
+            get => ceilingLightSector;
+            set => ceilingLightSector = value;
+        }
+
+        /// <summary>
+        /// Light used for the floor: the borrowed one when there is one.
+        ///
+        /// A method rather than a property because it needs the map to resolve the
+        /// index, and a sector does not know its own map. The caller passes the
+        /// sector array, which is where the borrow has to be looked up anyway.
+        /// </summary>
+        public int FloorLightLevel(Sector[] sectors)
+        {
+            return BorrowedLight(floorLightSector, sectors);
+        }
+
+        public int CeilingLightLevel(Sector[] sectors)
+        {
+            return BorrowedLight(ceilingLightSector, sectors);
+        }
+
+        private int BorrowedLight(int source, Sector[] sectors)
+        {
+            if (source < 0 || sectors == null || source >= sectors.Length)
+            {
+                return lightLevel;
+            }
+
+            return sectors[source].LightLevel;
         }
 
         public int FloorFlat
