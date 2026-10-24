@@ -275,14 +275,39 @@ namespace DPTDOOM.Scripting
         ///
         /// Three ways a block names its target, in the order DECORATE itself resolves them:
         /// the number written in the block, the name it replaces, and the parent it inherits
-        /// from. New actors - a block with a number this engine does not have - are refused
-        /// rather than created, because creating one needs a state table entry and a sprite
-        /// name, and an actor with neither cannot be placed on a map.
+        /// from. A number this engine does not have creates a new actor in the reserve, copied
+        /// from its parent - which is what "ACTOR Child : Parent" means, and what makes a mod
+        /// able to add a monster rather than only change one.
         /// </summary>
         private static MobjInfo ResolveTarget(DecorateActor actor, MobjInfo[] table,
                                               IList<string> problems)
         {
             var number = actor.DoomEdNum;
+            var parentType = -1;
+
+            if (actor.ParentName != null)
+            {
+                int parentNumber;
+
+                if (TryResolveName(actor.ParentName, out parentNumber))
+                {
+                    parentType = DoomInfo.TypeOf(parentNumber);
+                }
+                else
+                {
+                    // A parent this converter does not know is not fatal for a replacement:
+                    // the number in the block decides. It is only fatal when the block has no
+                    // number of its own, because then the parent was the only thing naming the
+                    // actor.
+                    if (number < 0)
+                    {
+                        problems.Add(actor.Name + " line " + actor.Line + ": the parent '" +
+                                     actor.ParentName + "' is an actor name this converter does " +
+                                     "not know, so the actor has nothing to inherit from");
+                        return null;
+                    }
+                }
+            }
 
             if (number < 0 && actor.Replaces != null)
             {
@@ -296,14 +321,6 @@ namespace DPTDOOM.Scripting
                 }
             }
 
-            if (number < 0 && actor.ParentName != null)
-            {
-                // Inheriting from a known actor and not replacing it means the derived actor
-                // takes over the parent's map slot, which is what DECORATE means by a block
-                // whose only identifier is ":" and a parent name.
-                TryResolveName(actor.ParentName, out number);
-            }
-
             if (number < 0)
             {
                 problems.Add(actor.Name + " line " + actor.Line + ": the block names no DoomEdNum " +
@@ -311,18 +328,28 @@ namespace DPTDOOM.Scripting
                 return null;
             }
 
-            foreach (var info in table)
+            var existing = DoomInfo.TypeOf(number);
+
+            if (existing >= 0)
             {
-                if (info.DoomEdNum == number)
-                {
-                    return info;
-                }
+                return table[existing];
             }
 
-            problems.Add(actor.Name + " line " + actor.Line + ": this engine has no actor with " +
-                         "DoomEdNum " + number.ToString(CultureInfo.InvariantCulture) +
-                         "; new actors need their own states, so it is not created");
-            return null;
+            // A number this engine does not have: a new actor. It inherits from its parent, or
+            // from the first entry in the table when the block names no parent at all - which
+            // is what DECORATE does too, and it is why a block with states and no parent still
+            // has something to be a copy of.
+            var type = DoomInfo.AddActor(number, parentType);
+
+            if (type < 0)
+            {
+                problems.Add(actor.Name + " line " + actor.Line + ": no free actor slots left; " +
+                             "the reserve is " + DoomInfo.CustomActorReserve + " actors per run, " +
+                             "so the actor is not created");
+                return null;
+            }
+
+            return DoomInfo.MobjInfos[type];
         }
 
         private static bool TryResolveName(string name, out int number)

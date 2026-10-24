@@ -120,12 +120,22 @@ ACTOR TestImp 3001
 }
 "@ | Set-Content -Path $withStates -Encoding ASCII
 
-    # A doomednum this engine does not have: a new actor, which needs states and a sprite.
+    # A doomednum this engine does not have, with a parent to inherit from. This is a new
+    # monster, and it must be created rather than refused: a mod that only changes existing
+    # actors cannot add anything.
     $newActor = Join-Path $work "new.dec"
     @"
-ACTOR BrandNew 13579
+ACTOR BrandNew : DoomImp
 {
-  Health 100
+  spawnid 13579
+  health 300
+  speed 14
+  States
+  {
+  Spawn:
+    TROO AB 2 A_Look
+    Loop
+  }
 }
 "@ | Set-Content -Path $newActor -Encoding ASCII
 
@@ -195,8 +205,8 @@ ACTOR TestImp 3001
     $newLog = Run-Game "new" @('-decorate', $newActor)
 
     Assert-True ($newLog -like "*map MAP01: OK*") "the level still loads"
-    Assert-True ($newLog -like "*13579*") "the doomednum is named"
-    Assert-True ($newLog -like "*not created*") "and the outcome: the actor is not created"
+    Assert-True ($newLog -like "*scripts: OK*") "the new actor was created rather than refused"
+    Assert-True ($newLog -notlike "*not created*") "nothing says it was refused"
 
     Write-Host "With a DECORATE lump inside a PWAD"
     $pwad = Join-Path $work "lump.wad"

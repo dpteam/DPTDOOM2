@@ -21,7 +21,16 @@ namespace DPTDOOM
 {
     public static partial class DoomInfo
     {
-        public static readonly MobjInfo[] MobjInfos = new MobjInfo[]
+        /// <summary>
+        /// The vanilla actor table, in the engine's own numbering.
+        ///
+        /// Private because <see cref="MobjInfos"/> is what the rest of the engine reads, and
+        /// index <c>i</c> here is <c>MobjType</c> value <c>i</c>: the world stores a mobj's
+        /// type as an integer, the save format writes it, and every lookup goes through
+        /// <c>MobjInfos[(int)type]</c>. So custom actors are appended to a copy, never
+        /// inserted here.
+        /// </summary>
+        private static readonly MobjInfo[] VanillaMobjInfos = new MobjInfo[]
         {
             new MobjInfo( // MobjType.Player
                 -1, // doomEdNum

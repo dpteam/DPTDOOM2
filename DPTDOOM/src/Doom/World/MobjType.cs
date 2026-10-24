@@ -157,6 +157,41 @@ namespace DPTDOOM
         Misc83,
         Misc84,
         Misc85,
-        Misc86
+        Misc86,
+
+        // Reserve for actors a mod brings. Appended, never inserted: the value is written
+        // into save files and read back as an index, so vanilla numbers must not move.
+        Custom0,
+        Custom1,
+        Custom2,
+        Custom3,
+        Custom4,
+        Custom5,
+        Custom6,
+        Custom7,
+        Custom8,
+        Custom9,
+        Custom10,
+        Custom11,
+        Custom12,
+        Custom13,
+        Custom14,
+        Custom15,
+        Custom16,
+        Custom17,
+        Custom18,
+        Custom19,
+        Custom20,
+        Custom21,
+        Custom22,
+        Custom23,
+        Custom24,
+        Custom25,
+        Custom26,
+        Custom27,
+        Custom28,
+        Custom29,
+        Custom30,
+        Custom31
     }
 }

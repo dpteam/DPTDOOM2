@@ -673,8 +673,9 @@ DECORATE приходится угадывать по чужим реализа�
 - [~] **DECORATE до уровня DOOM ACE.** Цель уточнена: в `refs/doom_ace-master/doc/decorate.md`
       лежит список поднабора DECORATE, который ACE поддерживает, и он же взят за ориентир
       (`docs/DECORATE.md`, раздел «Целевой поднабор»). Готово: замена актора, наследование,
-      `spawnid`, числа, флаги и `States` через конвертацию в SharpScript; всё остальное
-      попадает в отчёт загрузки. Не сделано: `scale`/`alpha`/`renderstyle`/`translation`,
+      **новые акторы** (резерв 32 слота в `MobjType` и `MobjInfos`), `spawnid`, числа,
+      флаги и `States` через конвертацию в SharpScript; всё остальное попадает в отчёт
+      загрузки. Не сделано: `scale`/`alpha`/`renderstyle`/`translation`,
       `gravity`, `damagetype`, `dropitem`, звуки по имени люмпа, `args`, свойства игрока,
       оружия, инвентаря, брони и powerup'ов, выражения в значениях и действия, которых у
       движка нет.

@@ -412,23 +412,61 @@ namespace DPTDOOMTest.UnitTests
         }
 
         [TestMethod]
-        public void ANewActorIsRefusedRatherThanHalfCreated()
+        public void ANewActorIsCreatedInTheReserve()
         {
-            // A doomednum this engine does not have needs states and a sprite name. Creating
-            // the entry without them would produce an actor that cannot be placed, and the
-            // message says exactly that.
+            // A doomednum this engine does not have, with a parent: a new actor. It must be
+            // created rather than refused, because a mod that can only change existing actors
+            // cannot add a monster at all - and adding one is the first thing a DECORATE mod
+            // does.
+            using (var content = GameContent.CreateDummy(WadPath.Doom2))
+            {
+                var problems = new List<string>();
+
+                var script = DecorateConverter.Convert(
+                    "ACTOR BrandNew : DoomImp { spawnid 13579 Health 100 }",
+                    DoomInfo.MobjInfos, problems);
+
+                Assert.AreEqual(0, problems.Count, string.Join("; ", problems.ToArray()));
+
+                var library = new ScriptLibrary();
+                library.Add(script, "generated", DoomInfo.MobjInfos);
+                library.ApplyTo(DoomInfo.MobjInfos);
+
+                Assert.AreEqual(0, library.Problems.Count,
+                    library.Problems.Count == 0 ? "" : library.Problems[0]);
+
+                var type = DoomInfo.TypeOf(13579);
+
+                Assert.IsTrue(type >= DoomInfo.CustomActorFirst,
+                    "the actor got a slot in the reserve, got " + type);
+
+                StringAssert.Contains(script, "Thing_13579");
+
+                // Inherited from the imp, which is what ":" means: a block that sets only
+                // numbers must not lose the states it never mentioned.
+                var info = DoomInfo.MobjInfos[type];
+                Assert.AreNotEqual(MobjState.Null, info.SeeState, "the parent's see state came across");
+                Assert.AreEqual(100, info.SpawnHealth);
+            }
+        }
+
+        [TestMethod]
+        public void ANewActorWithoutAParentIsRefused()
+        {
+            // Nothing to inherit from and no number: the block names no actor at all, and
+            // guessing would create something with no states.
             using (var content = GameContent.CreateDummy(WadPath.Doom2))
             {
                 var problems = new List<string>();
 
                 DecorateConverter.Convert(
-                    "ACTOR BrandNew 13579 { Health 100 }", DoomInfo.MobjInfos, problems);
+                    "ACTOR Orphan : NoSuchParent { Health 100 }", DoomInfo.MobjInfos, problems);
 
                 Assert.AreEqual(1, problems.Count);
 
                 var text = string.Join("; ", problems.ToArray());
-                StringAssert.Contains(text, "13579");
-                StringAssert.Contains(text, "not created");
+                StringAssert.Contains(text, "NoSuchParent");
+                StringAssert.Contains(text, "nothing to inherit");
             }
         }
 
