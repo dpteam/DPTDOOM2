@@ -26,6 +26,17 @@ namespace DPTDOOM.UserInput
         void GrabMouse();
         void ReleaseMouse();
 
+        /// <summary>
+        /// When true the input produces no commands.
+        ///
+        /// Needed because movement is read from the *state* of the keys, not from
+        /// events: while a player types a message, the letters w/a/s/d would keep
+        /// driving the player around the level. Suppressing the whole input is the
+        /// only place that can be fixed, since the keyboard state is polled below
+        /// this interface.
+        /// </summary>
+        bool Suppressed { get; set; }
+
         public int MaxMouseSensitivity { get; }
         public int MouseSensitivity { get; set; }
     }

@@ -28,6 +28,7 @@ namespace DPTDOOM.Win32
 
         private readonly bool[] weaponKeys;
         private int turnHeld;
+        private bool suppressed;
 
         public Win32UserInput(Config config, Win32Window window)
         {
@@ -40,6 +41,17 @@ namespace DPTDOOM.Win32
 
         public void BuildTicCmd(TicCmd cmd)
         {
+            if (suppressed)
+            {
+                // While a message is being typed the keyboard drives the text, not
+                // the player. Checked here rather than at the call site because the
+                // key state is polled below this method, and a held movement key
+                // would otherwise keep moving the player while nothing is visible
+                // on screen to explain why.
+                cmd.Clear();
+                return;
+            }
+
             var keyForward = IsPressed(config.key_forward);
             var keyBackward = IsPressed(config.key_backward);
             var keyStrafeLeft = IsPressed(config.key_strafeleft);
@@ -236,6 +248,12 @@ namespace DPTDOOM.Win32
         public void ReleaseMouse()
         {
             window.ReleaseMouse();
+        }
+
+        public bool Suppressed
+        {
+            get { return suppressed; }
+            set { suppressed = value; }
         }
 
         public int MaxMouseSensitivity => 15;

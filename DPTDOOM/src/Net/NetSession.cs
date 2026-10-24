@@ -18,6 +18,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
+using System.Text;
 using System.Threading;
 using DPTDOOM.Shared;
 
@@ -139,6 +140,7 @@ namespace DPTDOOM.Net
         private readonly List<Peer> peers = new List<Peer>();
         private readonly Dictionary<int, Dictionary<int, NetTic>> incoming = new Dictionary<int, Dictionary<int, NetTic>>();
         private readonly List<string> names = new List<string>();
+        private readonly Queue<string> chatIncoming = new Queue<string>();
 
         private TcpListener listener;
         private TcpClient hostConnection;
@@ -942,6 +944,10 @@ namespace DPTDOOM.Net
                     SendFrame(peer.Stream, NetProtocol.TypePong, payload, peer);
                     break;
 
+                case NetProtocol.TypeChat:
+                    HandleChat(peer, payload);
+                    break;
+
                 case NetProtocol.TypePong:
                     HandlePong(payload);
                     break;
@@ -1034,6 +1040,135 @@ namespace DPTDOOM.Net
             foreach (var peer in peers)
             {
                 SendFrame(peer.Stream, NetProtocol.TypeTic, payload, peer);
+            }
+        }
+
+        /// <summary>
+        /// Sends one chat line, prefixed with who said it.
+        ///
+        /// The sender's index rather than their name travels on the wire: names
+        /// are already known to everyone from the welcome, and a name could be
+        /// longer than the message.
+        ///
+        /// The host forwards a guest's line to the other guests, exactly as it
+        /// forwards tics. A guest only ever talks to the host, so without the
+        /// forward a three-player session would have two players who never see
+        /// each other's messages.
+        /// </summary>
+        public void SendChat(int player, string text)
+        {
+            if (string.IsNullOrEmpty(text) || player < 0 || player >= NetProtocol.MaxPlayers)
+            {
+                return;
+            }
+
+            var bytes = Encoding.ASCII.GetBytes(text);
+            var limit = Math.Min(bytes.Length, Chat.MaxLength);
+
+            var payload = new byte[1 + limit];
+            payload[0] = (byte)player;
+            Array.Copy(bytes, 0, payload, 1, limit);
+
+            List<Peer> targets;
+
+            if (!isHost)
+            {
+                targets = new List<Peer>();
+                lock (sync)
+                {
+                    if (peers.Count > 0)
+                    {
+                        targets.Add(peers[0]);
+                    }
+                }
+            }
+            else
+            {
+                lock (sync)
+                {
+                    targets = new List<Peer>(peers);
+                }
+            }
+
+            foreach (var peer in targets)
+            {
+                SendFrame(peer.Stream, NetProtocol.TypeChat, payload, peer);
+            }
+        }
+
+        /// <summary>
+        /// Takes one received chat line, already formatted as "Name: text".
+        ///
+        /// Formatted here rather than by the caller so that both ends show the
+        /// same thing: the name comes from the session's own name table, which is
+        /// the only place that knows the mapping from a player index to a person.
+        /// </summary>
+        public bool TryTakeChat(out string text)
+        {
+            lock (sync)
+            {
+                if (chatIncoming.Count == 0)
+                {
+                    text = null;
+                    return false;
+                }
+
+                text = chatIncoming.Dequeue();
+                return true;
+            }
+        }
+
+        private void HandleChat(Peer peer, byte[] payload)
+        {
+            if (payload.Length < 1)
+            {
+                return;
+            }
+
+            var player = payload[0];
+
+            if (player >= NetProtocol.MaxPlayers)
+            {
+                return;
+            }
+
+            var body = Encoding.ASCII.GetString(payload, 1, payload.Length - 1);
+
+            if (body.Length == 0)
+            {
+                return;
+            }
+
+            string name;
+
+            lock (sync)
+            {
+                name = player < names.Count ? names[player] : "player " + (player + 1);
+                chatIncoming.Enqueue(name + ": " + body);
+            }
+
+            // The host is the hub: a guest's line has to reach the other guests,
+            // and they are only connected to the host.
+            if (isHost && !ReferenceEquals(peer, null))
+            {
+                List<Peer> others;
+
+                lock (sync)
+                {
+                    others = new List<Peer>();
+                    foreach (var other in peers)
+                    {
+                        if (!ReferenceEquals(other, peer))
+                        {
+                            others.Add(other);
+                        }
+                    }
+                }
+
+                foreach (var other in others)
+                {
+                    SendFrame(other.Stream, NetProtocol.TypeChat, payload, other);
+                }
             }
         }
 

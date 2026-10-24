@@ -72,7 +72,19 @@ if (-not (Test-Path $Exe)) {
 
 $failures = 0
 
-foreach ($oneWay in $DelayMs) {
+for ($case = 0; $case -lt $DelayMs.Length; $case++) {
+    $oneWay = $DelayMs[$case]
+
+    # A port per delay, not one port for all of them.
+    #
+    # Reusing one port across iterations failed intermittently at 100 ms: the
+    # previous host was still shutting down, the new one could not bind, and the
+    # guest silently connected to the *old* host - which had already simulated its
+    # tics. The run then reported a world-hash mismatch that had nothing to do
+    # with latency.
+    $hostPort = $HostPort + $case * 2
+    $proxyPort = $ProxyPort + $case * 2
+
     $hostProcess = $null
     $guestProcess = $null
     $proxy = $null
@@ -85,14 +97,14 @@ foreach ($oneWay in $DelayMs) {
         $hostProcess = Start-Process -FilePath $Exe -PassThru -WindowStyle Hidden `
             -RedirectStandardOutput $hostOut `
             -ArgumentList @('-headless', '-iwad', $Iwad, '-net', 'host', '-players', '2',
-                            '-port', "$HostPort", '-warp', '1', '-skill', '3', '-tics', "$Tics")
+                            '-port', "$hostPort", '-warp', '1', '-skill', '3', '-tics', "$Tics")
 
         Start-Sleep -Seconds 5
 
         if ($oneWay -gt 0) {
             $proxyArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass',
                            '-File', 'tools\latency-proxy.ps1',
-                           '-Listen', "$ProxyPort", '-Target', "127.0.0.1:$HostPort",
+                           '-Listen', "$proxyPort", '-Target', "127.0.0.1:$hostPort",
                            '-DelayMs', "$oneWay", '-JitterMs', "$JitterMs",
                            '-LossPercent', "$LossPercent")
 
@@ -101,7 +113,7 @@ foreach ($oneWay in $DelayMs) {
             Start-Sleep -Seconds 4
         }
 
-        $address = if ($oneWay -gt 0) { "127.0.0.1:$ProxyPort" } else { "127.0.0.1:$HostPort" }
+        $address = if ($oneWay -gt 0) { "127.0.0.1:$proxyPort" } else { "127.0.0.1:$hostPort" }
 
         $watch = [Diagnostics.Stopwatch]::StartNew()
 
@@ -126,8 +138,15 @@ foreach ($oneWay in $DelayMs) {
         $guestState = (Get-Content $guestOut | Select-String 'State: mobj=' | Select-Object -First 1)
         $hostState = $null
 
-        if ($hostProcess.WaitForExit(20000)) {
+        # The host needs its own budget: at 100 ms of latency it finishes the
+        # remaining tics after the guest, and 20 s was not always enough. When it
+        # ran out the host state was silently absent, so the comparison below was
+        # skipped and the run looked like a mismatch instead of a timeout.
+        if ($hostProcess.WaitForExit(60000)) {
             $hostState = (Get-Content $hostOut | Select-String 'State: mobj=' | Select-Object -First 1)
+        }
+        else {
+            Write-Host "  --   the host did not finish in 60 s; its state is not comparable"
         }
 
         Assert-True ($null -ne $guestState) "the guest finished the session"

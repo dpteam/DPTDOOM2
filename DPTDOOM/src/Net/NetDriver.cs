@@ -51,6 +51,18 @@ namespace DPTDOOM.Net
 
         /// <summary>Hands the host's bots to the lockstep loop.</summary>
         void AttachBots(DoomBot[] bots);
+
+        /// <summary>
+        /// Sends a chat line to the other players. A no-op outside a network game.
+        ///
+        /// Chat is not game state: it never enters a tic, a demo or a save, so it
+        /// cannot affect determinism. The local echo is the caller's job, because
+        /// only the caller knows how to display it.
+        /// </summary>
+        void SendChat(string text);
+
+        /// <summary>Takes one received chat line, if any is waiting.</summary>
+        bool TryTakeChat(out string text);
     }
 
     public sealed class NetDriver : INetDriver
@@ -297,6 +309,16 @@ namespace DPTDOOM.Net
 
         /// <summary>True on the machine that drives the bots.</summary>
         public bool IsHost => session.IsHost;
+
+        public void SendChat(string text)
+        {
+            session.SendChat(session.LocalPlayer, text);
+        }
+
+        public bool TryTakeChat(out string text)
+        {
+            return session.TryTakeChat(out text);
+        }
         public bool Faulted => session.Faulted;
         public string FaultReason => session.FaultReason;
         public bool Finished => session.Finished;

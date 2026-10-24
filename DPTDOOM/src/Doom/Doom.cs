@@ -57,6 +57,12 @@ namespace DPTDOOM
 
         private bool sendPause;
 
+        /// <summary>
+        /// In-game text entry. Per machine, not per world: what one player is
+        /// typing must never be part of the shared state.
+        /// </summary>
+        private readonly Chat chat = new Chat();
+
         private bool quit;
         private string quitMessage;
 
@@ -597,6 +603,20 @@ namespace DPTDOOM
 
             foreach (var e in events)
             {
+                // Chat first, and before the menu: while a player is typing, every
+                // key belongs to the message. This is also what keeps "idkfa" typed
+                // into the chat from enabling cheats.
+                if (chat.Handle(e))
+                {
+                    if (chat.Submitted)
+                    {
+                        SendChat(chat.Text);
+                        chat.Close();
+                    }
+
+                    continue;
+                }
+
                 if (menu.DoEvent(e))
                 {
                     continue;
@@ -612,6 +632,15 @@ namespace DPTDOOM
 
                 if (currentState == DoomState.Game)
                 {
+                    if (netDriver != null && e.Key == DoomKey.T && e.Type == EventType.KeyDown)
+                    {
+                        // Chat needs somebody to talk to. A single-player session
+                        // has no transport, so the key stays inert rather than
+                        // opening a text box that cannot send anything.
+                        chat.Open();
+                        continue;
+                    }
+
                     if (e.Key == DoomKey.Pause && e.Type == EventType.KeyDown)
                     {
                         sendPause = true;
@@ -630,6 +659,85 @@ namespace DPTDOOM
             }
 
             events.Clear();
+        }
+
+        /// <summary>
+        /// Sends a chat line and shows it locally.
+        ///
+        /// The local echo does not come back over the network: a player who sends
+        /// a message expects to see it immediately, and a round trip would also
+        /// make the message appear twice on the host, which is both a sender and a
+        /// relay.
+        /// </summary>
+        private void SendChat(string text)
+        {
+            if (string.IsNullOrEmpty(text) || netDriver == null)
+            {
+                return;
+            }
+
+            netDriver.SendChat(text);
+
+            ShowChat("You: " + text);
+        }
+
+        /// <summary>
+        /// Displays a chat line the way a pickup message appears.
+        ///
+        /// Reusing the message line rather than adding a new HUD element is the
+        /// smallest change that is still readable, and it inherits the existing
+        /// font, scaling and positioning - which is the part that would otherwise
+        /// have to be written and tested from scratch.
+        /// </summary>
+        private void ShowChat(string text)
+        {
+            if (game == null || game.World == null)
+            {
+                return;
+            }
+
+            var player = game.World.ConsolePlayer;
+
+            player.SendMessage(text);
+
+            // Longer than a pickup message: 4 seconds is enough for a medikit and
+            // too short to read a sentence.
+            player.MessageTime = 8 * GameConst.TicRate;
+        }
+
+        private void PumpChat()
+        {
+            if (netDriver == null || game == null || game.World == null)
+            {
+                return;
+            }
+
+            string text;
+
+            while (netDriver.TryTakeChat(out text))
+            {
+                ShowChat(text);
+            }
+
+            // Show what is being typed. Doing it here, once per tic, keeps the
+            // message line honest: the alternative is an overlay element that has
+            // to be cleared on every path out of chat mode.
+            if (chat.Active && game.World != null)
+            {
+                var player = game.World.ConsolePlayer;
+
+                player.SendMessage("Say: " + chat.Text + "_");
+                player.MessageTime = 8 * GameConst.TicRate;
+            }
+
+            // Movement is read from key state rather than from events, so typing
+            // "wasd" would walk the player around. Suppressing the whole input is
+            // the only place that can be handled, since the polling happens below
+            // the interface.
+            if (userInput != null && userInput.Suppressed != chat.Active)
+            {
+                userInput.Suppressed = chat.Active;
+            }
         }
 
         private bool CheckFunctionKey(DoomKey key)
@@ -756,6 +864,10 @@ namespace DPTDOOM
         public UpdateResult Update()
         {
             DoEvents();
+
+            // Chat arrives on the network thread and is displayed here, on the
+            // game thread, so the message line is only ever touched in one place.
+            PumpChat();
 
             if (!wiping)
             {

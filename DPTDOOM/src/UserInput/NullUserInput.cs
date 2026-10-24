@@ -50,6 +50,8 @@ namespace DPTDOOM.UserInput
         {
         }
 
+        public bool Suppressed { get; set; }
+
         public int MaxMouseSensitivity
         {
             get
