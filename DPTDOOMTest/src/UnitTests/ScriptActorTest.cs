@@ -311,6 +311,44 @@ namespace DPTDOOMTest.UnitTests
             Assert.AreEqual("two.dpts", library.Patches[0].Source);
         }
 
+        [TestMethod]
+        public void ConversionsAreNamedAndAvailable()
+        {
+            // Both directions have a function, because the narrowing one must be visible
+            // in the text: an implicit truncation in the middle of an expression is the
+            // kind of thing a modder finds an hour later.
+            var table = Table();
+            var library = new ScriptLibrary();
+
+            library.Add(
+                "fn Thing_3004() { Height(ToFixed(ToInt(41.9))); }",
+                "convert.dpts", table);
+
+            library.ApplyTo(table);
+
+            Assert.AreEqual(0, library.Problems.Count);
+            Assert.AreEqual(Fixed.FromInt(41).Data, Find(table, 3004).Height.Data,
+                "41.9 truncated to 41, then widened back");
+        }
+
+        [TestMethod]
+        public void FailStopsTheScriptAndSaysWhy()
+        {
+            // The only way a script can report a problem: it cannot throw, and silently
+            // doing the wrong thing is worse than doing nothing.
+            var table = Table();
+            var library = new ScriptLibrary();
+
+            library.Add(
+                "fn Thing_3004() {\n  if (Health() <= 0) { Fail(\"health must be positive\"); }\n  Health(99);\n}",
+                "guard.dpts", table);
+
+            library.ApplyTo(table);
+
+            Assert.AreEqual(0, library.Problems.Count, "no failure for a healthy actor");
+            Assert.AreEqual(99, Find(table, 3004).SpawnHealth);
+        }
+
         // ------------------------------------------------------------ the sandbox
 
         [TestMethod]

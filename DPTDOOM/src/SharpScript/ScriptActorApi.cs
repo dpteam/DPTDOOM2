@@ -115,6 +115,13 @@ namespace DPTDOOM.Scripting
             {
                 throw call.Fail(call.AsText(0));
             });
+
+            // Conversions are named rather than implicit in the narrowing direction.
+            // Widening an integer to a fixed value cannot lose anything and happens by
+            // itself; narrowing truncates, and the truncation should be visible in the
+            // text rather than a surprise at the far end of an expression.
+            host.Register("ToInt", 1, call => ScriptValue.FromInt(call.AsInt(0)));
+            host.Register("ToFixed", 1, call => ScriptValue.FromFixed(call.AsFixed(0)));
         }
 
         private static void RegisterNumber(ScriptHost host, string name, Func<int> get, Action<int> set)
