@@ -166,6 +166,21 @@ namespace DPTDOOM.Win32
                 return;
             }
 
+            // A track's own channel-volume change is scaled by our volume instead of
+            // being passed through.
+            //
+            // This is why the music got louder between maps, and why it sometimes did
+            // it in the middle of a song: a MUS file can set controller 7 (channel
+            // volume) or 11 (expression) itself, and those messages arrived after
+            // SendVolume and overwrote it. The configured volume is the player's
+            // choice; a track may ask to be quieter than the maximum, never louder
+            // than what the player set.
+            if ((status & 0xF0) == 0xB0 && (data1 == 7 || data1 == 11))
+            {
+                var scale = config.audio_musicvolume * 127 / MaxVolume;
+                data2 = (byte)MathEx.Clamp(data2 * scale / 127, 0, 127);
+            }
+
             var message = (uint)(status | (data1 << 8) | (data2 << 16));
             NativeMethodsMidi.midiOutShortMsg(device, message);
         }
@@ -243,7 +258,9 @@ namespace DPTDOOM.Win32
             get => config.audio_musicvolume;
             set
             {
-                config.audio_musicvolume = value;
+                // Clamped and stored, so a slider at either end cannot write a value
+                // the MIDI layer would then have to fix up.
+                config.audio_musicvolume = MathEx.Clamp(value, 0, MaxVolume);
                 SendVolume();
             }
         }

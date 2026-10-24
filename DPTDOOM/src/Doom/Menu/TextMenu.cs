@@ -70,10 +70,19 @@ namespace DPTDOOM
 
         public override void Open()
         {
-            // Reopening always starts at the top: coming back to a screen scrolled
-            // to the bottom, because that is where the player was last time, makes
-            // the first press of Up do nothing visible.
-            index = FirstSelectable(0, 1);
+            // The highlight is deliberately *not* reset.
+            //
+            // Coming back to a screen and landing on the first row every time means a
+            // player who wants to change two settings in a row has to walk back down
+            // each time. Vanilla Doom remembers where the skull was, and so does this.
+            //
+            // The one case that does need a reset is a page that would open on a row
+            // that no longer exists, which cannot happen here: the rows are fixed at
+            // construction.
+            if (items.Length == 0)
+            {
+                index = 0;
+            }
         }
 
         /// <summary>
@@ -152,8 +161,16 @@ namespace DPTDOOM
                 case DoomKey.Space:
                     if (Current.Enabled)
                     {
-                        Current.Activate();
+                        // The sound plays before the action, so a row that opens
+                        // another screen still clicks, and a row that changes
+                        // something clicks once rather than not at all.
                         Menu.StartSound(Sfx.PISTOL);
+
+                        if (Current.Activate())
+                        {
+                            // Activate returning true means "this menu is done".
+                            Back();
+                        }
                     }
 
                     return true;

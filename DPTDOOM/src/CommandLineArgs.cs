@@ -87,6 +87,8 @@ namespace DPTDOOM
         public readonly Arg showconsole;
         public readonly Arg<int> profiler;
         public readonly Arg<string> consolecmd;
+        public readonly Arg showhelp;
+        public readonly Arg showabout;
         public readonly Arg showtriggers;
         public readonly Arg showblockmap;
         public readonly Arg bots;
@@ -173,6 +175,8 @@ namespace DPTDOOM
             // console command can be exercised by a script: without it the only way to
             // type one is to drive the keyboard from outside the process.
             consolecmd = GetString(args, "-consolecmd");
+            showhelp = new Arg(args.Contains("-showhelp"));
+            showabout = new Arg(args.Contains("-showabout"));
             showtriggers = new Arg(args.Contains("-showtriggers"));
             showblockmap = new Arg(args.Contains("-showblockmap"));
             bots = new Arg(args.Contains("-bots"));

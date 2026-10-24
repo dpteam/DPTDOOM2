@@ -99,6 +99,12 @@ namespace DPTDOOM
         /// </summary>
         public static readonly int PitchLimit = 70;
 
+        /// <summary>Opens the about screen.</summary>
+        public void ShowAbout()
+        {
+            menu.ShowAbout();
+        }
+
         public Fixed ViewPitch => viewPitch;
 
         /// <summary>
@@ -137,6 +143,8 @@ namespace DPTDOOM
         // Opened on the first frame of the level, for screenshots and for tests.
         private readonly bool showSettingsOnStart;
         private readonly bool showConsoleOnStart;
+        private readonly bool showHelpOnStart;
+        private readonly bool showAboutOnStart;
 
         /// <summary>
         /// One command from "-consolecmd", run on the first frame of the level.
@@ -147,6 +155,9 @@ namespace DPTDOOM
         private readonly string consoleCommandOnStart;
 
         private bool startScreensShown;
+
+        /// <summary>True when the console is what paused the game.</summary>
+        private bool consolePaused;
 
         private DemoRecorder recorder;
         private string recordPath;
@@ -235,6 +246,8 @@ namespace DPTDOOM
 
             showSettingsOnStart = args.showsettings.Present;
             showConsoleOnStart = args.showconsole.Present;
+            showHelpOnStart = args.showhelp.Present;
+            showAboutOnStart = args.showabout.Present;
             consoleCommandOnStart = args.consolecmd.Present ? args.consolecmd.Value : null;
 
             if (args.coopbots.Present)
@@ -771,6 +784,20 @@ namespace DPTDOOM
                     continue;
                 }
 
+                // Help comes before the menu, not after it.
+                //
+                // An open menu swallows every key, which is right for the keys it
+                // uses and wrong for F1: a player who has the menu open and presses
+                // help is asking what the keys do, and vanilla Doom shows the help
+                // screen from inside the menu too. This used to fall through to the
+                // menu and disappear, which is why "Справка - управление" appeared to
+                // do nothing while a menu was open.
+                if (e.Type == EventType.KeyDown && e.Key == DoomKey.F1)
+                {
+                    menu.ShowHelpScreen();
+                    continue;
+                }
+
                 if (menu.DoEvent(e))
                 {
                     continue;
@@ -816,7 +843,48 @@ namespace DPTDOOM
         }
 
         /// <summary>
-        /// Opens the screen the command line asked for, once the level exists.
+        /// Freezes the game while the console is open, the way the pause key does.
+        ///
+        /// Suppressing the input is not enough on its own: with the console open the
+        /// player is looking at a panel and cannot see the room, so an archvile
+        /// walking up behind them is not a fair death. Refused in a network game for
+        /// the usual reason - the pause is a tic command, and freezing the world on
+        /// one machine only would desynchronise the session.
+        ///
+        /// The resume only happens if this is what paused it. Closing the console
+        /// after the player paused on purpose must not un-pause the game.
+        /// </summary>
+        private void UpdateConsolePause()
+        {
+            if (currentState != DoomState.Game || game == null || game.State != GameState.Level)
+            {
+                consolePaused = false;
+                return;
+            }
+
+            if (overlay.Active)
+            {
+                if (!game.Paused && !consolePaused && !options.NetGame)
+                {
+                    PauseGame();
+                    consolePaused = true;
+                }
+
+                return;
+            }
+
+            if (consolePaused)
+            {
+                consolePaused = false;
+
+                if (game.Paused)
+                {
+                    ResumeGame();
+                }
+            }
+        }
+
+        /// <summary>Opens the screen the command line asked for, once the level exists.
         ///
         /// Deferred to the first frame of the level because both screens need a
         /// world: the menu draws over it and the console prints the session state.
@@ -838,16 +906,37 @@ namespace DPTDOOM
 
             if (consoleCommandOnStart != null)
             {
-                // Before the panels, so a command that fails prints its error into a
-                // console that is about to be shown rather than into one that does not
-                // exist yet.
-                overlay.Print("] " + consoleCommandOnStart, ConsoleLineKind.Echo);
-                commands.Execute(consoleCommandOnStart, overlay);
+                // Semicolons run several commands in order. That is what makes a
+                // sequence testable from a script - "volume sfx 3; map MAP02; volume
+                // sfx" answers "does the volume survive a level change", which is not
+                // answerable one command at a time.
+                foreach (var line in consoleCommandOnStart.Split(';'))
+                {
+                    var command = line.Trim();
+
+                    if (command.Length == 0)
+                    {
+                        continue;
+                    }
+
+                    overlay.Print("] " + command, ConsoleLineKind.Echo);
+                    commands.Execute(command, overlay);
+                }
             }
 
             if (showSettingsOnStart)
             {
                 menu.ShowSettings();
+            }
+
+            if (showHelpOnStart)
+            {
+                menu.ShowHelpScreen();
+            }
+
+            if (showAboutOnStart)
+            {
+                menu.ShowAbout();
             }
 
             if (showConsoleOnStart)
@@ -1681,6 +1770,8 @@ namespace DPTDOOM
             UpdateViewPitch();
 
             UpdateStartScreens();
+
+            UpdateConsolePause();
 
             if (!wiping)
             {

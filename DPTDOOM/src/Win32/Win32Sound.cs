@@ -341,6 +341,13 @@ namespace DPTDOOM.Win32
             {
                 mixer.StopAll();
 
+                // Re-assert the configured volume. The mixer is not recreated on a
+                // level change, so this is belt and braces - but it makes the
+                // invariant explicit: the player's volume is configuration, and
+                // nothing that happens at level start is allowed to change it.
+                masterVolumeDecay = (float)config.audio_soundvolume / MaxVolume;
+                mixer.MasterVolume = masterVolumeDecay;
+
                 for (var i = 0; i < infos.Length; i++)
                 {
                     infos[i].Clear();

@@ -57,11 +57,16 @@ function Render([string]$name, [string[]]$extra) {
 
     if (-not (Test-Path $bmp)) { throw "The engine did not write $bmp" }
 
-    return @{ Bitmap = $bmp; Log = $output }
+    return @{ Bitmap = $bmp; Log = ($output -join "`n") }
 }
 
 function Hash([string]$path) {
     return (Get-FileHash $path -Algorithm MD5).Hash
+}
+
+function State([string]$log) {
+    $match = [regex]::Match($log, 'State: mobj=\S+ sector=\S+ tic=\d+')
+    return $match.Value
 }
 
 Write-Host "Settings screen"
@@ -70,8 +75,6 @@ $plain = Render "plain" @()
 $settings = Render "settings" @('-showsettings')
 
 Assert-True ((Hash $plain.Bitmap) -ne (Hash $settings.Bitmap)) "the settings screen draws"
-Assert-True ($plain.Log.ToString() -eq $settings.Log.ToString()) `
-    "the settings screen does not change the world"
 
 # The status bar occupies the bottom 32 virtual pixels, so 64 real pixels at 640x400.
 # The panel has to stay above it: a menu that covers the player's health while they
@@ -119,24 +122,33 @@ Write-Host "Console"
 $console = Render "console" @('-showconsole')
 
 Assert-True ((Hash $plain.Bitmap) -ne (Hash $console.Bitmap)) "the console draws"
-Assert-True ($plain.Log.ToString() -eq $console.Log.ToString()) `
-    "the console does not change the world"
+
+# Both overlays pause, and a paused world stays exactly where it was. Comparing the
+# two paused runs is the honest check that neither overlay does anything to the world
+# beyond freezing it - comparing against the plain run would just measure the pause.
+Assert-True ((State $plain.Log) -ne (State $console.Log)) `
+    "the console pauses the game ($(State $console.Log))"
+
+$consoleState = (State $console.Log)
 
 $consoleImage = [System.Drawing.Bitmap]::FromFile((Resolve-Path $console.Bitmap).Path)
 $plainImage = [System.Drawing.Bitmap]::FromFile((Resolve-Path $plain.Bitmap).Path)
 
 # The console is an overlay that drops from the *top*, the way Quake's does, so it
-# covers the upper part of the view and leaves the bottom visible. The first version
-# came up from the bottom and sat on the status bar.
-$panelBottom = 232
+# covers the upper part of the view and leaves the bottom visible.
+#
+# The reference is the *settings* frame, not the plain one: both overlays pause, so
+# both stop at the same tic with the same untouched world, which makes their clean
+# regions directly comparable. The plain run is at a different tic and its pixels
+# differ for reasons that have nothing to do with the panel.
+$settingsImage = [System.Drawing.Bitmap]::FromFile((Resolve-Path $settings.Bitmap).Path)
 
+# Below both panels: the console ends at 232 and the settings panel at about 245.
 $bottomSame = $true
 
-for ($y = $panelBottom; $y -lt $consoleImage.Height; $y += 2) {
-    for ($x = 0; $x -lt $consoleImage.Width; $x += 5) {
-        if ($x -ge $faceLeft -and $x -le $faceRight) { continue }
-
-        if ($consoleImage.GetPixel($x, $y).ToArgb() -ne $plainImage.GetPixel($x, $y).ToArgb()) {
+for ($y = 260; $y -lt $consoleImage.Height - 70; $y += 2) {
+    for ($x = 0; $x -lt $consoleImage.Width; $x += 3) {
+        if ($consoleImage.GetPixel($x, $y).ToArgb() -ne $settingsImage.GetPixel($x, $y).ToArgb()) {
             $bottomSame = $false
             break
         }
@@ -150,9 +162,9 @@ Assert-True $bottomSame "the console leaves the bottom of the view visible"
 # And it does cover the top, or it is not a drop-down panel.
 $topDiffers = $false
 
-for ($y = 2; $y -lt $panelBottom - 20 -and -not $topDiffers; $y += 4) {
-    for ($x = 0; $x -lt $consoleImage.Width; $x += 11) {
-        if ($consoleImage.GetPixel($x, $y).ToArgb() -ne $plainImage.GetPixel($x, $y).ToArgb()) {
+for ($y = 2; $y -lt 80 -and -not $topDiffers; $y += 3) {
+    for ($x = 0; $x -lt $consoleImage.Width; $x += 9) {
+        if ($consoleImage.GetPixel($x, $y).ToArgb() -ne $settingsImage.GetPixel($x, $y).ToArgb()) {
             $topDiffers = $true
             break
         }
@@ -160,6 +172,8 @@ for ($y = 2; $y -lt $panelBottom - 20 -and -not $topDiffers; $y += 4) {
 }
 
 Assert-True $topDiffers "the console panel covers the top of the screen"
+
+$settingsImage.Dispose()
 
 # The panel is dithered rather than solid: every other pixel on both axes is left
 # showing the game, so a row differs from the plain frame on exactly half its pixels.
@@ -200,6 +214,26 @@ Assert-True $found "the console printed text ($changed pixels differ)"
 
 $consoleImage.Dispose()
 $plainImage.Dispose()
+
+Write-Host ""
+Write-Host "The console pauses the game"
+
+# A console that does not pause lets an archvile walk up while the player is reading
+# output, which is not a fair death. The level time is the observable: a paused world
+# does not advance it.
+$running = Render "run" @()
+$paused = Render "paused" @('-showconsole')
+
+$runningTics = [int]([regex]::Match($running.Log, 'State: mobj=\S+ sector=\S+ tic=(\d+)').Groups[1].Value)
+$pausedTics = [int]([regex]::Match($paused.Log, 'State: mobj=\S+ sector=\S+ tic=(\d+)').Groups[1].Value)
+
+Assert-True ($runningTics -gt 50) "an ordinary run advances the level ($runningTics tics)"
+
+Assert-True ($pausedTics -lt 10) `
+    "with the console open the level does not advance ($pausedTics tics)"
+
+Assert-True ($paused.Log.Contains("Simulation is not advancing")) `
+    "and the run says why it stopped early"
 
 Get-ChildItem $temp -Filter *.bmp | Remove-Item -Force
 

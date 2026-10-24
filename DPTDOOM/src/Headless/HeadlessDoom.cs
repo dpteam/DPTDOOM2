@@ -113,6 +113,14 @@ namespace DPTDOOM.Headless
                     var levelTics = 0;
                     var printedConsoleLines = 0;
 
+                    // Progress watch. A paused game never advances its level time, so
+                    // a "-tics 200" run would spin until the safety net at ten million
+                    // updates - which it did, in 1.4 seconds, and then reported
+                    // "Tics: 10000000" as if that meant something. Any genuine stall
+                    // deserves the same treatment: stop and say so.
+                    var lastSimulated = -1;
+                    var stalledUpdates = 0;
+
                     while (true)
                     {
                         if (doom.Update() == UpdateResult.Completed)
@@ -141,8 +149,31 @@ namespace DPTDOOM.Headless
                             ? driver.CurrentTic
                             : GameTics(doom, tics);
 
+                        // Checked before the limit, so the reported count is the tic
+                        // the run actually reached rather than the one before it.
+                        if (simulated == lastSimulated)
+                        {
+                            stalledUpdates++;
+                        }
+                        else
+                        {
+                            stalledUpdates = 0;
+                        }
+
+                        lastSimulated = simulated;
+
                         if (limit > 0 && simulated >= limit)
                         {
+                            break;
+                        }
+
+                        // A paused game stops advancing the level time, which is the
+                        // point of a pause - but a headless run asked for tics, and if
+                        // it cannot get them it should say so instead of spinning.
+                        if (stalledUpdates > 5000)
+                        {
+                            Console.WriteLine("Simulation is not advancing (paused?); stopping after " +
+                                              simulated + " tics.");
                             break;
                         }
 
@@ -230,7 +261,11 @@ namespace DPTDOOM.Headless
 
                     doom.FlushBotTrace();
 
-                    Console.WriteLine("Tics: " + (driver != null ? driver.CurrentTic : tics));
+                    // The number of tics that were actually simulated, not the number of loop
+                    // iterations. They differ when the run stops early - a paused game,
+                    // or the safety net - and reporting the iterations made a stalled
+                    // run look like it had simulated five thousand tics.
+                    Console.WriteLine("Tics: " + (driver != null ? driver.CurrentTic : Math.Max(0, lastSimulated)));
 
                     if (doom.Game != null && doom.Game.World != null)
                     {

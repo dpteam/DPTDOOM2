@@ -32,6 +32,7 @@ namespace DPTDOOM
         private TextMenu settingsInput;
         private TextMenu settingsSystem;
         private SelectableMenu volume;
+        private TextMenu about;
         private LoadMenu load;
         private SaveMenu save;
         private HelpScreen help;
@@ -357,6 +358,34 @@ namespace DPTDOOM
 
                 new ActionTextItem("BACK", () => Close(),
                     "Return to the main menu."));
+
+            // About, as a screen rather than a Windows message box. A MessageBox is in
+            // the system font with a system icon and belongs to the operating system;
+            // this is drawn by the renderer with Doom's own font, so it looks like the
+            // program it is describing and can be photographed by the same tooling as
+            // every other screen.
+            about = new TextMenu(
+                this,
+                "ABOUT",
+                null,
+
+                new InfoTextItem("PROGRAM", () => ApplicationInfo.Title,
+                    "DPT.DOOM, a source port of Doom."),
+
+                new InfoTextItem("ENGINE", () => "GNU GPL v2 or later",
+                    "The source is free software; game data is not."),
+
+                new InfoTextItem("BASED ON", () => "MANAGED DOOM",
+                    "Nobuaki Tanaka's C# translation of Linux Doom."),
+
+                new InfoTextItem("ORIGINAL", () => "ID SOFTWARE",
+                    "DOOM belongs to id Software. No game data is included."),
+
+                new InfoTextItem("ABOUTBOT", () => "COMING LATER",
+                    "The bot's documentation will live in refs/ and be summarised here."),
+
+                new ActionTextItem("BACK", () => Close(),
+                    "Return to the game."));
 
             // The pages return to the root, not to the main menu: a player who
             // pressed Escape to leave a page wanted the list of pages back.
@@ -725,6 +754,14 @@ namespace DPTDOOM
         private CrosshairColours MakeCrosshairColours(Wad wad)
         {
             return new CrosshairColours(wad.ReadLump("PLAYPAL"));
+        }
+
+        /// <summary>Opens the about screen, from the Windows menu or from a command line flag.</summary>
+        public void ShowAbout()
+        {
+            SetCurrent(about);
+            Open();
+            StartSound(Sfx.SWTCHN);
         }
 
         public Doom Doom => doom;

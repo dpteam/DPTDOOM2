@@ -348,7 +348,7 @@ namespace DPTDOOM.Win32
                     break;
 
                 case MenuCommand.HelpAbout:
-                    ShowAbout();
+                    doom.ShowAbout();
                     break;
 
                 case MenuCommand.TrayShow:
@@ -681,19 +681,6 @@ namespace DPTDOOM.Win32
             }
 
             return game.World.ConsolePlayer;
-        }
-
-        private void ShowAbout()
-        {
-            NativeMethods.MessageBox(
-                video.Window.Handle,
-                ApplicationInfo.Title + "\n\n" +
-                "DOOM source port for the DartPower Team.\n" +
-                "Based on Managed Doom by Nobuaki Tanaka.\n\n" +
-                "Engine: GNU GPL v2 or later.\n" +
-                "DOOM belongs to id Software; game data is not included.",
-                "О программе",
-                NativeMethods.MB_OK | NativeMethods.MB_ICONINFORMATION);
         }
 
         private void UpdateMenuChecks()
