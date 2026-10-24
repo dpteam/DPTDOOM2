@@ -104,7 +104,7 @@ namespace DPTDOOM.Win32
                 }
             }
 
-            Console.WriteLine("Sound effects: " + loaded + " loaded.");
+            ConsoleUi.Line("sound", loaded + " effects loaded");
 
             infos = new ChannelInfo[ChannelCount];
             for (var i = 0; i < ChannelCount; i++)
@@ -448,7 +448,7 @@ namespace DPTDOOM.Win32
         {
             if (!OpenWaveOut())
             {
-                Console.WriteLine("Sound unavailable: continuing without audio.");
+                ConsoleUi.Warn("sound unavailable, continuing without audio");
                 return;
             }
 
@@ -583,7 +583,7 @@ namespace DPTDOOM.Win32
             }
             catch (Exception e)
             {
-                Console.WriteLine("Sound unavailable: " + e.Message);
+                ConsoleUi.Warn("sound unavailable: " + e.Message);
                 return false;
             }
         }

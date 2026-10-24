@@ -51,7 +51,7 @@ namespace DPTDOOM.Win32
 
             if (result != 0)
             {
-                Console.WriteLine("Music unavailable (midiOutOpen error " + result + ").");
+                ConsoleUi.Warn("music unavailable, midiOutOpen error " + result);
                 device = IntPtr.Zero;
             }
         }

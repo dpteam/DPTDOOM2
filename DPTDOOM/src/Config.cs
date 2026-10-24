@@ -212,7 +212,7 @@ namespace DPTDOOM
         {
             try
             {
-                Console.Write("Restore settings: ");
+                ConsoleUi.Begin("settings");
 
                 var dic = new Dictionary<string, string>();
                 foreach (var line in File.ReadLines(path))
@@ -266,11 +266,11 @@ namespace DPTDOOM
 
                 isRestoredFromFile = true;
 
-                Console.WriteLine("OK");
+                ConsoleUi.Ok("restored from file");
             }
             catch
             {
-                Console.WriteLine("Failed");
+                ConsoleUi.Ok("defaults");
             }
         }
 

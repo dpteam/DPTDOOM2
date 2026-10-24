@@ -92,7 +92,10 @@ foreach ($style in $styles) {
 # The bot must not stop after the first level: the run continues on the next map,
 # which is what the level-transition line proves.
 $output = & $Exe -headless -iwad $Iwad -bots -warp 1 -skill 3 -tics $TicLimit -botstyle 0 2>&1
-$maps = $output | Select-String -Pattern "Load map '(\w+)'" | ForEach-Object { $_.Matches[0].Groups[1].Value }
+# The startup log names the map in its own label: "map MAP01: OK (loaded)". That is
+# the kernel-log shape the console uses now, and it keeps the map name greppable
+# without needing the message text.
+$maps = $output | Select-String -Pattern "map (MAP\d+|E\dM\d+):" | ForEach-Object { $_.Matches[0].Groups[1].Value }
 
 Assert-True ($maps.Count -ge 2) ("the run continues after MAP01 (maps loaded: " + ($maps -join ', ') + ")")
 

@@ -38,7 +38,7 @@ namespace DPTDOOM
         {
             try
             {
-                Console.Write("Load palette: ");
+                ConsoleUi.Begin("palette");
 
                 data = wad.ReadLump("PLAYPAL");
 
@@ -49,11 +49,11 @@ namespace DPTDOOM
                     palettes[i] = new uint[256];
                 }
 
-                Console.WriteLine("OK");
+                ConsoleUi.Ok(count + " palettes");
             }
             catch (Exception e)
             {
-                Console.WriteLine("Failed");
+                ConsoleUi.Failed("see below");
                 ExceptionDispatchInfo.Throw(e);
             }
         }

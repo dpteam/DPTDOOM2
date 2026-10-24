@@ -777,6 +777,11 @@ namespace DPTDOOM.Win32
 
             doom.Stats = stats;
 
+            // Everything that loads has loaded and the window is about to show the
+            // first frame. This is the line a player screenshots when the game feels
+            // slow to start.
+            ConsoleUi.Ready();
+
             using (clock = new FrameClock(pacer.TargetFps))
             {
                 if (args.fpslog.Present)

@@ -75,7 +75,7 @@ namespace DPTDOOM
         {
             try
             {
-                ConsoleUi.Begin("Load flats");
+                ConsoleUi.Begin("flats");
 
                 var firstFlat = wad.GetLumpNumber("F_START") + 1;
                 var lastFlat = wad.GetLumpNumber("F_END") - 1;
@@ -201,7 +201,7 @@ namespace DPTDOOM
         {
             try
             {
-                ConsoleUi.Begin("Load flats");
+                ConsoleUi.Begin("flats");
 
                 var allFlats = new List<int>();
                 var flatZone = false;

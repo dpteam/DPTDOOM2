@@ -39,7 +39,7 @@ namespace DPTDOOM
         {
             try
             {
-                ConsoleUi.Begin("Load textures");
+                ConsoleUi.Begin("textures");
 
                 InitLookup(wad);
                 InitSwitchList();

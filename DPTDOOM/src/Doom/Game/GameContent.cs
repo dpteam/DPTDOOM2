@@ -39,6 +39,11 @@ namespace DPTDOOM
 
             DeHackEd.Initialize(args, wad);
 
+            // A blank line between the groups, so a startup log of a dozen lines can be
+            // skimmed instead of read. Purely visual - the timestamps already say what
+            // took how long.
+            ConsoleUi.Section("graphics");
+
             palette = new Palette(wad);
             colorMap = new ColorMap(wad);
             textures = new TextureLookup(wad);

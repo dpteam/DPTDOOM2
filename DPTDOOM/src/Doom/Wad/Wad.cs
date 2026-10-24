@@ -36,7 +36,7 @@ namespace DPTDOOM
         {
             try
             {
-                Console.Write("Open WAD files: ");
+                ConsoleUi.Begin("wad");
 
                 names = new List<string>();
                 streams = new List<Stream>();
@@ -62,11 +62,11 @@ namespace DPTDOOM
                         "Cannot tell which game this is: no known IWAD name and no maps found.");
                 }
 
-                Console.WriteLine("OK (" + string.Join(", ", fileNames.Select(x => Path.GetFileName(x))) + ")");
+                ConsoleUi.Ok(string.Join(", ", fileNames.Select(x => Path.GetFileName(x))));
             }
             catch (Exception e)
             {
-                Console.WriteLine("Failed");
+                ConsoleUi.Failed("see below");
                 Dispose();
                 ExceptionDispatchInfo.Throw(e);
             }

@@ -70,7 +70,10 @@ namespace DPTDOOM
                     name = "E" + options.Episode + "M" + options.Map;
                 }
 
-                Console.Write("Load map '" + name + "': ");
+                // The map name is part of the label, the way a kernel log prefixes a device: the
+                // line has to say which map loaded, and a generic "map:" would need the
+                // name in the message to be useful at all.
+                ConsoleUi.Begin("map " + name);
 
                 var map = wad.GetLumpNumber(name);
 
@@ -114,11 +117,11 @@ namespace DPTDOOM
                     title = DoomInfo.MapTitles.Doom[options.Episode - 1][options.Map - 1];
                 }
 
-                Console.WriteLine("OK");
+                ConsoleUi.Ok("loaded");
             }
             catch (Exception e)
             {
-                Console.WriteLine("Failed");
+                ConsoleUi.Failed(e.Message);
                 ExceptionDispatchInfo.Throw(e);
             }
         }

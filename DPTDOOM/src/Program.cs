@@ -90,9 +90,7 @@ namespace DPTDOOM
 
                 if (quitMessage != null)
                 {
-                    Console.ForegroundColor = ConsoleColor.Green;
-                    Console.WriteLine(quitMessage);
-                    Console.ResetColor();
+                    ConsoleUi.Closing(quitMessage);
                     WaitForKey();
                 }
 
@@ -100,6 +98,8 @@ namespace DPTDOOM
             }
             catch (Exception e)
             {
+                ConsoleUi.Closing("failed");
+
                 Console.ForegroundColor = ConsoleColor.Red;
                 Console.WriteLine(e);
                 Console.ResetColor();

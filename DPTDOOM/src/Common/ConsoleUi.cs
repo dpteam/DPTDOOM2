@@ -14,29 +14,40 @@
 
 using System;
 using System.Diagnostics;
+using System.Globalization;
 using System.Runtime.InteropServices;
 
 namespace DPTDOOM
 {
     /// <summary>
-    /// The startup report in the .NET console window.
+    /// The startup report in the .NET console window, in the shape of a kernel log.
     ///
-    /// Doom's own startup printed a banner and then one line per subsystem, so a
-    /// player could see where it stopped when it stopped. This is that, for the
-    /// things this port actually does: the WAD, the palette, the three graphic
-    /// caches, the session.
+    /// Doom's own startup printed a banner and one line per subsystem. This is that,
+    /// with a timestamp in front of every line:
     ///
-    /// Two rules decide the whole design:
+    /// <code>
+    /// [    0.412817] wad      : 1900 lumps, DOOM 2
+    /// [    0.913167] flats    : 147
+    /// [    1.453751] net      : hosting on 5029
+    /// </code>
+    ///
+    /// The timestamp is the point of the format. It answers "what was slow" without a
+    /// profiler, and a fixed-width column keeps a screenful of lines readable in a
+    /// proportional font, where aligning by hand never lines up twice.
+    ///
+    /// Three rules decide the rest:
     ///
     ///  - **When the output is redirected, nothing changes.** A test, a launcher or a
     ///    pipe gets exactly the lines it got before: no banner, no colours, no
-    ///    padding. Sixteen scripts parse this output, and decorating a log that a
-    ///    machine reads is how a beautiful console breaks a build.
+    ///    timestamps, no padding. Sixteen scripts parse this output, and decorating a
+    ///    log that a machine reads is how a beautiful console breaks a build.
     ///  - **ASCII only.** The project runs on Windows XP, where the console code page
-    ///    and the font between them decide whether a box-drawing character appears
-    ///    or a question mark does. Every character here is plain 7-bit ASCII, so the
-    ///    banner looks the same in a Russian cmd, an English one and a redirected
-    ///    file.
+    ///    and the font between them decide whether a box-drawing character appears or
+    ///    a question mark does.
+    ///  - **A step that is still running prints a provisional line.** A load that takes
+    ///    a second would otherwise sit silent and then print everything at once, which
+    ///    looks like a hang. The provisional is overwritten in place, so what is left
+    ///    on screen is exactly the final log.
     /// </summary>
     public static class ConsoleUi
     {
@@ -44,17 +55,25 @@ namespace DPTDOOM
         private const uint FileTypeChar = 2;
 
         /// <summary>
-        /// Column where the status of a step starts.
+        /// Width of the subsystem column, before the colon.
         ///
-        /// Chosen so the longest label in the project ("base palette") still leaves
-        /// room for a count on an 80-column window, which is what a default console
-        /// is and what an XP one always was.
+        /// Wide enough for the longest name in the project ("dehacked"), narrow enough
+        /// that a message still starts before column 30 on an 80-column window.
         /// </summary>
-        private const int StatusColumn = 44;
+        private const int SubsystemColumn = 9;
 
         private static bool? interactive;
         private static bool disabled;
         private static readonly Stopwatch since = Stopwatch.StartNew();
+
+        /// <summary>The step currently running, or null between steps.</summary>
+        private static string current;
+
+        /// <summary>
+        /// The last subsystem that reported, so a <see cref="Detail"/> printed outside
+        /// a step still says who it is about.
+        /// </summary>
+        private static string last;
 
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern IntPtr GetStdHandle(int handle);
@@ -111,7 +130,18 @@ namespace DPTDOOM
             disabled = true;
         }
 
-        /// <summary>Seconds since the process started reporting. Used for "ready in".</summary>
+        /// <summary>
+        /// Forces the interactive decision, for tests.
+        ///
+        /// Text formatting is exactly the thing a test verifies better than an eye, and
+        /// a build server has no console window to check it against.
+        /// </summary>
+        public static void ForceInteractive(bool value)
+        {
+            interactive = value;
+        }
+
+        /// <summary>Seconds since the process started reporting.</summary>
         public static double ElapsedSeconds
         {
             get { return since.Elapsed.TotalSeconds; }
@@ -151,11 +181,43 @@ namespace DPTDOOM
         }
 
         /// <summary>
-        /// The banner. Six lines of block letters, a rule above and below, and one
-        /// line saying what this program is.
+        /// The time column: <c>[    1.453751] </c>.
         ///
-        /// Printed only on a console. In a redirected run the caller prints the plain
-        /// title instead, so nothing a script reads changes.
+        /// Six decimals, right-aligned in a fixed width, the way a kernel log has done
+        /// it for decades. The trailing space is part of the column, not of the
+        /// message: without it the closing bracket touches the subsystem name and the
+        /// whole line reads as a run-on.
+        /// </summary>
+        private static string Timestamp()
+        {
+            return "[" + ElapsedSeconds.ToString("0.000000", CultureInfo.InvariantCulture)
+                                         .PadLeft(12) + "] ";
+        }
+
+        private static void WriteTimestamp()
+        {
+            Color(ConsoleColor.DarkGray);
+            Console.Write(Timestamp());
+            Reset();
+        }
+
+        private static void WriteSubsystem(string name)
+        {
+            Color(ConsoleColor.Cyan);
+            Console.Write((name ?? "?").PadRight(SubsystemColumn));
+            Reset();
+
+            Console.Write(": ");
+        }
+
+        /// <summary>
+        /// The banner. Five lines of block letters and one line saying what this
+        /// program is.
+        ///
+        /// Still a banner rather than a log line: it is the first thing anyone sees and
+        /// it has to say what the program is before the log starts explaining what it
+        /// is doing. In a redirected run the caller prints the plain title instead, so
+        /// nothing a script reads changes.
         /// </summary>
         public static void Banner()
         {
@@ -165,11 +227,6 @@ namespace DPTDOOM
                 return;
             }
 
-            var rule = new string('=', 78);
-
-            Color(ConsoleColor.DarkCyan);
-            Console.WriteLine();
-            Console.WriteLine("  " + rule);
             Console.WriteLine();
 
             Color(ConsoleColor.Cyan);
@@ -179,17 +236,20 @@ namespace DPTDOOM
             Console.WriteLine("   | |_| |  __/ | |      | |_| | |_| | |_| | |  | |");
             Console.WriteLine("   |____/|_|    |_|      |____/ \\___/ \\___/|_|  |_|");
 
-            Color(ConsoleColor.DarkCyan);
-            Console.WriteLine();
+            Color(ConsoleColor.DarkGray);
             Console.WriteLine("   " + ApplicationInfo.Title +
                               "   .NET Framework 4.0   Windows XP to 11");
-            Console.WriteLine();
-            Console.WriteLine("  " + rule);
             Reset();
             Console.WriteLine();
         }
 
-        /// <summary>A section heading, with the rule under it.</summary>
+        /// <summary>
+        /// A blank line between groups of steps.
+        ///
+        /// A kernel log has no sections, and adding headings would break the one
+        /// property that makes it readable - every line the same shape. A gap does the
+        /// same work without pretending to be a line of output.
+        /// </summary>
         public static void Section(string name)
         {
             if (!IsInteractive)
@@ -198,49 +258,28 @@ namespace DPTDOOM
             }
 
             Console.WriteLine();
-
-            Color(ConsoleColor.Cyan);
-            Console.WriteLine("  " + name);
-
-            Color(ConsoleColor.DarkCyan);
-            Console.WriteLine("  " + new string('-', name.Length));
-            Reset();
         }
 
         /// <summary>
-        /// Starts a step: the label, then dots up to the status column.
+        /// Starts a step. Nothing is printed yet: the line appears when the step ends.
         ///
-        /// Two calls rather than one because the work happens between them, and the
-        /// result is only known afterwards. Printing the label first is what lets a
-        /// long load show where it is instead of sitting silent and then printing
-        /// everything at once.
+        /// An earlier version printed a provisional line and overwrote it at the end,
+        /// which looked like progress until a step printed a <see cref="Detail"/>
+        /// partway through - those lines landed on top of the half-written one and left
+        /// their tails sticking out. A kernel log prints a line when the event
+        /// completes, so a timestamp means "this finished at 0.41 s", which is what
+        /// anyone reading it wants to know. The previous line already shows that
+        /// something is happening; a pause before the next one is not a hang.
         /// </summary>
-        public static void Begin(string label)
+        public static void Begin(string subsystem)
         {
             if (!IsInteractive)
             {
-                Console.Write(label + ": ");
+                Console.Write(subsystem + ": ");
                 return;
             }
 
-            Console.Write("    ");
-
-            Color(ConsoleColor.Gray);
-            Console.Write(label);
-            Reset();
-
-            var width = 4 + label.Length;
-            var dots = StatusColumn - width;
-
-            if (dots < 1)
-            {
-                Console.Write(" ");
-                return;
-            }
-
-            Color(ConsoleColor.DarkGray);
-            Console.Write(" " + new string('.', dots - 1) + " ");
-            Reset();
+            current = subsystem;
         }
 
         /// <summary>Finishes a step with a result.</summary>
@@ -252,20 +291,17 @@ namespace DPTDOOM
                 return;
             }
 
-            Color(ok ? ConsoleColor.Green : ConsoleColor.Red);
-            Console.Write(ok ? "[ ok ]" : "[ !! ]");
+            var body = ok ? detail : "FAILED" + (string.IsNullOrEmpty(detail) ? "" : " - " + detail);
+
+            WriteTimestamp();
+            WriteSubsystem(current ?? last ?? "?");
+
+            Color(ok ? ConsoleColor.Gray : ConsoleColor.Red);
+            Console.WriteLine(body ?? "");
             Reset();
 
-            if (!string.IsNullOrEmpty(detail))
-            {
-                Console.Write(" ");
-
-                Color(ok ? ConsoleColor.DarkGray : ConsoleColor.Gray);
-                Console.Write(detail);
-                Reset();
-            }
-
-            Console.WriteLine();
+            last = current ?? last;
+            current = null;
         }
 
         public static void Ok(string detail)
@@ -281,8 +317,9 @@ namespace DPTDOOM
         /// <summary>
         /// A line under a step: what was skipped and why.
         ///
-        /// Dim and indented, so it reads as a remark about the line above rather than
-        /// as a step of its own - and it never changes the status.
+        /// Same shape as a step, same subsystem, no timestamp of its own - it happened
+        /// as part of the step above it, and giving it a fresh time would suggest it
+        /// was a separate event.
         /// </summary>
         public static void Detail(string text)
         {
@@ -292,8 +329,14 @@ namespace DPTDOOM
                 return;
             }
 
+            // The timestamp column is left blank rather than filled with a dash: the
+            // line belongs to the step above it, and a fresh time would suggest it was
+            // a separate event.
+            Console.Write(new string(' ', Timestamp().Length));
+            WriteSubsystem(current ?? last ?? "?");
+
             Color(ConsoleColor.DarkGray);
-            Console.WriteLine("           " + text);
+            Console.WriteLine(text ?? "");
             Reset();
         }
 
@@ -306,18 +349,38 @@ namespace DPTDOOM
                 return;
             }
 
+            WriteTimestamp();
+            WriteSubsystem("warn");
+
             Color(ConsoleColor.Yellow);
-            Console.WriteLine("  [ .. ] " + text);
+            Console.WriteLine(text ?? "");
             Reset();
+        }
+
+        /// <summary>
+        /// A line with no step around it: a single remark, such as where the master is
+        /// listening.
+        /// </summary>
+        public static void Line(string subsystem, string text)
+        {
+            if (!IsInteractive)
+            {
+                Console.WriteLine(subsystem + ": " + text);
+                return;
+            }
+
+            WriteTimestamp();
+            WriteSubsystem(subsystem);
+
+            Console.WriteLine(text ?? "");
         }
 
         /// <summary>
         /// The last line of the startup: how long it took, and that the window is
         /// about to open.
         ///
-        /// Doom ended its startup on the status bar appearing, with no ceremony. This
-        /// is the same idea with a number attached, because "why does it take so
-        /// long" is a question a number answers and a blank line does not.
+        /// "why does it take so long" is a question a number answers and a blank line
+        /// does not.
         /// </summary>
         public static void Ready()
         {
@@ -326,18 +389,8 @@ namespace DPTDOOM
                 return;
             }
 
-            Console.WriteLine();
-
-            Color(ConsoleColor.DarkCyan);
-            Console.Write("  " + new string('=', 78));
-            Console.WriteLine();
-
-            Color(ConsoleColor.Green);
-            Console.Write("   READY");
-
-            Color(ConsoleColor.DarkGray);
-            Console.WriteLine("   " + ElapsedSeconds.ToString("0.00") + " s");
-            Reset();
+            Line("ready", "window opening, " +
+                          ElapsedSeconds.ToString("0.00", CultureInfo.InvariantCulture) + " s");
             Console.WriteLine();
         }
 
@@ -352,11 +405,8 @@ namespace DPTDOOM
                 return;
             }
 
-            Console.WriteLine();
-
-            Color(ConsoleColor.DarkGray);
-            Console.WriteLine("  " + reason + "   " + ElapsedSeconds.ToString("0.00") + " s");
-            Reset();
+            Line("exit", reason + ", " +
+                          ElapsedSeconds.ToString("0.00", CultureInfo.InvariantCulture) + " s");
         }
     }
 }

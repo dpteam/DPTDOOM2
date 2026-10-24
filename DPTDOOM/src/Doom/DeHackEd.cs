@@ -48,7 +48,7 @@ namespace DPTDOOM
                 // Ensure the static members are initialized.
                 DoomInfo.Strings.PRESSKEY.GetHashCode();
 
-                Console.Write("Load DeHackEd patches: ");
+                ConsoleUi.Begin("dehacked");
 
                 foreach (var fileName in fileNames)
                 {
@@ -56,11 +56,11 @@ namespace DPTDOOM
                     ProcessLines(File.ReadLines(fileName));
                 }
 
-                Console.WriteLine("OK (" + string.Join(", ", fileNames.Select(x => Path.GetFileName(x))) + ")");
+                ConsoleUi.Ok(string.Join(", ", fileNames.Select(x => Path.GetFileName(x))));
             }
             catch (Exception e)
             {
-                Console.WriteLine("Failed");
+                ConsoleUi.Failed(e.Message);
                 throw new Exception("Failed to apply DeHackEd patch: " + lastFileName, e);
             }
         }
@@ -76,15 +76,15 @@ namespace DPTDOOM
 
                 try
                 {
-                    Console.Write("Load DeHackEd patch from WAD: ");
+                    ConsoleUi.Begin("dehacked");
 
                     ProcessLines(ReadLines(wad.ReadLump(lump)));
 
-                    Console.WriteLine("OK");
+                    ConsoleUi.Ok("DEHACKED lump");
                 }
                 catch (Exception e)
                 {
-                    Console.WriteLine("Failed");
+                    ConsoleUi.Failed(e.Message);
                     throw new Exception("Failed to apply DeHackEd patch!", e);
                 }
             }

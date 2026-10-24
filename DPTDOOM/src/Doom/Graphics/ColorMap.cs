@@ -30,7 +30,7 @@ namespace DPTDOOM
         {
             try
             {
-                Console.Write("Load color map: ");
+                ConsoleUi.Begin("colormap");
 
                 var raw = wad.ReadLump("COLORMAP");
                 var num = raw.Length / 256;
@@ -45,11 +45,11 @@ namespace DPTDOOM
                     }
                 }
 
-                Console.WriteLine("OK");
+                ConsoleUi.Ok(num + " light levels");
             }
             catch (Exception e)
             {
-                Console.WriteLine("Failed");
+                ConsoleUi.Failed("see below");
                 ExceptionDispatchInfo.Throw(e);
             }
         }

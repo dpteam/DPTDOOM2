@@ -29,7 +29,7 @@ namespace DPTDOOM
         {
             try
             {
-                Console.Write("Load texture animation info: ");
+                ConsoleUi.Begin("animation");
 
                 var list = new List<TextureAnimationInfo>();
 
@@ -75,11 +75,11 @@ namespace DPTDOOM
 
                 animations = list.ToArray();
 
-                Console.WriteLine("OK");
+                ConsoleUi.Ok(list.Count + " animated");
             }
             catch (Exception e)
             {
-                Console.WriteLine("Failed");
+                ConsoleUi.Failed("see below");
                 ExceptionDispatchInfo.Throw(e);
             }
         }

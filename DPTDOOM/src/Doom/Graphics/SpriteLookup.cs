@@ -29,7 +29,7 @@ namespace DPTDOOM
         {
             try
             {
-                ConsoleUi.Begin("Load sprites");
+                ConsoleUi.Begin("sprites");
 
                 var temp = new Dictionary<string, List<SpriteInfo>>();
                 for (var i = 0; i < (int)Sprite.Count; i++)
