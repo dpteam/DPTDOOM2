@@ -52,6 +52,12 @@ namespace DPTDOOM.Video
         private AutoMapRenderer autoMap;
         private FinaleRenderer finale;
 
+        /// <summary>
+        /// The drop-down console. Drawn last of all, over the game and over the
+        /// menu: it is an overlay, not a screen.
+        /// </summary>
+        private ConsoleRenderer console;
+
         private Patch pause;
 
         private int wipeBandWidth;
@@ -84,6 +90,7 @@ namespace DPTDOOM.Video
             openingSequence = new OpeningSequenceRenderer(content.Wad, screen, this);
             autoMap = new AutoMapRenderer(content.Wad, screen);
             finale = new FinaleRenderer(content, screen);
+            console = new ConsoleRenderer(content.Wad, screen);
 
             pause = Patch.FromWad(content.Wad, "M_PAUSE");
 
@@ -240,6 +247,13 @@ namespace DPTDOOM.Video
 
             RenderDoom(doom, frameFrac);
             RenderMenu(doom);
+
+            // The console goes over everything, including the menu: it is the one
+            // thing the player opened on top of whatever else was showing.
+            if (doom.ConsoleOverlay.Active)
+            {
+                console.Render(doom.ConsoleOverlay, doom.FrameCount);
+            }
 
             var colors = palette[0];
             if (doom.State == DoomState.Game &&

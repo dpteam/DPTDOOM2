@@ -144,6 +144,12 @@ jobs:
         shell: pwsh
         run: ./tools/test-view.ps1
 
+      - name: Settings screen and console
+        # Opens both overlays without a keyboard and checks that they draw, that
+        # they stay where they belong, and that neither changes the world.
+        shell: pwsh
+        run: ./tools/test-console.ps1
+
       - name: Automap debug overlays actually draw
         # "-maponly" was in the command line and did nothing: it was applied only by
         # the window's own toggle, so a headless run ignored it and every screenshot

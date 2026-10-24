@@ -27,6 +27,7 @@ namespace DPTDOOM
         private SelectableMenu episodeMenu;
         private SelectableMenu skillMenu;
         private SelectableMenu optionMenu;
+        private TextMenu settings;
         private SelectableMenu volume;
         private LoadMenu load;
         private SaveMenu save;
@@ -200,6 +201,100 @@ namespace DPTDOOM
 
             var video = doom.Options.Video;
             var userInput = doom.Options.UserInput;
+
+            // The settings screen, drawn with the font rather than with WAD patches.
+            //
+            // It exists because the classic menus can only offer what id Software
+            // drew: there is no patch for a crosshair or for vertical look, and
+            // shipping our own menu graphics would mean art the project does not
+            // have. Everything added since 1994 lives here, in one screen, instead of
+            // being reachable only from the Windows menu.
+            var config = doom.Config;
+
+            settings = new TextMenu(
+                this,
+                "SETTINGS",
+                optionMenu,
+
+                new SectionTextItem("VIEW"),
+
+                new ChoiceTextItem(
+                    "CROSSHAIR",
+                    new[] { "OFF", "CROSS", "DOT", "CROSS+DOT" },
+                    () => config.hud_crosshair,
+                    value => config.hud_crosshair = value,
+                    "Mark, not aiming. Shots use Doom autoaim."),
+
+                new ToggleTextItem(
+                    "FREE LOOK",
+                    () => config.view_freelook,
+                    value => config.view_freelook = value,
+                    "Mouse tilts the view. No aiming change."),
+
+                new ToggleTextItem(
+                    "MESSAGES",
+                    () => video.DisplayMessage,
+                    value => video.DisplayMessage = value,
+                    "Pickup text in the message line."),
+
+                new SliderTextItem(
+                    "SCREEN SIZE", 0, video.MaxWindowSize,
+                    () => video.WindowSize,
+                    value => video.WindowSize = value,
+                    "View size. Last step is full screen."),
+
+                new SliderTextItem(
+                    "GAMMA", 0, video.MaxGammaCorrectionLevel,
+                    () => video.GammaCorrectionLevel,
+                    value => video.GammaCorrectionLevel = value,
+                    "Brightness. Raise if too dark."),
+
+                new SectionTextItem("AUDIO"),
+
+                new SliderTextItem(
+                    "SOUND VOLUME", 0, sound.MaxVolume,
+                    () => sound.Volume,
+                    value => sound.Volume = value,
+                    "Effects: shots, doors, monsters.", true),
+
+                new SliderTextItem(
+                    "MUSIC VOLUME", 0, music.MaxVolume,
+                    () => music.Volume,
+                    value => music.Volume = value,
+                    "Background music.", true),
+
+                new SectionTextItem("INPUT"),
+
+                new SliderTextItem(
+                    "MOUSE SPEED", 1, userInput.MaxMouseSensitivity,
+                    () => userInput.MouseSensitivity,
+                    value => userInput.MouseSensitivity = value,
+                    "Mouse turning speed.", true),
+
+                new ToggleTextItem(
+                    "ALWAYS RUN",
+                    () => config.game_alwaysrun,
+                    value => config.game_alwaysrun = value,
+                    "Run by default. Shift walks."),
+
+                new SectionTextItem("SYSTEM"),
+
+                new ToggleTextItem(
+                    "FRAME PROFILE",
+                    () => video.Profile != null && video.Profile.Enabled,
+                    value =>
+                    {
+                        if (video.Profile != null)
+                        {
+                            video.Profile.Enabled = value;
+                        }
+                    },
+                    "Frame sections, reported on exit."));
+
+            // No "back" row: Escape already goes back, and the row cost more than it
+            // was worth - it was the one that pushed the list past the bottom of the
+            // screen at 640x400.
+
             optionMenu = new SelectableMenu(
                 this,
                 "M_OPTTTL", 108, 15,
@@ -231,7 +326,15 @@ namespace DPTDOOM
                 new SimpleMenuItem(
                     "M_SVOL", 28, 144 - 16, 60, 149 - 16,
                     null,
-                    volume));
+                    volume),
+
+                new TextLabelMenuItem(
+                    "SETTINGS", 28, 160 - 16, 60, 165 - 16,
+                    settings));
+
+            // The parent is assigned after the fact because the settings screen is
+            // built first and points at a menu that does not exist yet.
+            settings.Parent = optionMenu;
 
             load = new LoadMenu(
                 this,
@@ -474,11 +577,20 @@ namespace DPTDOOM
             StartSound(Sfx.SWTCHN);
         }
 
+        /// <summary>Opens the settings screen, from the menu or from the Windows menu.</summary>
+        public void ShowSettings()
+        {
+            SetCurrent(settings);
+            Open();
+            StartSound(Sfx.SWTCHN);
+        }
+
         public Doom Doom => doom;
         public GameOptions Options => doom.Options;
         public MenuDef Current => current;
         public bool Active => active;
         public int Tics => tics;
         public SaveSlots SaveSlots => saveSlots;
+        public TextMenu Settings => settings;
     }
 }

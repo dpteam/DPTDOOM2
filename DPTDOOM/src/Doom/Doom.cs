@@ -63,6 +63,16 @@ namespace DPTDOOM
         /// </summary>
         private readonly Chat chat = new Chat();
 
+        /// <summary>
+        /// The drop-down console, opened with the key above Tab.
+        ///
+        /// Like the chat, it is not game state: a console that could change the
+        /// simulation would be a cheat channel in a network game.
+        /// </summary>
+        private readonly GameConsole overlay = new GameConsole();
+
+        private readonly ConsoleCommands commands = new ConsoleCommands();
+
         private bool quit;
         private string quitMessage;
 
@@ -92,10 +102,35 @@ namespace DPTDOOM
         public Fixed ViewPitch => viewPitch;
 
         /// <summary>
+        /// The console, so the renderer can draw it and tests can drive it.
+        ///
+        /// Exposed rather than duplicated: the renderer needs the scrollback and the
+        /// input line, and a second copy of either would be a second source of truth.
+        /// </summary>
+        public GameConsole ConsoleOverlay => overlay;
+
+        /// <summary>The command table, for tests and for the Windows menu.</summary>
+        public ConsoleCommands ConsoleCommands => commands;
+
+        /// <summary>Configuration, which the settings screen edits in place.</summary>
+        public Config Config => config;
+
+        /// <summary>Frames drawn so far. Used for blinking cursors and the like.</summary>
+        public int FrameCount => frameCount;
+
+        /// <summary>
         /// True while the status bar is showing the reconnect countdown, so it
         /// can be cleared once instead of being rewritten every frame.
         /// </summary>
         private bool reconnectMessageShown;
+
+        /// <summary>Frames drawn so far, for blinking cursors and the like.</summary>
+        private int frameCount;
+
+        // Opened on the first frame of the level, for screenshots and for tests.
+        private readonly bool showSettingsOnStart;
+        private readonly bool showConsoleOnStart;
+        private bool startScreensShown;
 
         private DemoRecorder recorder;
         private string recordPath;
@@ -146,6 +181,8 @@ namespace DPTDOOM
             this.userInput = userInput;
             this.netDriver = netDriver;
 
+            RegisterConsoleCommands();
+
             botMode = args.bots.Present;
 
             // Presentation switches from the command line. Applied here because this
@@ -169,6 +206,9 @@ namespace DPTDOOM
                 config.view_freelook = true;
                 viewPitch = Fixed.FromInt(MathEx.Clamp(args.pitch.Value, -PitchLimit, PitchLimit));
             }
+
+            showSettingsOnStart = args.showsettings.Present;
+            showConsoleOnStart = args.showconsole.Present;
 
             if (args.coopbots.Present)
             {
@@ -652,7 +692,35 @@ namespace DPTDOOM
 
             foreach (var e in events)
             {
-                // Chat first, and before the menu: while a player is typing, every
+                // Console first of all: while it is open every key belongs to it, so
+                // a digit typed into it must not also switch the view size and
+                // "iddqd" must not also enable a cheat.
+                if (overlay.Active)
+                {
+                    overlay.Handle(e);
+
+                    if (overlay.Submitted)
+                    {
+                        RunConsoleLine();
+                    }
+
+                    continue;
+                }
+
+                if (e.Type == EventType.KeyDown && e.Key == DoomKey.Tilde)
+                {
+                    // Available in a game and in a demo, not on the title screen:
+                    // there is nothing to inspect there and the console would cover
+                    // the sequence.
+                    if (currentState == DoomState.Game || currentState == DoomState.DemoPlayback)
+                    {
+                        overlay.Open();
+                        overlay.Print("Type \"help\" for a list of commands.", ConsoleLineKind.Hint);
+                        continue;
+                    }
+                }
+
+                // Chat next, and before the menu: while a player is typing, every
                 // key belongs to the message. This is also what keeps "idkfa" typed
                 // into the chat from enabling cheats.
                 if (chat.Handle(e))
@@ -708,6 +776,62 @@ namespace DPTDOOM
             }
 
             events.Clear();
+        }
+
+        /// <summary>
+        /// Opens the screen the command line asked for, once the level exists.
+        ///
+        /// Deferred to the first frame of the level because both screens need a
+        /// world: the menu draws over it and the console prints the session state.
+        /// Doing it in the constructor produced a menu over a black screen.
+        /// </summary>
+        private void UpdateStartScreens()
+        {
+            if (startScreensShown)
+            {
+                return;
+            }
+
+            if (currentState != DoomState.Game || game == null || game.World == null)
+            {
+                return;
+            }
+
+            startScreensShown = true;
+
+            if (showSettingsOnStart)
+            {
+                menu.ShowSettings();
+            }
+
+            if (showConsoleOnStart)
+            {
+                overlay.Open();
+                overlay.Print(ApplicationInfo.Title, ConsoleLineKind.Hint);
+                overlay.Print("Type \"help\" for a list of commands.", ConsoleLineKind.Hint);
+            }
+        }
+
+        /// <summary>
+        /// Runs the line that was just submitted and echoes it.
+        ///
+        /// The echo is printed before the command runs, so a command that fails
+        /// still shows what was typed right above the error - without it the player
+        /// sees a complaint and has to guess which line it belongs to.
+        /// </summary>
+        private void RunConsoleLine()
+        {
+            var line = overlay.Text;
+
+            overlay.Remember(line);
+
+            if (line == null || line.Trim().Length == 0)
+            {
+                return;
+            }
+
+            overlay.Print("> " + line, ConsoleLineKind.Echo);
+            commands.Execute(line, overlay);
         }
 
         /// <summary>
@@ -782,10 +906,13 @@ namespace DPTDOOM
             // Movement is read from key state rather than from events, so typing
             // "wasd" would walk the player around. Suppressing the whole input is
             // the only place that can be handled, since the polling happens below
-            // the interface.
-            if (userInput != null && userInput.Suppressed != chat.Active)
+            // the interface. The console needs the same treatment for the same
+            // reason.
+            var suppressed = chat.Active || overlay.Active;
+
+            if (userInput != null && userInput.Suppressed != suppressed)
             {
-                userInput.Suppressed = chat.Active;
+                userInput.Suppressed = suppressed;
             }
         }
 
@@ -833,6 +960,334 @@ namespace DPTDOOM
 
                 viewPitch = next;
             }
+        }
+
+        /// <summary>
+        /// Fills the console command table.
+        ///
+        /// The table lives here rather than in <see cref="ConsoleCommands"/> because
+        /// every command needs something from this object - the config, the video
+        /// backend, the session - and a command table that knows about the game is a
+        /// command table that cannot be tested without one.
+        ///
+        /// Nothing here changes the simulation. "map" is the only command that could,
+        /// and it refuses to run in a network game or while a demo is playing, for
+        /// the same reason cheats do: the other side would not know.
+        /// </summary>
+        private void RegisterConsoleCommands()
+        {
+            commands.Register(
+                "help", "help [command]",
+                "List every command, or explain one.",
+                call =>
+                {
+                    if (call.Args.Length > 0)
+                    {
+                        commands.ShowHelp(call.Args[0], overlay);
+                    }
+                    else
+                    {
+                        commands.ShowHelp(null, overlay);
+                    }
+                });
+
+            commands.Register(
+                "clear", "clear",
+                "Clear the scrollback.",
+                call => overlay.Clear());
+
+            commands.Register(
+                "echo", "echo <text>",
+                "Print the text back.",
+                call => call.Write(call.Raw));
+
+            commands.Register(
+                "version", "version",
+                "Show the build and the engine version.",
+                call => call.Write(ApplicationInfo.Title));
+
+            commands.Register(
+                "crosshair", "crosshair <0..3|off|cross|dot|both>",
+                "Aiming mark: 0 off, 1 cross, 2 dot, 3 cross with a dot.",
+                call =>
+                {
+                    if (call.Args.Length == 0)
+                    {
+                        call.Write("crosshair = " + config.hud_crosshair);
+                        return;
+                    }
+
+                    var value = ParseCrosshair(call.Args[0]);
+
+                    if (value < 0)
+                    {
+                        call.Error("Expected 0..3, off, cross, dot or both.");
+                        return;
+                    }
+
+                    config.hud_crosshair = value;
+                    call.Write("crosshair = " + config.hud_crosshair);
+                });
+
+            commands.Register(
+                "freelook", "freelook <on|off>",
+                "Vertical look: the mouse tilts the view. Not aiming.",
+                call =>
+                {
+                    if (call.Args.Length == 0)
+                    {
+                        call.Write("freelook = " + ConsoleCall.ToggleText(config.view_freelook));
+                        return;
+                    }
+
+                    bool value;
+                    if (!ConsoleCall.TryParseToggle(call.Args[0], out value))
+                    {
+                        call.Error("Expected on or off.");
+                        return;
+                    }
+
+                    config.view_freelook = value;
+                    call.Write("freelook = " + ConsoleCall.ToggleText(value));
+                });
+
+            commands.Register(
+                "sensitivity", "sensitivity <1..9>",
+                "Mouse turning speed.",
+                call => SetNumber(call, 1, userInput.MaxMouseSensitivity,
+                    "sensitivity",
+                    () => userInput.MouseSensitivity,
+                    value => userInput.MouseSensitivity = value));
+
+            commands.Register(
+                "volume", "volume <sfx|music> [0..max]",
+                "Show or set a volume.",
+                call =>
+                {
+                    if (call.Args.Length == 0)
+                    {
+                        call.Write("volume sfx = " + sound.Volume + " of " + sound.MaxVolume);
+                        call.Write("volume music = " + music.Volume + " of " + music.MaxVolume);
+                        return;
+                    }
+
+                    var which = call.Args[0].ToLowerInvariant();
+
+                    if (which != "sfx" && which != "music")
+                    {
+                        call.Error("Expected \"sfx\" or \"music\".");
+                        return;
+                    }
+
+                    if (call.Args.Length < 2)
+                    {
+                        call.Write(which + " = " +
+                            (which == "sfx" ? sound.Volume : music.Volume));
+                        return;
+                    }
+
+                    int value;
+                    if (!int.TryParse(call.Args[1], out value))
+                    {
+                        call.Error("Expected a number.");
+                        return;
+                    }
+
+                    if (which == "sfx")
+                    {
+                        sound.Volume = MathEx.Clamp(value, 0, sound.MaxVolume);
+                        call.Write("volume sfx = " + sound.Volume);
+                    }
+                    else
+                    {
+                        music.Volume = MathEx.Clamp(value, 0, music.MaxVolume);
+                        call.Write("volume music = " + music.Volume);
+                    }
+                });
+
+            commands.Register(
+                "gamma", "gamma <0..max>",
+                "Screen brightness.",
+                call => SetNumber(call, 0, video.MaxGammaCorrectionLevel,
+                    "gamma",
+                    () => video.GammaCorrectionLevel,
+                    value => video.GammaCorrectionLevel = value));
+
+            commands.Register(
+                "screensize", "screensize <0..max>",
+                "How much of the screen the view takes.",
+                call => SetNumber(call, 0, video.MaxWindowSize,
+                    "screensize",
+                    () => video.WindowSize,
+                    value => video.WindowSize = value));
+
+            commands.Register(
+                "alwaysrun", "alwaysrun <on|off>",
+                "Run by default, or walk by default.",
+                call => SetToggle(call, "alwaysrun",
+                    () => config.game_alwaysrun,
+                    value => config.game_alwaysrun = value));
+
+            commands.Register(
+                "messages", "messages <on|off>",
+                "Pickup messages in the message line.",
+                call => SetToggle(call, "messages",
+                    () => video.DisplayMessage,
+                    value => video.DisplayMessage = value));
+
+            commands.Register(
+                "profile", "profile <on|off>",
+                "Frame profile: prints a per-section report on exit.",
+                call =>
+                {
+                    if (video.Profile == null)
+                    {
+                        call.Error("This backend has no frame profile.");
+                        return;
+                    }
+
+                    SetToggle(call, "profile",
+                        () => video.Profile.Enabled,
+                        value => video.Profile.Enabled = value);
+                });
+
+            commands.Register(
+                "map", "map <1..32>",
+                "Start a level. Single player only.",
+                call =>
+                {
+                    // Refused rather than silently ignored: a player who typed it
+                    // deserves to know why nothing happened, and the reason is the
+                    // one that matters everywhere in this project - the other side
+                    // would not know the world changed.
+                    if (netDriver != null)
+                    {
+                        call.Error("Not in a network game: the other player would not know.");
+                        return;
+                    }
+
+                    if (currentState != DoomState.Game)
+                    {
+                        call.Error("Only during a game.");
+                        return;
+                    }
+
+                    if (call.Args.Length == 0)
+                    {
+                        call.Write("map = " + options.Map);
+                        return;
+                    }
+
+                    int value;
+                    if (!int.TryParse(call.Args[0], out value) || value < 1 || value > 32)
+                    {
+                        call.Error("Expected a map number from 1 to 32.");
+                        return;
+                    }
+
+                    NewGame(options.Skill, options.Episode, value);
+                    call.Write("map = " + value);
+                });
+
+            commands.Register(
+                "players", "players",
+                "Who is in the session.",
+                call =>
+                {
+                    if (netDriver == null)
+                    {
+                        call.Write("Single player.");
+                        return;
+                    }
+
+                    call.Write("Slots: " + netDriver.ExpectedPlayers +
+                               (netDriver.IsHost ? ", hosting" : ", connected"));
+                });
+
+            commands.Register(
+                "quit", "quit",
+                "Leave the game.",
+                call =>
+                {
+                    call.Write("Quitting.");
+                    Quit();
+                });
+
+            // Tab completion works off the same table, so a command is never
+            // registered in one place and forgotten in the other.
+            foreach (var name in commands.Names)
+            {
+                overlay.AddCompletion(name);
+            }
+        }
+
+        /// <summary>
+        /// Shared body of every numeric setting command: no argument shows the
+        /// current value, one argument sets it, anything else explains itself.
+        /// </summary>
+        private static void SetNumber(ConsoleCall call, int min, int max, string name,
+                                      Func<int> get, Action<int> set)
+        {
+            if (call.Args.Length == 0)
+            {
+                call.Write(name + " = " + get());
+                return;
+            }
+
+            int value;
+            if (!int.TryParse(call.Args[0], out value))
+            {
+                call.Error("Expected a number from " + min + " to " + max + ".");
+                return;
+            }
+
+            var clamped = MathEx.Clamp(value, min, max);
+            set(clamped);
+
+            call.Write(name + " = " + get());
+        }
+
+        private static void SetToggle(ConsoleCall call, string name, Func<bool> get, Action<bool> set)
+        {
+            if (call.Args.Length == 0)
+            {
+                call.Write(name + " = " + ConsoleCall.ToggleText(get()));
+                return;
+            }
+
+            bool value;
+            if (!ConsoleCall.TryParseToggle(call.Args[0], out value))
+            {
+                call.Error("Expected on or off.");
+                return;
+            }
+
+            set(value);
+            call.Write(name + " = " + ConsoleCall.ToggleText(get()));
+        }
+
+        private static int ParseCrosshair(string text)
+        {
+            switch (text.ToLowerInvariant())
+            {
+                case "0":
+                case "off":
+                    return 0;
+
+                case "1":
+                case "cross":
+                    return 1;
+
+                case "2":
+                case "dot":
+                    return 2;
+
+                case "3":
+                case "both":
+                    return 3;
+            }
+
+            return -1;
         }
 
         private bool CheckFunctionKey(DoomKey key)
@@ -964,7 +1419,11 @@ namespace DPTDOOM
             // game thread, so the message line is only ever touched in one place.
             PumpChat();
 
+            frameCount++;
+
             UpdateViewPitch();
+
+            UpdateStartScreens();
 
             if (!wiping)
             {

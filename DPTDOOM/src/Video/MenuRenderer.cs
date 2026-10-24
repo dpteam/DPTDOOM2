@@ -29,16 +29,26 @@ namespace DPTDOOM.Video
 
         private PatchCache cache;
 
+        private TextMenuRenderer textMenu;
+
         public MenuRenderer(Wad wad, DrawScreen screen)
         {
             this.wad = wad;
             this.screen = screen;
 
             cache = new PatchCache(wad);
+            textMenu = new TextMenuRenderer(wad, screen);
         }
 
         public void Render(DoomMenu menu)
         {
+            var text = menu.Current as TextMenu;
+            if (text != null)
+            {
+                textMenu.Render(text, menu.Tics);
+                return;
+            }
+
             var selectable = menu.Current as SelectableMenu;
             if (selectable != null)
             {
@@ -80,6 +90,23 @@ namespace DPTDOOM.Video
             {
                 DrawHelp(help);
             }
+        }
+
+        /// <summary>
+        /// A menu row drawn with the font, with the same skull cursor as the rows
+        /// around it so it does not look pasted in.
+        ///
+        /// The classic menus are made of WAD patches and there is no patch for
+        /// "Настройки", so this is how a text row joins them.
+        /// </summary>
+        private void DrawTextLabelMenuItem(TextLabelMenuItem item)
+        {
+            var scale = screen.Width / 320;
+
+            var x = scale * item.ItemX;
+            var y = scale * item.ItemY;
+
+            screen.DrawText(item.Label, x, y + 7 * scale, scale);
         }
 
         private void DrawSelectableMenu(SelectableMenu selectable)
@@ -166,6 +193,12 @@ namespace DPTDOOM.Video
             if (textBox != null)
             {
                 DrawTextBoxMenuItem(textBox, menu.Tics);
+            }
+
+            var textLabel = item as TextLabelMenuItem;
+            if (textLabel != null)
+            {
+                DrawTextLabelMenuItem(textLabel);
             }
         }
 

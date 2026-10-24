@@ -83,6 +83,8 @@ namespace DPTDOOM
         public readonly Arg<int> crosshair;
         public readonly Arg freelook;
         public readonly Arg<int> pitch;
+        public readonly Arg showsettings;
+        public readonly Arg showconsole;
         public readonly Arg showtriggers;
         public readonly Arg showblockmap;
         public readonly Arg bots;
@@ -157,6 +159,12 @@ namespace DPTDOOM
             crosshair = GetInt(args, "-crosshair");
             freelook = new Arg(args.Contains("-freelook"));
             pitch = GetInt(args, "-pitch");
+
+            // Open a screen straight away, for screenshots and for tests: without
+            // these the only way to photograph the menu or the console is to drive
+            // the keyboard from outside the process.
+            showsettings = new Arg(args.Contains("-showsettings"));
+            showconsole = new Arg(args.Contains("-showconsole"));
             showtriggers = new Arg(args.Contains("-showtriggers"));
             showblockmap = new Arg(args.Contains("-showblockmap"));
             bots = new Arg(args.Contains("-bots"));

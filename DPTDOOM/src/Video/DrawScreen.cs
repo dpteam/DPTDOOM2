@@ -109,6 +109,18 @@ namespace DPTDOOM.Video
 
         private void DrawColumn(Column[] source, int x, int y, int scale)
         {
+            DrawColumnTranslated(source, x, y, scale, null);
+        }
+
+        /// <summary>
+        /// One column of a patch, optionally remapped through a translation table.
+        ///
+        /// The scaling loop is duplicated from the original rather than sharing one
+        /// with a branch inside: this runs for every pixel of every glyph and the
+        /// console draws a lot of them.
+        /// </summary>
+        private void DrawColumnTranslated(Column[] source, int x, int y, int scale, byte[] translation)
+        {
             var step = Fixed.One / scale;
 
             foreach (var column in source)
@@ -138,11 +150,23 @@ namespace DPTDOOM.Video
                     drawLength -= exceed;
                 }
 
-                for (; i < drawLength; i++)
+                if (translation == null)
                 {
-                    data[p] = column.Data[sourceIndex + frac.ToIntFloor()];
-                    p++;
-                    frac += step;
+                    for (; i < drawLength; i++)
+                    {
+                        data[p] = column.Data[sourceIndex + frac.ToIntFloor()];
+                        p++;
+                        frac += step;
+                    }
+                }
+                else
+                {
+                    for (; i < drawLength; i++)
+                    {
+                        data[p] = translation[column.Data[sourceIndex + frac.ToIntFloor()]];
+                        p++;
+                        frac += step;
+                    }
                 }
             }
         }
@@ -214,6 +238,24 @@ namespace DPTDOOM.Video
 
         public void DrawText(string text, int x, int y, int scale)
         {
+            DrawTextTranslated(text, x, y, scale, null);
+        }
+
+        /// <summary>
+        /// Text in a tinted colour.
+        ///
+        /// <paramref name="translation"/> is a 256-entry table that maps every
+        /// palette index to another one; the console builds these from PLAYPAL so a
+        /// tint keeps the glyph's own shading instead of flattening it into a
+        /// silhouette. Null means "the colours the patch already has".
+        /// </summary>
+        public void DrawTextColored(string text, int x, int y, int scale, byte[] translation)
+        {
+            DrawTextTranslated(text, x, y, scale, translation);
+        }
+
+        private void DrawTextTranslated(string text, int x, int y, int scale, byte[] translation)
+        {
             var drawX = x;
             var drawY = y - 7 * scale;
             foreach (var ch in text)
@@ -241,9 +283,50 @@ namespace DPTDOOM.Video
                     continue;
                 }
 
-                DrawPatch(patch, drawX, drawY, scale);
+                DrawPatchTranslated(patch, drawX, drawY, scale, translation);
 
                 drawX += scale * patch.Width;
+            }
+        }
+
+        /// <summary>
+        /// A patch drawn through a colour translation table.
+        ///
+        /// The transparent parts of a patch are the columns it does not have, so
+        /// they stay transparent; only the drawn pixels are remapped.
+        /// </summary>
+        private void DrawPatchTranslated(Patch patch, int x, int y, int scale, byte[] translation)
+        {
+            if (translation == null)
+            {
+                DrawPatch(patch, x, y, scale);
+                return;
+            }
+
+            var drawX = x - scale * patch.LeftOffset;
+            var drawY = y - scale * patch.TopOffset;
+            var drawWidth = scale * patch.Width;
+
+            var i = 0;
+            var frac = Fixed.One / scale - Fixed.Epsilon;
+            var step = Fixed.One / scale;
+
+            if (drawX < 0)
+            {
+                var exceed = -drawX;
+                frac += exceed * step;
+                i += exceed;
+            }
+
+            if (drawX + drawWidth > width)
+            {
+                drawWidth -= drawX + drawWidth - width;
+            }
+
+            for (; i < drawWidth; i++)
+            {
+                DrawColumnTranslated(patch.Columns[frac.ToIntFloor()], drawX + i, drawY, scale, translation);
+                frac += step;
             }
         }
 

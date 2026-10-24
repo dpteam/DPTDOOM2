@@ -47,6 +47,7 @@ powershell -NoProfile -File tools\test-net-bots.ps1
 powershell -NoProfile -File tools\test-reconnect.ps1
 powershell -NoProfile -File tools\test-profile.ps1
 powershell -NoProfile -File tools\test-view.ps1
+powershell -NoProfile -File tools\test-console.ps1
 powershell -NoProfile -File tools\test-debug-overlays.ps1
 powershell -NoProfile -File tools\test-launcher.ps1
 ```
@@ -81,6 +82,11 @@ powershell -NoProfile -File tools\test-launcher.ps1
   вместе), а не поворот камеры; при отрисовке оружия `centerY` возвращается к
   базовому, иначе спрайт стоит на месте, но показывает не ту часть текстуры.
   Стрельба остаётся ванильным 2D-автоприцелом. Проверка — `tools/test-view.ps1`.
+- Консоль (`~`) и экран настроек — тоже **не** состояние игры. Пока консоль
+  открыта, она забирает **все** клавиши (`Handle` возвращает true на любую), иначе
+  набранный `iddqd` сработал бы читом, а цифра переключила размер вида. Команд,
+  меняющих симуляцию, в таблице нет; `map` отказывается работать в сети и в демо.
+  Проверка — `GameConsoleTest` и `tools/test-console.ps1`.
 - P/Invoke: при `CharSet.Unicode` + `ExactSpelling = true` указывать `EntryPoint`
   с суффиксом `W` обязательно (`SendMessageW`, `DefWindowProcW`, `LoadIconW`).
   Без него рантайм ищет функцию без суффикса и падает в рантайме, а не при
