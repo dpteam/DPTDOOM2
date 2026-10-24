@@ -13,6 +13,7 @@
 //
 
 using System;
+using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 using DPTDOOM.Shared;
@@ -307,6 +308,37 @@ namespace DPTDOOM.Net
                 throw new Exception(
                     "The host is running a different WAD set. " +
                     "Both players must use the same IWAD and PWADs.");
+            }
+
+            // How to get back in after a drop. The direct address is dialled
+            // again; a relay channel has to be asked for at the master, because
+            // the guest never holds the host's address in that mode. Without a
+            // dialer the session can only end on a disconnect, which is what it
+            // did before reconnection existed.
+            const int graceSeconds = 30;
+
+            if (directHost != null)
+            {
+                var reconnectHost = directHost;
+                var reconnectPort = directPort;
+
+                session.SetReconnectDialer(
+                    () =>
+                    {
+                        TcpClient unused = null;
+                        return NetSession.DialDirect(reconnectHost, reconnectPort, 8000, out unused);
+                    },
+                    graceSeconds);
+            }
+            else
+            {
+                var reconnectMaster = masterHost;
+                var reconnectMasterPort = masterPort;
+                var reconnectId = relaySession;
+
+                session.SetReconnectDialer(
+                    () => MasterClient.RelayJoin(reconnectMaster, reconnectMasterPort, reconnectId, 12000).Stream,
+                    graceSeconds);
             }
 
             status("CONNECTED", new[]

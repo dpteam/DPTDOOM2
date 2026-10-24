@@ -70,6 +70,12 @@ namespace DPTDOOM
 
         private INetDriver netDriver;
 
+        /// <summary>
+        /// True while the status bar is showing the reconnect countdown, so it
+        /// can be cleared once instead of being rewritten every frame.
+        /// </summary>
+        private bool reconnectMessageShown;
+
         private DemoRecorder recorder;
         private string recordPath;
 
@@ -1036,6 +1042,23 @@ namespace DPTDOOM
                                 break;
                             }
 
+                            // A dropped link is not the end of the game any
+                            // more: both sides stopped at the same tic, so the
+                            // only thing missing is a few commands, and the
+                            // session can re-send those once the peer is back.
+                            // Freezing with an explanation is far better than
+                            // losing the level to a two-second router hiccup.
+                            if (netDriver.Reconnecting)
+                            {
+                                ShowReconnectStatus();
+                                break;
+                            }
+
+                            if (reconnectMessageShown)
+                            {
+                                ClearReconnectStatus();
+                            }
+
                             // The world is built by the first game.Update, and the
                             // bots cannot produce a command before the world
                             // exists - so waiting for a bot tic here would wait
@@ -1259,6 +1282,60 @@ namespace DPTDOOM
         {
             StopRecording();
             quit = true;
+        }
+
+        /// <summary>
+        /// Puts the reconnect countdown on the status bar.
+        ///
+        /// Written every frame rather than once, because a player message expires
+        /// after a couple of seconds and the countdown has to survive a wait that
+        /// can last half a minute. The message is local display only - it is not
+        /// in a tic, a demo or the world hash - so this cannot desynchronise the
+        /// session it is reporting on.
+        /// </summary>
+        private void ShowReconnectStatus()
+        {
+            var world = game.World;
+            if (world == null)
+            {
+                return;
+            }
+
+            var status = netDriver.ReconnectStatus;
+            if (status == null)
+            {
+                return;
+            }
+
+            var player = world.ConsolePlayer;
+
+            // The message timer is refreshed here on purpose. A player message
+            // normally expires after four seconds, and this one has to survive a
+            // wait that can last thirty; refreshing it per frame is the simplest
+            // way to keep it on screen without a second overlay mechanism.
+            //
+            // This is display only: messages are not in the world hash, not in a
+            // demo and not in a save that travels over the wire, so touching them
+            // from the frame loop cannot desynchronise the session it describes.
+            player.Message = status;
+            player.MessageTime = 4 * GameConst.TicRate;
+
+            reconnectMessageShown = true;
+        }
+
+        private void ClearReconnectStatus()
+        {
+            reconnectMessageShown = false;
+
+            var world = game.World;
+            if (world == null)
+            {
+                return;
+            }
+
+            world.ConsolePlayer.Message = null;
+            world.ConsolePlayer.MessageTime = 0;
+            Console.WriteLine("Net: the session is back.");
         }
 
         /// <summary>

@@ -43,6 +43,17 @@ namespace DPTDOOM.Net
         bool Finished { get; }
         int LocalPlayer { get; }
 
+        /// <summary>
+        /// True while the session is holding the game for a dropped connection
+        /// instead of ending it.
+        /// </summary>
+        bool Reconnecting { get; }
+
+        /// <summary>
+        /// One ASCII line for the status bar while reconnecting, or null.
+        /// </summary>
+        string ReconnectStatus { get; }
+
         /// <summary>Total slots in the session, bots included.</summary>
         int ExpectedPlayers { get; }
 
@@ -159,7 +170,20 @@ namespace DPTDOOM.Net
 
         public bool TryAdvance(TicCmd[] cmds, IUserInput input, ref bool pause)
         {
+            // Expire a reconnect that never completed. The game loop is the only
+            // thing that runs often enough to do this without a watchdog thread.
+            session.PollReconnect();
+
             if (session.Faulted)
+            {
+                return false;
+            }
+
+            // While the link is being re-established the world stands still.
+            // Advancing here would move the local player through tics the peer
+            // has not agreed on, and the two sides would have to reconcile a
+            // difference instead of just replaying a few lost commands.
+            if (session.Reconnecting)
             {
                 return false;
             }
@@ -323,6 +347,8 @@ namespace DPTDOOM.Net
         public string FaultReason => session.FaultReason;
         public bool Finished => session.Finished;
         public int LocalPlayer => session.LocalPlayer;
+        public bool Reconnecting => session.Reconnecting;
+        public string ReconnectStatus => session.ReconnectStatus;
 
         /// <summary>
         /// Replaces the local input with a deterministic sequence derived from

@@ -44,6 +44,7 @@ powershell -NoProfile -File tools\test-relay.ps1
 powershell -NoProfile -File tools\test-net-latency.ps1
 powershell -NoProfile -File tools\test-bots.ps1
 powershell -NoProfile -File tools\test-net-bots.ps1
+powershell -NoProfile -File tools\test-reconnect.ps1
 powershell -NoProfile -File tools\test-debug-overlays.ps1
 powershell -NoProfile -File tools\test-launcher.ps1
 ```
@@ -135,6 +136,15 @@ powershell -NoProfile -File tools\test-launcher.ps1
   (см. `docs/NETWORK.md`, проверка `tools/test-net-latency.ps1`). Больше трафика
   это не требует: сессия занимает ~1.5 КБ/с, поэтому «уменьшать пакеты» не
   помогает и не нужно.
+- Reconnect (`NetSession.BeginReconnect`, `ReplayHistory`) держится на трёх
+  запретах, и каждый нарушается молча: слот при возврате **не** перевыдаётся,
+  задержка ввода **не** пересчитывается, мир назад **не** откатывается. Догоняет
+  отстающая сторона, получая повтор потерянных команд: команда — запись с
+  номером, приёмник игнорирует знакомые номера. Состояние мира не передаётся.
+  Проверка — `NetReconnectTest` (потиковый хеш применённых команд) и
+  `tools/test-reconnect.ps1` (реальный разрыв, хеши мира).
+- Молча умерший сокет ловится по тишине (`LinkSilenceMs`, 8 с): `Read` на нём
+  висит вечно, и без этого игру не спасает никакой reconnect.
 - Правила коопа (`TeammatesBlock`, `CoopDeathmatchWeapons`, `SharedKeys`) меняют
   симуляцию, поэтому живут в `SessionSettings` (флаги байта 127) и приезжают
   гостю в welcome. Нельзя читать их из командной строки на стороне гостя и

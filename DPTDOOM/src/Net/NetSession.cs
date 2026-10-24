@@ -125,6 +125,79 @@ namespace DPTDOOM.Net
     }
 
     /// <summary>
+    /// Re-opens the link to the host after it dropped.
+    ///
+    /// A delegate rather than an address because a session can be reached two
+    /// ways: directly, and through a relay channel that has to be requested from
+    /// the master again. The session has no business knowing which one it is.
+    /// Returns a stream on which the handshake has not been performed yet.
+    /// </summary>
+    public delegate Stream ReconnectDialer();
+
+    /// <summary>
+    /// A ring of the last commands this machine sent, in tic order.
+    ///
+    /// Needed only for reconnection: when the link drops, some of the commands
+    /// already handed to the socket never arrive, and the peer cannot advance
+    /// past the first one it is missing. Re-sending the window is enough, because
+    /// a command is a plain record with a tic number - the receiver ignores
+    /// duplicates and drops anything older than the tic it is on. Nothing has to
+    /// be acknowledged, so no extra traffic is spent keeping the session alive.
+    /// </summary>
+    public sealed class TicHistory
+    {
+        public struct Entry
+        {
+            public int Player;
+            public NetTic Tic;
+        }
+
+        private readonly Entry[] entries;
+        private readonly int capacity;
+        private int count;
+        private int next;
+
+        public TicHistory(int capacity)
+        {
+            this.capacity = capacity;
+            entries = new Entry[capacity];
+        }
+
+        // Written by the game thread once per tic, read by the network thread
+        // when a peer comes back. Both are cheap, and a torn read here would
+        // replay a half-written command, so the lock is not optional.
+        public void Add(int player, NetTic tic)
+        {
+            lock (this)
+            {
+                entries[next] = new Entry { Player = player, Tic = tic };
+                next = (next + 1) % capacity;
+
+                if (count < capacity)
+                {
+                    count++;
+                }
+            }
+        }
+
+        public Entry[] Snapshot()
+        {
+            lock (this)
+            {
+                var result = new Entry[count];
+
+                var start = (next - count + capacity) % capacity;
+                for (var i = 0; i < count; i++)
+                {
+                    result[i] = entries[(start + i) % capacity];
+                }
+
+                return result;
+            }
+        }
+    }
+
+    /// <summary>
     /// Transport for a small co-op session. One host accepts up to three
     /// guests; tics travel over TCP and the host relays them, so every client
     /// only needs a connection to the host.
@@ -141,6 +214,25 @@ namespace DPTDOOM.Net
         private readonly Dictionary<int, Dictionary<int, NetTic>> incoming = new Dictionary<int, Dictionary<int, NetTic>>();
         private readonly List<string> names = new List<string>();
         private readonly Queue<string> chatIncoming = new Queue<string>();
+
+        /// <summary>
+        /// The last commands this machine originated, kept so a resumed peer can
+        /// be given the tics that were lost with the connection.
+        ///
+        /// On the host this is the local player plus every bot; on a guest it is
+        /// only the local player. Both are exactly what this side is responsible
+        /// for sending, so replaying the whole buffer never sends anything the
+        /// peer could not have expected from us.
+        /// </summary>
+        private readonly TicHistory localHistory = new TicHistory(256);
+
+        /// <summary>
+        /// Host only: the commands guests sent that were forwarded to the other
+        /// guests. A resumed guest needs them as much as it needs the host's own,
+        /// and they are not in <see cref="localHistory"/> because this machine did
+        /// not originate them.
+        /// </summary>
+        private readonly TicHistory relayedHistory = new TicHistory(256);
 
         private TcpListener listener;
         private TcpClient hostConnection;
@@ -164,6 +256,28 @@ namespace DPTDOOM.Net
 
         private int delay;
         private readonly int delayOverride;
+
+        // Reconnection. See docs/NETWORK.md - the important property is that
+        // lockstep makes this possible at all: neither side needs a world
+        // snapshot, because both stalled at the same tic number and only the
+        // commands in between were lost.
+        private ReconnectDialer reconnectDialer;
+        private int reconnectGraceSeconds = 30;
+        private volatile bool reconnecting;
+        private int reconnectDeadline;
+        private int reconnectAttempts;
+        private readonly Dictionary<int, int> awaitingResume = new Dictionary<int, int>();
+
+        /// <summary>
+        /// The token issued to each slot, kept for the life of the session.
+        ///
+        /// It cannot live on the peer object alone: the peer is removed from the
+        /// list the moment its socket dies, and the token is exactly what the
+        /// returning guest has to be checked against after that.
+        /// </summary>
+        private readonly Dictionary<int, ulong> slotTokens = new Dictionary<int, ulong>();
+        private int resumeTokenSequence;
+        private ulong resumeToken;
 
         private Thread pingThread;
         private readonly object pingLock = new object();
@@ -332,10 +446,36 @@ namespace DPTDOOM.Net
             }
 
             string guestName;
+            var resume = false;
+            var resumePlayer = -1;
+            ulong resumeToken = 0;
+
             using (var payload = new MemoryStream(hello.Value.Payload))
             using (var payloadReader = new BinaryReader(payload))
             {
                 guestName = NetProtocol.ReadString(payloadReader);
+
+                // Trailing bytes are optional on purpose: a build that predates
+                // reconnection sends only the name, and must still be able to
+                // join. Reading them behind a "is there more" check is what keeps
+                // the wire format compatible in both directions.
+                if (payload.Position < payload.Length)
+                {
+                    var flags = payloadReader.ReadByte();
+
+                    if ((flags & 1) != 0 && payload.Length - payload.Position >= 9)
+                    {
+                        resume = true;
+                        resumeToken = payloadReader.ReadUInt64();
+                        resumePlayer = payloadReader.ReadByte();
+                    }
+                }
+            }
+
+            if (resume)
+            {
+                AcceptResume(stream, client, reader, guestName, resumePlayer, resumeToken);
+                return;
             }
 
             lock (sync)
@@ -356,6 +496,9 @@ namespace DPTDOOM.Net
                 peer.Stream = stream;
                 peer.PlayerIndex = playerIndex;
                 peer.Name = guestName;
+                peer.Token = NewResumeToken();
+
+                slotTokens[playerIndex] = peer.Token;
 
                 // Measure the round trip before the welcome goes out, and put
                 // the result in it. Both ends then start with the same input
@@ -378,7 +521,7 @@ namespace DPTDOOM.Net
 
                 delay = Math.Max(delay, measured);
 
-                SendWelcome(stream, playerIndex, guestName);
+                SendWelcome(stream, playerIndex, guestName, peer.Token);
 
                 peers.Add(peer);
 
@@ -399,6 +542,114 @@ namespace DPTDOOM.Net
                                   (rtt >= 0 ? "ping " + rtt + " ms" : "ping not measured") +
                                   ", input delay " + Delay + " tics = " + (Delay * 1000 / NetProtocol.TicsPerSecond) + " ms).");
             }
+        }
+
+        private ulong NewResumeToken()
+        {
+            // The token only has to tell this session's own guests apart, so a
+            // counter mixed with the clock is enough; there is nothing to guess
+            // and nothing to protect.
+            var mixed = (ulong)unchecked(++resumeTokenSequence * 2654435761u) ^ (ulong)Environment.TickCount;
+            var token = mixed | ((ulong)1 << 63);
+
+            // Zero is the "no token" value on the wire.
+            return token == 0 ? 1 : token;
+        }
+
+        /// <summary>
+        /// A guest coming back on a new socket, claiming a slot it already had.
+        ///
+        /// Three things must not happen here, and all three would break the
+        /// session rather than just fail it:
+        ///  - the slot must not be re-issued, or the player's old commands and
+        ///    their new ones would belong to different people;
+        ///  - the input delay must not be re-measured, because the delay shifts
+        ///    tic numbering and both sides already agreed on one;
+        ///  - the old peer must stop being able to fault the session when its
+        ///    dead read loop unwinds. It is removed from `peers` instead, and
+        ///    ReadLoop treats "no longer in the list" as "superseded, stay quiet".
+        /// </summary>
+        private void AcceptResume(Stream stream, TcpClient client, BinaryReader reader,
+                                  string guestName, int playerIndex, ulong token)
+        {
+            Peer old = null;
+            string slotName;
+
+            lock (sync)
+            {
+                // Checked against the session's own record of the slot, not
+                // against the live peer list: by the time a guest comes back the
+                // dead peer has already been dropped from that list.
+                ulong expected;
+                if (!slotTokens.TryGetValue(playerIndex, out expected) || expected != token)
+                {
+                    // Either the host has forgotten this player - the grace
+                    // period ran out - or the token belongs to another session.
+                    // Say so instead of silently starting a new game on a slot
+                    // the guest thinks it already owns.
+                    SendFrame(stream, NetProtocol.TypeReject, EncodeReason("unknown session"), null);
+                    CloseGuest(client, stream);
+                    return;
+                }
+
+                foreach (var candidate in peers)
+                {
+                    if (candidate.PlayerIndex == playerIndex)
+                    {
+                        old = candidate;
+                        break;
+                    }
+                }
+
+                slotName = playerIndex < names.Count ? names[playerIndex] : guestName;
+            }
+
+            var peer = new Peer();
+            peer.Client = client;
+            peer.Stream = stream;
+            peer.PlayerIndex = playerIndex;
+            peer.Name = slotName;
+            peer.Token = token;
+
+            lock (sync)
+            {
+                // The replacement goes in before the dead one comes out, so the
+                // game thread never sees a moment with no peer for this slot.
+                // Duplicate sends during the swap are harmless: a tic is keyed by
+                // number and the receiver ignores a number it already has.
+                SendWelcome(stream, playerIndex, peer.Name, token);
+                peers.Add(peer);
+
+                if (old != null)
+                {
+                    peers.Remove(old);
+                }
+
+                awaitingResume.Remove(playerIndex);
+
+                var thread = new Thread(() => ReadLoop(peer));
+                thread.IsBackground = true;
+                thread.Name = "DPTDOOM net peer " + playerIndex + " (resumed)";
+                peer.Thread = thread;
+                thread.Start();
+
+                if (awaitingResume.Count == 0)
+                {
+                    reconnecting = false;
+                }
+            }
+
+            Console.WriteLine("Net: '" + guestName + "' reconnected as player " + (playerIndex + 1) + ".");
+
+            if (old != null)
+            {
+                CloseGuest(old.Client, old.Stream);
+            }
+
+            // Everything this side originated while the peer was away: the local
+            // player's commands and, on the host, the bots'. The guest cannot
+            // have advanced past the first tic it lost.
+            ReplayHistory(peer);
         }
 
         /// <summary>
@@ -584,7 +835,7 @@ namespace DPTDOOM.Net
             }
         }
 
-        private void SendWelcome(Stream stream, int playerIndex, string guestName)
+        private void SendWelcome(Stream stream, int playerIndex, string guestName, ulong token)
         {
             using (var payload = new MemoryStream())
             using (var writer = new BinaryWriter(payload))
@@ -603,6 +854,10 @@ namespace DPTDOOM.Net
                     }
                 }
 
+                // The resume token goes last so a guest that predates it reads
+                // the payload it knows and ignores the tail.
+                writer.Write(token);
+
                 writer.Flush();
                 SendFrame(stream, NetProtocol.TypeWelcome, payload.ToArray(), null);
             }
@@ -614,18 +869,47 @@ namespace DPTDOOM.Net
 
         private void Connect(string address, int port, int timeoutMs)
         {
-            hostConnection = new TcpClient();
-            hostConnection.NoDelay = true;
+            var stream = DialDirect(address, port, timeoutMs, out hostConnection);
+            Handshake(stream);
+        }
 
-            var result = hostConnection.BeginConnect(address, port, null, null);
-            if (!result.AsyncWaitHandle.WaitOne(timeoutMs, false))
+        /// <summary>
+        /// Opens a plain TCP link to a host, with a bounded wait.
+        ///
+        /// Shared with reconnection, which is why it is static and why it hands
+        /// the client back: the first connection has to be closable from Dispose,
+        /// and both paths must time out the same way or a reconnect would hang
+        /// where the first join gave up.
+        /// </summary>
+        public static Stream DialDirect(string address, int port, int timeoutMs, out TcpClient client)
+        {
+            client = new TcpClient();
+            client.NoDelay = true;
+
+            try
             {
-                throw new Exception("Connection to " + address + ":" + port + " timed out.");
+                var result = client.BeginConnect(address, port, null, null);
+                if (!result.AsyncWaitHandle.WaitOne(timeoutMs, false))
+                {
+                    throw new Exception("Connection to " + address + ":" + port + " timed out.");
+                }
+
+                client.EndConnect(result);
+                return client.GetStream();
             }
+            catch
+            {
+                try
+                {
+                    client.Close();
+                }
+                catch
+                {
+                }
 
-            hostConnection.EndConnect(result);
-
-            Handshake(hostConnection.GetStream());
+                client = null;
+                throw;
+            }
         }
 
         /// <summary>
@@ -683,8 +967,22 @@ namespace DPTDOOM.Net
                     // Do not park a second waiting channel while the session is
                     // full: the master would hold a socket open for a guest that
                     // could never be admitted.
+                    //
+                    // A lost guest is the exception. Its slot is still taken -
+                    // that is the point of holding it - so "full" would keep the
+                    // host from ever opening the channel the guest needs to come
+                    // back through. Without this a relayed session could not
+                    // reconnect at all, while a direct one could.
                     while (!disposed && !faulted && PlayerCount >= expectedPlayers)
                     {
+                        lock (sync)
+                        {
+                            if (awaitingResume.Count > 0)
+                            {
+                                break;
+                            }
+                        }
+
                         Thread.Sleep(500);
                     }
                 }
@@ -703,22 +1001,47 @@ namespace DPTDOOM.Net
 
         private void Handshake(Stream stream)
         {
+            Handshake(stream, false);
+            AttachHostPeer(stream);
+        }
+
+        /// <summary>
+        /// The guest half of the handshake, used both for the first join and for
+        /// a reconnect.
+        ///
+        /// On a reconnect nothing about the session may be renegotiated: the slot,
+        /// the player count, the settings and above all the input delay are
+        /// already fixed, and a delay that changed here would shift tic numbering
+        /// on this side alone and desynchronise the world.
+        /// </summary>
+        private ulong Handshake(Stream stream, bool resume)
+        {
             var reader = new BinaryReader(stream);
 
             using (var payload = new MemoryStream())
             using (var writer = new BinaryWriter(payload))
             {
                 NetProtocol.WriteString(writer, localName);
+
+                if (resume)
+                {
+                    writer.Write((byte)1);
+                    writer.Write(resumeToken);
+                    writer.Write((byte)localPlayer);
+                }
+
                 writer.Flush();
                 SendFrame(stream, NetProtocol.TypeHello, payload.ToArray(), null);
             }
 
             var reply = awaitWelcome(reader, stream);
 
+            var token = 0UL;
+
             using (var payload = new MemoryStream(reply.Payload))
             using (var payloadReader = new BinaryReader(payload))
             {
-                localPlayer = payloadReader.ReadByte();
+                var player = payloadReader.ReadByte();
                 var playerCount = payloadReader.ReadByte();
 
                 // The session size comes from the host, not from what the guest
@@ -727,35 +1050,74 @@ namespace DPTDOOM.Net
                 // the first two: it waited for a tic that no one would ever send,
                 // or advanced without the others. The welcome is the only place
                 // that knows how many slots the session really has.
-                expectedPlayers = MathEx.Clamp(playerCount, 2, NetProtocol.MaxPlayers);
+                var hostPlayers = MathEx.Clamp(playerCount, 2, NetProtocol.MaxPlayers);
 
-                settings = SessionSettings.Deserialize(payloadReader);
+                var hostSettings = SessionSettings.Deserialize(payloadReader);
 
                 // The host measured the round trip and decided how far ahead to
                 // send commands. Both ends must use the same number or their tic
                 // numbering diverges.
-                delay = payloadReader.ReadByte();
+                var hostDelay = payloadReader.ReadByte();
 
                 var count = payloadReader.ReadByte();
-                lock (sync)
+                var receivedNames = new List<string>();
+                for (var i = 0; i < count; i++)
                 {
-                    names.Clear();
-                    for (var i = 0; i < count; i++)
+                    receivedNames.Add(NetProtocol.ReadString(payloadReader));
+                }
+
+                // Zero when the host predates reconnection.
+                if (payload.Position + 8 <= payload.Length)
+                {
+                    token = payloadReader.ReadUInt64();
+                }
+
+                if (!resume)
+                {
+                    localPlayer = player;
+                    expectedPlayers = hostPlayers;
+                    settings = hostSettings;
+                    delay = hostDelay;
+
+                    lock (sync)
                     {
-                        names.Add(NetProtocol.ReadString(payloadReader));
+                        names.Clear();
+                        names.AddRange(receivedNames);
+                        connectedPlayers = playerCount;
+                    }
+                }
+                else
+                {
+                    if (player != localPlayer || hostPlayers != expectedPlayers)
+                    {
+                        throw new Exception("The host no longer has this session.");
                     }
 
-                    connectedPlayers = playerCount;
+                    if (hostDelay != delay)
+                    {
+                        throw new Exception("The host changed the input delay.");
+                    }
                 }
             }
 
+            resumeToken = token;
+
+            return token;
+        }
+
+        private void AttachHostPeer(Stream stream)
+        {
             var peer = new Peer();
             peer.Client = hostConnection;
             peer.Stream = stream;
             peer.PlayerIndex = 0;
             peer.Name = "host";
+            peer.Token = resumeToken;
 
-            peers.Add(peer);
+            lock (sync)
+            {
+                peers.Add(peer);
+            }
 
             var thread = new Thread(() => ReadLoop(peer));
             thread.IsBackground = true;
@@ -807,6 +1169,31 @@ namespace DPTDOOM.Net
 
                 lock (sync)
                 {
+                    // Every peer is checked for silence, not only the one that is
+                    // probed. A socket can die without a FIN, and in a three-player
+                    // session the peer that goes quiet is often not peers[0].
+                    var silent = new List<Peer>();
+
+                    foreach (var candidate in peers)
+                    {
+                        var gap = unchecked(Environment.TickCount - candidate.LastFrameTicks);
+
+                        if (gap > LinkSilenceMs)
+                        {
+                            silent.Add(candidate);
+                        }
+                    }
+
+                    foreach (var dead in silent)
+                    {
+                        Console.WriteLine("Net: no traffic from '" + dead.Name + "' for " +
+                                          (LinkSilenceMs / 1000) + " s, treating the link as dropped.");
+
+                        // Closing the socket unblocks the read loop, which then does
+                        // exactly what it does for an ordinary drop.
+                        CloseGuest(dead.Client, dead.Stream);
+                    }
+
                     // Only one peer is probed: with a small co-op session they are
                     // all on the same link, and probing every one of them would
                     // multiply the traffic for a number nobody reads twice.
@@ -945,14 +1332,454 @@ namespace DPTDOOM.Net
                 // Falls through to the disconnect handling below.
             }
 
-            if (!disposed && !finished)
+            if (disposed || finished || faulted)
+            {
+                return;
+            }
+
+            // A peer that a resumed socket has replaced is not a lost peer: its
+            // read loop unwinds because the old socket was closed on purpose, and
+            // treating that as a disconnect would immediately undo the resume.
+            lock (sync)
+            {
+                if (!peers.Contains(peer))
+                {
+                    return;
+                }
+            }
+
+            if (isHost)
+            {
+                BeginPeerLoss(peer);
+            }
+            else
+            {
+                BeginReconnect(peer);
+            }
+        }
+
+        ////////////////////////////////////////////////////////////
+        // Reconnection
+        ////////////////////////////////////////////////////////////
+
+        /// <summary>
+        /// Clock arithmetic that survives the signed wrap of
+        /// <see cref="Environment.TickCount"/> every 24.8 days.
+        ///
+        /// Comparing the raw values would make a deadline appear to be decades in
+        /// the future - or long past - and the grace period would either never
+        /// expire or expire immediately.
+        /// </summary>
+        private static bool DeadlinePassed(int deadline)
+        {
+            return unchecked(Environment.TickCount - deadline) >= 0;
+        }
+
+        /// <summary>
+        /// How long a peer may stay completely silent before the link counts as
+        /// dropped rather than merely late.
+        /// </summary>
+        private const int LinkSilenceMs = 8000;
+
+        /// <summary>
+        /// Host side: a guest's socket died. Keep the slot and wait.
+        ///
+        /// The slot is deliberately not freed. Re-issuing it would hand the
+        /// newcomer the dropping player's commands and inventory, and the two
+        /// ends would already disagree about who player N is.
+        /// </summary>
+        private void BeginPeerLoss(Peer peer)
+        {
+            lock (sync)
+            {
+                // The socket can die and be replaced before this runs: the guest
+                // redials as soon as its own read fails, which may be before the
+                // host's read loop unwinds. A peer that has already been replaced
+                // must not start a wait that nobody is coming back from.
+                if (!peers.Contains(peer))
+                {
+                    return;
+                }
+
+                peers.Remove(peer);
+                awaitingResume[peer.PlayerIndex] = unchecked(Environment.TickCount + reconnectGraceSeconds * 1000);
+                reconnecting = true;
+            }
+
+            Console.WriteLine("Net: lost '" + peer.Name + "', holding the game for up to " +
+                              reconnectGraceSeconds + " s.");
+
+            CloseGuest(peer.Client, peer.Stream);
+        }
+
+        /// <summary>
+        /// Guest side: the link to the host died. Redial until the grace period
+        /// runs out.
+        /// </summary>
+        private void BeginReconnect(Peer peer)
+        {
+            // No dialer means this side cannot re-open the link (a host, or a
+            // test). No token means the host predates reconnection and would
+            // read the resume hello as a brand new join.
+            if (reconnectDialer == null || resumeToken == 0)
             {
                 Fault("connection to '" + peer.Name + "' was lost");
+                return;
+            }
+
+            lock (sync)
+            {
+                if (reconnecting || disposed || finished || !peers.Contains(peer))
+                {
+                    return;
+                }
+
+                reconnecting = true;
+                reconnectAttempts = 0;
+                reconnectDeadline = unchecked(Environment.TickCount + reconnectGraceSeconds * 1000);
+                peers.Remove(peer);
+            }
+
+            Console.WriteLine("Net: lost the host, reconnecting for up to " + reconnectGraceSeconds + " s.");
+
+            CloseGuest(peer.Client, peer.Stream);
+
+            var thread = new Thread(ReconnectLoop);
+            thread.IsBackground = true;
+            thread.Name = "DPTDOOM net reconnect";
+            thread.Start();
+        }
+
+        private void ReconnectLoop()
+        {
+            while (!disposed && !finished && !faulted)
+            {
+                if (DeadlinePassed(reconnectDeadline))
+                {
+                    break;
+                }
+
+                try
+                {
+                    var stream = reconnectDialer();
+
+                    lock (sync)
+                    {
+                        if (disposed || finished || !reconnecting)
+                        {
+                            // The session was torn down while the dial was in
+                            // flight; drop the socket we just opened rather than
+                            // leaving an unused peer attached to it.
+                            try
+                            {
+                                stream.Close();
+                            }
+                            catch
+                            {
+                            }
+
+                            return;
+                        }
+                    }
+
+                    Handshake(stream, true);
+
+                    var peer = new Peer();
+                    peer.Client = null;
+                    peer.Stream = stream;
+                    peer.PlayerIndex = 0;
+                    peer.Name = "host";
+                    peer.Token = resumeToken;
+
+                    lock (sync)
+                    {
+                        peers.Add(peer);
+                        reconnecting = false;
+                    }
+
+                    var thread = new Thread(() => ReadLoop(peer));
+                    thread.IsBackground = true;
+                    thread.Name = "DPTDOOM net host (resumed)";
+                    peer.Thread = thread;
+                    thread.Start();
+
+                    // Everything this side sent while the host was unreachable.
+                    // Whatever the host missed, it now has; whatever it already
+                    // had, it ignores, because a command is keyed by tic number.
+                    ReplayHistory(null);
+
+                    Console.WriteLine("Net: reconnected to the host after " + reconnectAttempts + " attempt(s).");
+                    return;
+                }
+                catch (Exception e)
+                {
+                    lock (sync)
+                    {
+                        reconnectAttempts++;
+                    }
+
+                    if (!disposed && !finished && !faulted)
+                    {
+                        Console.WriteLine("Net: reconnect attempt failed (" + e.Message + ").");
+                    }
+
+                    try
+                    {
+                        Thread.Sleep(1200);
+                    }
+                    catch
+                    {
+                        return;
+                    }
+                }
+            }
+
+            if (!disposed && !finished && !faulted)
+            {
+                Fault("connection to the host was lost");
+            }
+        }
+
+        /// <summary>
+        /// Re-sends the commands this machine originated, so a peer that was away
+        /// can be brought up to date.
+        ///
+        /// Only commands, never state. That is enough for lockstep: a tic is a
+        /// record with a number, the peer applies the ones it is missing in order
+        /// and ends up in exactly the same place - which is why reconnection is
+        /// possible here at all, and why it costs a few kilobytes rather than a
+        /// world snapshot.
+        /// </summary>
+        private void ReplayHistory(Peer target)
+        {
+            var snapshot = localHistory.Snapshot();
+
+            if (snapshot.Length == 0)
+            {
+                return;
+            }
+
+            Stream stream;
+
+            if (target != null)
+            {
+                stream = target.Stream;
+            }
+            else
+            {
+                lock (sync)
+                {
+                    if (peers.Count == 0)
+                    {
+                        return;
+                    }
+
+                    target = peers[0];
+                    stream = target.Stream;
+                }
+            }
+
+            foreach (var entry in snapshot)
+            {
+                var payload = EncodeTic(entry.Player, entry.Tic);
+                SendFrame(stream, NetProtocol.TypeTic, payload, target);
+            }
+
+            if (!isHost)
+            {
+                return;
+            }
+
+            // And the other guests' commands, which this machine forwarded but
+            // did not originate. Without them a resumed guest in a three-player
+            // session still lacks one player's tics for the lost window, and the
+            // session stalls again on the first tic it cannot complete.
+            foreach (var entry in relayedHistory.Snapshot())
+            {
+                var payload = EncodeTic(entry.Player, entry.Tic);
+                SendFrame(stream, NetProtocol.TypeTic, payload, target);
+            }
+        }
+
+        /// <summary>
+        /// Expires a reconnect that never completed.
+        ///
+        /// Called from the game loop rather than from a watchdog thread, because
+        /// the loop already runs 35 times a second and an extra thread would only
+        /// add something else to shut down in the right order.
+        /// </summary>
+        public void PollReconnect()
+        {
+            if (disposed || finished || faulted)
+            {
+                return;
+            }
+
+            if (isHost)
+            {
+                var expired = -1;
+
+                lock (sync)
+                {
+                    if (awaitingResume.Count == 0)
+                    {
+                        return;
+                    }
+
+                    foreach (var pair in awaitingResume)
+                    {
+                        if (DeadlinePassed(pair.Value))
+                        {
+                            expired = pair.Key;
+                            break;
+                        }
+                    }
+                }
+
+                if (expired >= 0)
+                {
+                    Fault("player " + (expired + 1) + " did not come back");
+                }
+
+                return;
+            }
+
+            lock (sync)
+            {
+                if (!reconnecting || !DeadlinePassed(reconnectDeadline))
+                {
+                    return;
+                }
+            }
+
+            Fault("connection to the host was lost");
+        }
+
+        /// <summary>
+        /// Lets the session re-open its own link. A session without a dialer -
+        /// an automated test, or a host - simply fails on a drop, as before.
+        /// </summary>
+        public void SetReconnectDialer(ReconnectDialer dialer, int graceSeconds)
+        {
+            reconnectDialer = dialer;
+
+            if (graceSeconds > 0)
+            {
+                reconnectGraceSeconds = graceSeconds;
+            }
+        }
+
+        /// <summary>
+        /// Closes the socket of one peer, as if the link had vanished.
+        ///
+        /// Exists for tests only: a TCP connection cannot be made to die on
+        /// demand from managed code, and everything worth checking about
+        /// reconnection - the redial, the token, the replay, the tic stream
+        /// staying intact - is only reachable if the link can be broken halfway
+        /// through a live game.
+        /// </summary>
+        internal void DropPeerForTest(int playerIndex)
+        {
+            Peer target = null;
+
+            lock (sync)
+            {
+                foreach (var peer in peers)
+                {
+                    if (peer.PlayerIndex == playerIndex)
+                    {
+                        target = peer;
+                        break;
+                    }
+                }
+            }
+
+            if (target != null)
+            {
+                CloseGuest(target.Client, target.Stream);
+            }
+        }
+
+        public bool Reconnecting => reconnecting;
+
+        public int ReconnectSecondsLeft
+        {
+            get
+            {
+                lock (sync)
+                {
+                    if (!reconnecting)
+                    {
+                        return 0;
+                    }
+
+                    var deadline = isHost && awaitingResume.Count > 0
+                        ? FirstDeadline()
+                        : reconnectDeadline;
+
+                    var left = unchecked(deadline - Environment.TickCount);
+                    return left <= 0 ? 0 : left / 1000;
+                }
+            }
+        }
+
+        private int FirstDeadline()
+        {
+            var best = 0;
+            var first = true;
+
+            foreach (var pair in awaitingResume)
+            {
+                if (first || unchecked(pair.Value - best) < 0)
+                {
+                    best = pair.Value;
+                    first = false;
+                }
+            }
+
+            return best;
+        }
+
+        /// <summary>
+        /// One ASCII line describing what the session is waiting for. The screen
+        /// draws with Doom's font, which has no Cyrillic, so this stays English
+        /// like the other in-game status text.
+        /// </summary>
+        public string ReconnectStatus
+        {
+            get
+            {
+                if (!reconnecting)
+                {
+                    return null;
+                }
+
+                var seconds = ReconnectSecondsLeft;
+
+                if (!isHost)
+                {
+                    return "RECONNECTING " + seconds;
+                }
+
+                var name = "PLAYER";
+
+                lock (sync)
+                {
+                    foreach (var pair in awaitingResume)
+                    {
+                        name = pair.Key < names.Count ? names[pair.Key] : "PLAYER " + (pair.Key + 1);
+                        break;
+                    }
+                }
+
+                return "WAITING FOR " + name.ToUpperInvariant() + "  " + seconds;
             }
         }
 
         private void HandleFrame(Peer peer, ushort type, byte[] payload)
         {
+            peer.LastFrameTicks = Environment.TickCount;
+
             switch (type)
             {
                 case NetProtocol.TypeTic:
@@ -1021,6 +1848,8 @@ namespace DPTDOOM.Net
             // The host relays guests' tics to the other guests.
             if (isHost)
             {
+                relayedHistory.Add(player, tic);
+
                 foreach (var other in peers)
                 {
                     if (!ReferenceEquals(other, peer) && other.Stream != null)
@@ -1045,6 +1874,50 @@ namespace DPTDOOM.Net
 
         public void SendTic(int player, NetTic tic)
         {
+            var payload = EncodeTic(player, tic);
+
+            // Recorded before the send, not after: the interesting moment is a
+            // socket that dies mid-write, and the command still has to be there
+            // when the peer comes back.
+            localHistory.Add(player, tic);
+
+            if (!isHost)
+            {
+                Peer host;
+
+                lock (sync)
+                {
+                    if (peers.Count == 0)
+                    {
+                        // Between the drop and the resume there is no socket to
+                        // write to; the history above is what will carry it.
+                        return;
+                    }
+
+                    host = peers[0];
+                }
+
+                SendFrame(host.Stream, NetProtocol.TypeTic, payload, host);
+                return;
+            }
+
+            StoreTic(player, tic);
+
+            List<Peer> targets;
+
+            lock (sync)
+            {
+                targets = new List<Peer>(peers);
+            }
+
+            foreach (var peer in targets)
+            {
+                SendFrame(peer.Stream, NetProtocol.TypeTic, payload, peer);
+            }
+        }
+
+        private static byte[] EncodeTic(int player, NetTic tic)
+        {
             var payload = new byte[10];
             NetProtocol.WriteUInt32(payload, 0, (uint)tic.Number);
             payload[4] = (byte)player;
@@ -1053,20 +1926,7 @@ namespace DPTDOOM.Net
             payload[7] = (byte)(tic.AngleTurn & 0xFF);
             payload[8] = (byte)((tic.AngleTurn >> 8) & 0xFF);
             payload[9] = tic.Buttons;
-
-            if (!isHost)
-            {
-                var peer = peers[0];
-                SendFrame(peer.Stream, NetProtocol.TypeTic, payload, peer);
-                return;
-            }
-
-            StoreTic(player, tic);
-
-            foreach (var peer in peers)
-            {
-                SendFrame(peer.Stream, NetProtocol.TypeTic, payload, peer);
-            }
+            return payload;
         }
 
         /// <summary>
@@ -1461,7 +2321,15 @@ namespace DPTDOOM.Net
             public int PlayerIndex;
             public string Name;
             public Thread Thread;
+            public ulong Token;
             public readonly object WriteLock = new object();
+
+            /// <summary>
+            /// When a frame last arrived. A TCP read blocks forever on a link
+            /// that died without a FIN - a Wi-Fi drop, a NAT mapping that expired -
+            /// so silence has to be noticed by something that is not blocked.
+            /// </summary>
+            public int LastFrameTicks = Environment.TickCount;
         }
 
         public bool IsHost => isHost;

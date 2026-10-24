@@ -123,6 +123,13 @@ jobs:
         shell: pwsh
         run: ./tools/test-net-bots.ps1
 
+      - name: Session survives a dropped link
+        # Kills the proxy the guest is talking through and starts it again. Without
+        # reconnection the session ends; with it, both ends freeze on the same tic,
+        # replay the lost commands and must still agree on the world hash.
+        shell: pwsh
+        run: ./tools/test-reconnect.ps1
+
       - name: Automap debug overlays actually draw
         # "-maponly" was in the command line and did nothing: it was applied only by
         # the window's own toggle, so a headless run ignored it and every screenshot
