@@ -48,6 +48,17 @@ namespace DPTDOOM
         /// </summary>
         private Scroller[] scrollers;
 
+        /// <summary>Boom wind/current pushers, built once per level.</summary>
+        private Pusher[] pushers;
+
+        private sealed class Pusher
+        {
+            public Sector Sector;
+            public bool IsCurrent;
+            public int Dx;
+            public int Dy;
+        }
+
         /// <summary>
         /// How far the line vector is shifted right to become a scroll speed.
         ///
@@ -131,7 +142,7 @@ namespace DPTDOOM
                     continue;
                 }
 
-                switch ((int)sector.Special)
+                switch (SectorSpecials.EffectOf(sector))
                 {
                     case 1:
                         // Flickering lights.
@@ -190,7 +201,139 @@ namespace DPTDOOM
             }
 
             BuildScrollers();
+            BuildPushers();
         }
+
+        /// <summary>
+        /// Collects the Boom pushers of this level.
+        ///
+        /// 224 is a wind and 225 a current: a linedef tagged to sectors makes those
+        /// sectors push whatever stands in them, in the direction of the line.
+        /// 226 (a point source that pushes things within a radius) is deliberately
+        /// absent - it needs the MT_PUSH and MT_PULL things, which Doom II does not
+        /// contain and this port has no sprites or states for. Adding the special
+        /// without the thing it depends on would look implemented and do nothing.
+        ///
+        /// Which sectors a pusher acts on is read from the sector itself, not from
+        /// the line: Boom sets the pusher flag (0x200) on the sector and the line
+        /// only supplies direction and speed. A map that forgot the flag gets no
+        /// wind, which is what PrBoom does too.
+        /// </summary>
+        internal void BuildPushers()
+        {
+            var list = new List<Pusher>();
+
+            foreach (var line in world.Map.Lines)
+            {
+                var special = (int)line.Special;
+
+                if (special != 224 && special != 225)
+                {
+                    continue;
+                }
+
+                var dx = line.Dx.ToIntFloor();
+                var dy = line.Dy.ToIntFloor();
+
+                if (dx == 0 && dy == 0)
+                {
+                    continue;
+                }
+
+                foreach (var sector in world.Map.Sectors)
+                {
+                    if (sector.Tag != line.Tag || !SectorSpecials.IsPusher(sector))
+                    {
+                        continue;
+                    }
+
+                    var pusher = new Pusher();
+                    pusher.Sector = sector;
+                    pusher.IsCurrent = special == 225;
+                    pusher.Dx = dx;
+                    pusher.Dy = dy;
+                    list.Add(pusher);
+                }
+            }
+
+            pushers = list.ToArray();
+        }
+
+        /// <summary>
+        /// Applies every pusher for one tic.
+        ///
+        /// The three-case rule is PrBoom's and is not an aesthetic choice: a wind
+        /// pushes harder on something standing up, a current only moves what is on
+        /// the ground, and neither moves anything that noclips or floats. Getting it
+        /// wrong makes a wind tunnel either useless or a launcher.
+        ///
+        /// Only players are affected, as in Boom without MBF extensions. Monsters
+        /// being blown around is an MBF feature, and this port does not claim it.
+        /// </summary>
+        private void UpdatePushers()
+        {
+            if (pushers == null)
+            {
+                return;
+            }
+
+            foreach (var pusher in pushers)
+            {
+                // The sector's flag can be cleared at runtime (a Boom line that
+                // changes the floor type), and then the pusher must stop too.
+                if (!SectorSpecials.IsPusher(pusher.Sector))
+                {
+                    continue;
+                }
+
+                var sector = pusher.Sector;
+
+                for (var thing = sector.ThingList; thing != null; thing = thing.SectorNext)
+                {
+                    if (thing.Player == null)
+                    {
+                        continue;
+                    }
+
+                    if ((thing.Flags & (MobjFlags.NoGravity | MobjFlags.NoClip)) != 0)
+                    {
+                        continue;
+                    }
+
+                    var airborne = thing.Z > sector.FloorHeight;
+
+                    // Wind: full force in the air, half on the ground. Current: no
+                    // force in the air, full on the ground.
+                    Fixed scale;
+
+                    if (pusher.IsCurrent)
+                    {
+                        if (airborne)
+                        {
+                            continue;
+                        }
+
+                        scale = Fixed.One;
+                    }
+                    else
+                    {
+                        scale = airborne ? Fixed.One : Fixed.One / 2;
+                    }
+
+                    // PUSH_FACTOR is 7 in PrBoom, so the momentum added per tic is
+                    // the speed divided by 128 - the force a map is authored
+                    // against, not a number to tune.
+                    var pushX = Fixed.FromInt(pusher.Dx) / PushFactor;
+                    var pushY = Fixed.FromInt(pusher.Dy) / PushFactor;
+
+                    thing.MomX += pushX * scale;
+                    thing.MomY += pushY * scale;
+                }
+            }
+        }
+
+        /// <summary>PrBoom's PUSH_FACTOR: momentum per tic is the speed over this.</summary>
+        private const int PushFactor = 128;
 
         /// <summary>
         /// Collects the Boom scrollers of this level.
@@ -580,6 +723,7 @@ namespace DPTDOOM
 
             // Animate line specials.
             UpdateScrollers();
+            UpdatePushers();
 
             // Do buttons.
             for (var i = 0; i < maxButtonCount; i++)

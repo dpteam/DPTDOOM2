@@ -376,7 +376,7 @@ namespace DPTDOOM
             var ti = world.ThingInteraction;
 
             // Has hitten ground.
-            switch ((int)sector.Special)
+            switch (SectorSpecials.EffectOf(sector))
             {
                 case 5:
                     // Hell slime damage.
