@@ -115,6 +115,12 @@ namespace DPTDOOM
         /// </summary>
         public GameConsole ConsoleOverlay => overlay;
 
+        /// <summary>
+        /// The chat input, exposed for tests that need to check what an open chat does to
+        /// the rest of the input. Internal: it is not part of what the game offers.
+        /// </summary>
+        internal Chat ChatInput => chat;
+
         /// <summary>The command table, for tests and for the Windows menu.</summary>
         public ConsoleCommands ConsoleCommands => commands;
 
@@ -1066,17 +1072,45 @@ namespace DPTDOOM
                 player.SendMessage("Say: " + chat.Text + "_");
                 player.MessageTime = 8 * GameConst.TicRate;
             }
+        }
 
+        /// <summary>
+        /// Stops the keyboard and the mouse from reaching the player while something
+        /// is asking for them.
+        ///
+        /// Separate from <see cref="PumpChat"/>, and that is the whole point: this used to
+        /// live inside it, after an early return for "no network driver", so in single
+        /// player the suppression was never applied at all. Opening the console in a
+        /// single-player game therefore left the mouse turning the view and the keys
+        /// walking the player - the console looked like it was taking the input and it was
+        /// not.
+        ///
+        /// Called every frame rather than every tic: the console can be opened and closed
+        /// between two tics, and the frame after closing it must not run one tic with the
+        /// keys still held down.
+        /// </summary>
+        private void UpdateInputSuppression()
+        {
             // Movement is read from key state rather than from events, so typing
             // "wasd" would walk the player around. Suppressing the whole input is
             // the only place that can be handled, since the polling happens below
-            // the interface. The console needs the same treatment for the same
-            // reason.
+            // the interface.
             var suppressed = chat.Active || overlay.Active;
 
-            if (userInput != null && userInput.Suppressed != suppressed)
+            if (userInput == null || userInput.Suppressed == suppressed)
             {
-                userInput.Suppressed = suppressed;
+                return;
+            }
+
+            userInput.Suppressed = suppressed;
+
+            // Motion collected while nothing was reading it is thrown away, not saved
+            // for later: the mouse moves while the console is open because the player is
+            // reading, and applying that movement on close snaps the view by however far
+            // the hand travelled.
+            if (suppressed)
+            {
+                userInput.Reset();
             }
         }
 
@@ -1101,6 +1135,15 @@ namespace DPTDOOM
 
             bool center;
             var delta = userInput.TakeViewPitch(out center);
+
+            // Drained and dropped while the game is paused. The tilt is not game state, so
+            // nothing about it belongs to a tic - but a view that turns while the game is
+            // stopped reads as "the game is not really paused", which is exactly what a
+            // player reported when they moved the mouse with the console open.
+            if (game != null && game.Paused)
+            {
+                return;
+            }
 
             if (center)
             {
@@ -1870,6 +1913,8 @@ namespace DPTDOOM
             // Chat arrives on the network thread and is displayed here, on the
             // game thread, so the message line is only ever touched in one place.
             PumpChat();
+
+            UpdateInputSuppression();
 
             frameCount++;
 

@@ -59,7 +59,16 @@ namespace DPTDOOM.Win32
                 // key state is polled below this method, and a held movement key
                 // would otherwise keep moving the player while nothing is visible
                 // on screen to explain why.
+                //
+                // The mouse delta is drained rather than left to pile up: the pointer
+                // still moves while the console is open, and whatever collected there
+                // would be applied in one tic the moment the console closes.
                 cmd.Clear();
+
+                int pendingX;
+                int pendingY;
+                window.ConsumeMouseDelta(out pendingX, out pendingY);
+
                 return;
             }
 

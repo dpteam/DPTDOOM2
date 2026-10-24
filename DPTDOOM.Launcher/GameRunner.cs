@@ -275,6 +275,13 @@ namespace DPTDOOM.Launcher
             startInfo.UseShellExecute = false;
             startInfo.CreateNoWindow = false;
 
+            // Told to the game, so it does not stop to ask for a key on the way out.
+            //
+            // The launcher waits for this process to end, so a game that pauses after its
+            // window closes keeps the launcher showing "running" until somebody closes the
+            // console by hand - and closing the console then looks like the game died.
+            startInfo.EnvironmentVariables["DPTDOOM_LAUNCHED"] = "1";
+
             if (!string.IsNullOrEmpty(logPath))
             {
                 startInfo.RedirectStandardOutput = true;

@@ -745,6 +745,17 @@ namespace DPTDOOM.Win32
             while (thread.IsAlive)
             {
                 video.Window.PumpMessages();
+
+                if (video.Window.Closed)
+                {
+                    // The player closed the window while the handshake was still running -
+                    // a slow connect, a firewall prompt, or the five-minute wait for a guest.
+                    // Without this the process stays alive with no window and a console,
+                    // which is what the launcher reads as "the game is still running", and
+                    // what a player reads as a hang.
+                    throw new OperationCanceledException("The window was closed during the network handshake.");
+                }
+
                 Thread.Sleep(50);
             }
 

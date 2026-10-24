@@ -96,6 +96,13 @@ namespace DPTDOOM
 
                 return 0;
             }
+            catch (OperationCanceledException)
+            {
+                // The player closed the window while the game was still connecting. That is
+                // a decision, not a failure: no error text, no key to press.
+                ConsoleUi.Closing("closed");
+                return 0;
+            }
             catch (Exception e)
             {
                 ConsoleUi.Closing("failed");
@@ -110,14 +117,45 @@ namespace DPTDOOM
 
         private static void WaitForKey()
         {
+            // The launcher starts the game and waits for the process to end. Holding the
+            // process here means the launcher keeps reporting "game running" long after the
+            // window is gone, and the only way out is to close the console by hand - which
+            // then looks to the launcher like the game died. So when the launcher started us,
+            // there is nobody to press a key for: exit.
+            if (Environment.GetEnvironmentVariable("DPTDOOM_LAUNCHED") == "1")
+            {
+                return;
+            }
+
             try
             {
-                Console.Write("Press any key to exit.");
-                Console.ReadKey();
+                // Bounded, because an unattended process is worse than a lost message: a
+                // game started by a script, by a desktop shortcut, or by a player who walked
+                // away must still end.
+                Console.Write("Press any key to exit, or wait " + PauseSeconds + " seconds. ");
+
+                var deadline = Environment.TickCount + PauseSeconds * 1000;
+
+                while (unchecked(Environment.TickCount - deadline) < 0)
+                {
+                    if (Console.KeyAvailable)
+                    {
+                        Console.ReadKey(true);
+                        return;
+                    }
+
+                    System.Threading.Thread.Sleep(50);
+                }
+
+                Console.WriteLine();
             }
             catch
             {
+                // No console, or the input is redirected: there is nobody to press a key.
             }
         }
+
+        /// <summary>How long a closing message stays readable before the process ends.</summary>
+        private const int PauseSeconds = 15;
     }
 }
