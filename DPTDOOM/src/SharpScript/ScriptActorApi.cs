@@ -47,6 +47,292 @@ namespace DPTDOOM.Scripting
             this.info = info;
         }
 
+        // ------------------------------------------------------------ states for a mod
+
+        /// <summary>
+        /// The states this actor's definition created, by the name the script gave them.
+        /// </summary>
+        private readonly Dictionary<string, int> customStates =
+            new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Frames whose "next" name is not resolved yet.
+        ///
+        /// A DECORATE chain names its successor before that successor exists - "See" points at
+        /// "See2" and "See2" points back - so the links can only be made once the whole
+        /// definition has run. This is what <see cref="Finish"/> is for.
+        /// </summary>
+        private readonly List<PendingLink> pendingLinks = new List<PendingLink>();
+
+        private sealed class PendingLink
+        {
+            public int Number;
+            public string NextName;
+        }
+
+        /// <summary>
+        /// Whether the definition created any state of its own.
+        ///
+        /// Used by the library to decide whether the actor's states need finishing at all:
+        /// resolving nothing is cheap, but calling it on every vanilla actor would look like
+        /// work being done when none is.
+        /// </summary>
+        public bool HasCustomStates
+        {
+            get { return customStates.Count > 0; }
+        }
+
+        /// <summary>
+        /// Defines one frame of a state chain.
+        ///
+        /// <paramref name="frame"/> is a single letter as DECORATE writes it: A to Z for the
+        /// normal rotation, then [ \ ] ^ _ ` for the mirrored set. A leading "+" makes the
+        /// frame full bright, which is how DECORATE spells what the engine stores as 0x8000.
+        ///
+        /// <paramref name="next"/> is a name given to another frame of this actor, or "" to
+        /// stop. It is resolved in <see cref="Finish"/>, so it may name a frame that does not
+        /// exist yet - which it always does, since a chain is a cycle.
+        /// </summary>
+        private void RegisterStates(ScriptHost host)
+        {
+            host.Register("State", 5, 6, call =>
+            {
+                var name = call.AsText(0);
+
+                if (string.IsNullOrEmpty(name))
+                {
+                    throw call.Fail("a state needs a name");
+                }
+
+                if (customStates.ContainsKey(name))
+                {
+                    // Two frames with one name means the chain is ambiguous, and the second
+                    // silently losing is the kind of thing a modder finds after a day.
+                    throw call.Fail("the state '" + name + "' is already defined for this actor");
+                }
+
+                Sprite sprite;
+
+                if (!TryParseSprite(call.AsText(1), out sprite))
+                {
+                    throw call.Fail("no such sprite '" + call.AsText(1) +
+                                    "'; sprites are the four-letter WAD names such as TROO");
+                }
+
+                int frame;
+
+                if (!TryParseFrame(call.AsText(2), out frame))
+                {
+                    throw call.Fail("frame '" + call.AsText(2) +
+                                    "' is not one letter from A to Z or [ to `");
+                }
+
+                var tics = call.AsInt(3);
+
+                if (tics < -1)
+                {
+                    throw call.Fail("tics cannot be less than -1, which means never");
+                }
+
+                Action<World, Mobj> action = null;
+                var actionName = call.AsText(4);
+
+                if (actionName.Length > 0 && !DoomInfo.TryGetAction(actionName, out action))
+                {
+                    // Named with the near misses listed, because "A_Jump" is a reasonable
+                    // thing to write and the answer "no such action" alone does not tell a
+                    // modder that this engine has no jumping.
+                    throw call.Fail("no such action '" + actionName +
+                                    "'; this engine has: " + string.Join(", ", ToArray(DoomInfo.ActionNameList())));
+                }
+
+                var nextName = call.Count > 5 ? call.AsText(5) : "";
+                var number = DoomInfo.AllocateState();
+
+                if (number < 0)
+                {
+                    throw call.Fail("no free state slots left; the reserve is " +
+                                    DoomInfo.CustomStateReserve + " states per run");
+                }
+
+                DoomInfo.DefineState(number, sprite, frame, tics, action, MobjState.Null);
+
+                customStates[name] = number;
+
+                var link = new PendingLink();
+                link.Number = number;
+                link.NextName = nextName;
+                pendingLinks.Add(link);
+
+                return ScriptValue.FromInt(number);
+            });
+        }
+
+        /// <summary>
+        /// Resolves every "next" name and reports the ones that lead nowhere.
+        ///
+        /// Called once, after the actor's definition has run. A frame whose successor is
+        /// missing keeps pointing at Null, which removes the mobj: the actor behaves as if it
+        /// died at that frame, which is visible at once and named in the report.
+        /// </summary>
+        public void Finish(IList<string> problems, string source)
+        {
+            foreach (var link in pendingLinks)
+            {
+                if (string.IsNullOrEmpty(link.NextName))
+                {
+                    continue;
+                }
+
+                int next;
+
+                if (customStates.TryGetValue(link.NextName, out next))
+                {
+                    DoomInfo.SetStateNext(link.Number, (MobjState)next);
+                    continue;
+                }
+
+                // A name that is not one of this actor's own may still be a vanilla state,
+                // which is how "Goto See" reaches the engine's own state from a mod's chain.
+                MobjState engineState;
+
+                if (TryParseState(link.NextName, out engineState))
+                {
+                    DoomInfo.SetStateNext(link.Number, engineState);
+                    continue;
+                }
+
+                problems.Add(source + ": the state '" + NameOf(link.Number) +
+                             "' continues to '" + link.NextName +
+                             "', which is neither a state of this actor nor an engine state; " +
+                             "the actor stops there");
+            }
+
+            pendingLinks.Clear();
+        }
+
+        private string NameOf(int number)
+        {
+            foreach (var pair in customStates)
+            {
+                if (pair.Value == number)
+                {
+                    return pair.Key;
+                }
+            }
+
+            return number.ToString();
+        }
+
+        private static string[] ToArray(IList<string> list)
+        {
+            var array = new string[list.Count];
+
+            for (var i = 0; i < array.Length; i++)
+            {
+                array[i] = list[i];
+            }
+
+            return array;
+        }
+
+        /// <summary>
+        /// A sprite by its WAD name, which is what a mod knows.
+        ///
+        /// The engine's enum is not the same list: the shotgun guy's sprite is <c>SHTG</c> in
+        /// this enumeration and <c>POSS</c> in the WAD and in DECORATE, because the enum is
+        /// named after the first frame that uses it. So the name is looked up in the WAD's own
+        /// table, where index and enum value agree.
+        /// </summary>
+        public static bool TryParseSprite(string name, out Sprite sprite)
+        {
+            sprite = Sprite.TROO;
+
+            if (string.IsNullOrEmpty(name) || name.Length != 4)
+            {
+                return false;
+            }
+
+            var names = DoomInfo.SpriteNames;
+
+            for (var i = 0; i < names.Length; i++)
+            {
+                if (!string.Equals(names[i].ToString(), name, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (i >= Enum.GetValues(typeof(Sprite)).Length)
+                {
+                    return false;
+                }
+
+                sprite = (Sprite)i;
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// One letter to a frame index, plus the full-bright bit.
+        ///
+        /// DECORATE's frame letters run A-Z and then [ \ ] ^ _ ` for the mirrored rotations,
+        /// and the engine stores the same thing as 0..31 with 0x8000 for full bright.
+        /// </summary>
+        public static bool TryParseFrame(string text, out int frame)
+        {
+            frame = 0;
+
+            if (string.IsNullOrEmpty(text))
+            {
+                return false;
+            }
+
+            var index = 0;
+            var fullBright = false;
+
+            if (text[0] == '+')
+            {
+                fullBright = true;
+                index = 1;
+
+                if (text.Length == 1)
+                {
+                    return false;
+                }
+            }
+
+            if (text.Length != index + 1)
+            {
+                return false;
+            }
+
+            var c = text[index];
+
+            int value;
+
+            if (c >= 'A' && c <= 'Z')
+            {
+                value = c - 'A';
+            }
+            else if (c >= 'a' && c <= 'z')
+            {
+                value = c - 'a';
+            }
+            else if (c >= '[' && c <= '`')
+            {
+                value = 26 + (c - '[');
+            }
+            else
+            {
+                return false;
+            }
+
+            frame = fullBright ? value | 0x8000 : value;
+            return true;
+        }
+
         public void Register(ScriptHost host)
         {
             // Numbers, each read or written through one function.
@@ -122,6 +408,9 @@ namespace DPTDOOM.Scripting
             // text rather than a surprise at the far end of an expression.
             host.Register("ToInt", 1, call => ScriptValue.FromInt(call.AsInt(0)));
             host.Register("ToFixed", 1, call => ScriptValue.FromFixed(call.AsFixed(0)));
+
+            // States of the actor's own, for a mod that brings new frames.
+            RegisterStates(host);
         }
 
         private static void RegisterNumber(ScriptHost host, string name, Func<int> get, Action<int> set)
@@ -152,8 +441,8 @@ namespace DPTDOOM.Scripting
             });
         }
 
-        private static void RegisterState(ScriptHost host, string name,
-                                          Func<MobjState> get, Action<MobjState> set)
+        private void RegisterState(ScriptHost host, string name,
+                                   Func<MobjState> get, Action<MobjState> set)
         {
             host.Register(name, 0, 1, call =>
             {
@@ -163,6 +452,18 @@ namespace DPTDOOM.Scripting
                 }
 
                 var stateName = call.AsText(0);
+
+                // A state this actor defined itself comes first: "SeeState("See")" after the
+                // definition of See has to mean the new chain, and that is the whole point of
+                // letting a mod describe states.
+                int custom;
+
+                if (customStates.TryGetValue(stateName, out custom))
+                {
+                    set((MobjState)custom);
+                    return ScriptValue.Void;
+                }
+
                 MobjState state;
 
                 if (!TryParseState(stateName, out state))
@@ -197,6 +498,17 @@ namespace DPTDOOM.Scripting
                 set(sound);
                 return ScriptValue.Void;
             });
+        }
+
+        /// <summary>
+        /// A state name from the engine's own enumeration, as a public lookup.
+        ///
+        /// Exposed so the DECORATE converter can resolve "Goto See" to vanilla: it works in
+        /// names, and the engine's state is the only place a name like See has a meaning.
+        /// </summary>
+        public static bool TryParseEngineState(string name, out MobjState state)
+        {
+            return TryParseState(name, out state);
         }
 
         private static bool TryParseState(string name, out MobjState state)

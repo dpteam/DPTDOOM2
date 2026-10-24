@@ -119,6 +119,22 @@ namespace DPTDOOMTest.UnitTests
         }
 
         [TestMethod]
+        public void SpawnIdGivesTheDoomedNumAsAProperty()
+        {
+            // Both spellings appear in the wild: the number after the actor name, and the
+            // spawnid property. ACE - whose DECORATE subset is the target here - documents
+            // spawnid as the way to give an actor a map number.
+            var problems = new List<string>();
+            var actors = DecorateConverter.Parse("ACTOR X { spawnid 3005 Health 10 }", problems);
+
+            Assert.AreEqual(3005, actors[0].DoomEdNum);
+
+            // And it works in hex, because doomednums usually are.
+            actors = DecorateConverter.Parse("ACTOR Y { spawnid 0x0BBD }", problems);
+            Assert.AreEqual(3005, actors[0].DoomEdNum);
+        }
+
+        [TestMethod]
         public void ReplacesAndParentAreReadInEitherOrder()
         {
             // DECORATE allows "ACTOR Name : Parent replaces Other" and the reverse, and real
@@ -140,7 +156,7 @@ namespace DPTDOOMTest.UnitTests
         }
 
         [TestMethod]
-        public void AStatesSectionIsNoticedAndNotRead()
+        public void AStatesSectionIsRead()
         {
             var problems = new List<string>();
             var actors = DecorateConverter.Parse(
@@ -161,6 +177,40 @@ namespace DPTDOOMTest.UnitTests
             Assert.AreEqual(1, actors.Count);
             Assert.IsTrue(actors[0].HasStates);
             Assert.AreEqual(40, actors[0].Numbers[0].Value, "the properties before States survive");
+
+            Assert.AreEqual(2, actors[0].Chains.Count);
+
+            var spawn = actors[0].Chains[0];
+            Assert.AreEqual("Spawn", spawn.Label);
+            Assert.AreEqual(1, spawn.Frames.Count);
+            Assert.AreEqual("TROO", spawn.Frames[0].Sprite);
+            Assert.AreEqual("A", spawn.Frames[0].Letter);
+            Assert.AreEqual(10, spawn.Frames[0].Tics);
+            Assert.AreEqual("A_Look", spawn.Frames[0].Action);
+            Assert.AreEqual("Loop", spawn.Next);
+
+            // A run of letters is a run of frames, which is the part of DECORATE most often
+            // misread: "AABBCCDD" is eight frames, not one.
+            var see = actors[0].Chains[1];
+            Assert.AreEqual(8, see.Frames.Count, "AABBCCDD is eight frames");
+            Assert.AreEqual("A", see.Frames[0].Letter);
+            Assert.AreEqual("D", see.Frames[7].Letter);
+            Assert.AreEqual(4, see.Frames[7].Tics, "and all of them share the tics that follow");
+            Assert.AreEqual("A_Chase", see.Frames[7].Action);
+        }
+
+        [TestMethod]
+        public void AFullBrightFrameIsMarked()
+        {
+            var problems = new List<string>();
+            var actors = DecorateConverter.Parse(
+                "ACTOR X 3001 { States { Missile: TROO A^ 2 Bright A_Fire Loop } }", problems);
+
+            var frame = actors[0].Chains[0].Frames[0];
+
+            // Both spellings mean the same thing: the caret after the letters, and the word
+            // Bright after the tics.
+            StringAssert.Contains(frame.Letter, "+", "the full-bright bit is carried to the script");
         }
 
         [TestMethod]
@@ -219,6 +269,8 @@ namespace DPTDOOMTest.UnitTests
             {
                 var table = DoomInfo.MobjInfos;
                 var original = Find(table, 3001).SpawnHealth;
+                var originalSpeed = Find(table, 3001).Speed;
+                var originalFlags = Find(table, 3001).Flags;
 
                 var problems = new List<string>();
 
@@ -246,8 +298,72 @@ namespace DPTDOOMTest.UnitTests
                 // Put it back: the actor table is a static, and a test that leaves the imp
                 // altered would quietly change every test after it.
                 info.SpawnHealth = original;
-                info.Speed = 8;
-                info.Flags &= ~MobjFlags.NoGravity;
+                info.Speed = originalSpeed;
+                info.Flags = originalFlags;
+            }
+        }
+
+        [TestMethod]
+        public void AStatesSectionReachesTheActorThroughTheScript()
+        {
+            // The whole point of the converter, end to end: a DECORATE States section must
+            // become script text that the library accepts and the state table performs.
+            using (var content = GameContent.CreateDummy(WadPath.Doom2))
+            {
+                var table = DoomInfo.MobjInfos;
+                var imp = Find(table, 3001);
+                var originalSee = imp.SeeState;
+
+                // The generated script sets Health as well as the states, and every one of
+                // these fields is global static state shared with every later test in this
+                // process. Leaving the imp at 400 health changed the world hash of an
+                // unrelated demo test and looked, from the failure, like a simulation
+                // regression - which is the worst kind of test bug: it accuses the code.
+                var originalHealth = imp.SpawnHealth;
+
+                var problems = new List<string>();
+
+                var script = DecorateConverter.Convert(
+                    "ACTOR TestImp 3001\n" +
+                    "{\n" +
+                    "  Health 400\n" +
+                    "  States\n" +
+                    "  {\n" +
+                    "  See:\n" +
+                    "    TROO A 3 A_Look\n" +
+                    "    TROO B 3 A_Chase\n" +
+                    "    Loop\n" +
+                    "  }\n" +
+                    "}", table, problems);
+
+                Assert.AreEqual(0, problems.Count, string.Join("; ", problems.ToArray()));
+
+                StringAssert.Contains(script, "SeeState(\"See#1\");",
+                    "the label the engine knows is bound to the actor");
+
+                var library = new ScriptLibrary();
+                library.Add(script, "generated", table);
+                library.ApplyTo(table);
+
+                Assert.AreEqual(0, library.Problems.Count,
+                    library.Problems.Count == 0 ? "" : library.Problems[0]);
+
+                var head = DoomInfo.States[(int)imp.SeeState];
+
+                Assert.AreEqual(Sprite.TROO, head.Sprite);
+                Assert.AreEqual(3, head.Tics);
+                Assert.IsNotNull(head.MobjAction, "A_Look became a real action");
+
+                var second = DoomInfo.States[(int)head.Next];
+                Assert.AreEqual(1, second.Frame, "the B frame");
+
+                Assert.AreEqual((int)imp.SeeState, (int)second.Next, "Loop goes back to the head");
+
+                imp.SeeState = originalSee;
+                imp.SpawnHealth = originalHealth;
+
+                Assert.AreEqual(originalSee, imp.SeeState, "the actor is put back exactly");
+                Assert.AreEqual(originalHealth, imp.SpawnHealth, "health too");
             }
         }
 
@@ -262,7 +378,7 @@ namespace DPTDOOMTest.UnitTests
                     "ACTOR TestImp 3001\n" +
                     "{\n" +
                     "  Health 100\n" +
-                    "  States { Spawn: TROO A 10 A_Look Loop }\n" +
+                    "  States { }\n" +
                     "}", DoomInfo.MobjInfos, problems);
 
                 var text = string.Join("; ", problems.ToArray());

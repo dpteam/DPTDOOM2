@@ -102,7 +102,7 @@ ACTOR TestImp 3001
 }
 "@ | Set-Content -Path $numbers -Encoding ASCII
 
-    # A block that also asks for states, which this engine cannot take yet.
+    # A block that also asks for states.
     $withStates = Join-Path $work "states.dec"
     @"
 ACTOR TestImp 3001
@@ -111,7 +111,10 @@ ACTOR TestImp 3001
   States
   {
   Spawn:
-    TROO AB 10 A_Look
+    TROO A -1 A_Look
+    Loop
+  See:
+    TROO AB 2 A_Look
     Loop
   }
 }
@@ -156,18 +159,37 @@ ACTOR BrandNew 13579
     $withStatesLog = Run-Game "states" @('-decorate', $withStates)
 
     Assert-True ($withStatesLog -like "*map MAP01: OK*") "the level still loads"
-    Assert-True ($withStatesLog -like "*decorate problem*") "the part that did not convert is reported"
-    Assert-True ($withStatesLog -like "*States section is not converted*") "named as the States section"
-    Assert-True ($withStatesLog -like "*states.dec*" -or $withStatesLog -like "*TestImp*") `
-        "with the actor it belongs to"
-    Assert-True ($withStatesLog -like "*keeps the engine's own states*") `
-        "and what happened instead"
+    Assert-True ($withStatesLog -like "*scripts: OK*") "the converted script loaded"
+    Assert-True ($withStatesLog -notlike "*decorate problem*") `
+        "a States section this engine can take is converted with nothing to report"
 
-    # The numbers in the same file must still have applied: the report is about the states,
-    # not about the whole block. Compared against the run with no DECORATE at all, because
-    # this file sets fewer properties than numbers.dec and so is legitimately a third world.
+    # The frames must reach the world, not merely the table: the imp's own animation is
+    # replaced, so a run without any input diverges from the same run without the file.
     Assert-True ((State-Of $withStatesLog) -ne $plainState) `
-        "the numbers around the States section still applied"
+        "the new states changed the world ($plainState vs $(State-Of $withStatesLog))"
+    Assert-True ((State-Of $withStatesLog) -ne $numbersState) `
+        "and changed it differently than the numbers alone"
+
+    Write-Host "With a States section this engine cannot take"
+    $badStates = Join-Path $work "badstates.dec"
+    @"
+ACTOR TestImp 3001
+{
+  Health 400
+  States
+  {
+  See:
+    TROO A 3 A_Jump
+    Loop
+  }
+}
+"@ | Set-Content -Path $badStates -Encoding ASCII
+
+    $badLog = Run-Game "badstates" @('-decorate', $badStates)
+
+    Assert-True ($badLog -like "*map MAP01: OK*") "the level still loads"
+    Assert-True ($badLog -like "*A_Jump*") "the action this engine lacks is named"
+    Assert-True ($badLog -like "*A_Look*") "and the ones it has are listed"
 
     Write-Host "With a new actor"
     $newLog = Run-Game "new" @('-decorate', $newActor)

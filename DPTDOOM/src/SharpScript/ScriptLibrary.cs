@@ -174,11 +174,19 @@ namespace DPTDOOM.Scripting
                     }
 
                     var host = new ScriptHost();
-                    new ScriptActorApi(info).Register(host);
+                    var api = new ScriptActorApi(info);
+                    api.Register(host);
 
                     try
                     {
                         new ScriptInterpreter(entry.Unit, host).Call(function.Name);
+
+                        // The links between a mod's own frames can only be made now: a chain
+                        // names its successor before that successor exists.
+                        if (api.HasCustomStates)
+                        {
+                            api.Finish(problems, entry.Source);
+                        }
                     }
                     catch (ScriptException e)
                     {

@@ -24,7 +24,15 @@ namespace DPTDOOM
         private static PlayerActions pa = new PlayerActions();
         private static MobjActions ma = new MobjActions();
 
-        public static readonly MobjStateDef[] States = new MobjStateDef[]
+        /// <summary>
+        /// The vanilla state table, in the engine's own numbering.
+        ///
+        /// Private because <see cref="States"/> is what the rest of the engine reads: index
+        /// <c>i</c> of this array is state number <c>i</c>, and that numbering is part of the
+        /// save format and of the world hashes. Nothing may renumber it, so custom states are
+        /// appended to a copy rather than inserted here.
+        /// </summary>
+        private static readonly MobjStateDef[] VanillaStates = new MobjStateDef[]
         {
             new MobjStateDef(0, Sprite.TROO, 0, -1, null, null, MobjState.Null, 0, 0), // State.Null
             new MobjStateDef(1, Sprite.SHTG, 4, 0, pa.Light0, null, MobjState.Null, 0, 0), // State.Lightdone

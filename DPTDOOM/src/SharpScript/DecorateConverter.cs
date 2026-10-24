@@ -50,6 +50,36 @@ namespace DPTDOOM.Scripting
 
         /// <summary>Whether the block carried a States section.</summary>
         public bool HasStates;
+
+        /// <summary>
+        /// One label of the States section: "See", "Spawn", and so on.
+        ///
+        /// Kept in the order written, because the first frame of a label is what a Goto and a
+        /// Loop refer to, and because a report naming a frame is easier to follow in order.
+        /// </summary>
+        public readonly List<StateChain> Chains = new List<StateChain>();
+    }
+
+    /// <summary>One labelled run of frames.</summary>
+    public sealed class StateChain
+    {
+        public string Label;
+        public int Line;
+
+        public readonly List<StateFrame> Frames = new List<StateFrame>();
+
+        /// <summary>What follows the last frame: Loop, Stop, Wait, or Goto a name.</summary>
+        public string Next = "";
+    }
+
+    /// <summary>One frame of a chain, as DECORATE writes it.</summary>
+    public sealed class StateFrame
+    {
+        public string Sprite;
+        public string Letter;
+        public int Tics;
+        public string Action;
+        public int Line;
     }
 
     /// <summary>
@@ -171,20 +201,20 @@ namespace DPTDOOM.Scripting
                     continue;
                 }
 
-                if (actor.HasStates)
-                {
-                    // Said once per actor, in the terms that matter: the numbers came
-                    // across, the behaviour did not.
-                    problems.Add(actor.Name + " line " + actor.Line +
-                                 ": its States section is not converted, so the actor keeps the " +
-                                 "engine's own states");
-                }
-
                 foreach (var property in actor.Unsupported)
                 {
                     problems.Add(actor.Name + " line " + actor.Line + ": '" + property.Key +
                                  " " + property.Value + "' has no counterpart in this engine, so it " +
                                  "is left as it was");
+                }
+
+                if (actor.HasStates && actor.Chains.Count == 0)
+                {
+                    // A States section was written and nothing came out of it - every label was
+                    // empty or unreadable, and the per-chain reports above say why.
+                    problems.Add(actor.Name + " line " + actor.Line +
+                                 ": the States section produced no frames, so the actor keeps the " +
+                                 "engine's own states");
                 }
 
                 if (actor.Numbers.Count == 0 && actor.Flags.Count == 0)
@@ -207,6 +237,8 @@ namespace DPTDOOM.Scripting
                     script.Append("    Flag(\"").Append(pair.Key).Append("\", ")
                           .Append(pair.Value ? "true" : "false").Append(");\n");
                 }
+
+                EmitStates(script, actor, problems);
 
                 script.Append("}\n");
             }
@@ -291,6 +323,154 @@ namespace DPTDOOM.Scripting
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// Writes one State(...) call per frame, then binds the labels the engine knows to the
+        /// actor's own state slots.
+        ///
+        /// Frame names are qualified with the label and a number - "See#1", "See#2" - because
+        /// the names are scoped to the actor and a chain that loops needs to refer to its own
+        /// head. The separator is '#' so that a label really called "See1" cannot collide
+        /// with the second frame of "See".
+        /// </summary>
+        private static void EmitStates(StringBuilder script, DecorateActor actor,
+                                       IList<string> problems)
+        {
+            foreach (var chain in actor.Chains)
+            {
+                if (chain.Frames.Count == 0)
+                {
+                    problems.Add(actor.Name + " line " + chain.Line + ": the label '" +
+                                 chain.Label + "' has no frames, so it is not converted");
+                    continue;
+                }
+
+                for (var i = 0; i < chain.Frames.Count; i++)
+                {
+                    var frame = chain.Frames[i];
+                    var next = "";
+
+                    if (i + 1 < chain.Frames.Count)
+                    {
+                        next = FrameName(chain.Label, i + 2);
+                    }
+                    else
+                    {
+                        next = ResolveChainEnd(actor, chain, i + 1);
+                    }
+
+                    if (frame.Action.Length > 0)
+                    {
+                        Action<World, Mobj> action;
+
+                        if (!DoomInfo.TryGetAction(frame.Action, out action))
+                        {
+                            // Named with the actions that exist, because the useful answer to
+                            // "A_Jump" is not "no" but "not here, and here is what there is".
+                            problems.Add(actor.Name + " line " + frame.Line + ": no such action '" +
+                                         frame.Action + "'; this frame's action is dropped. " +
+                                         "This engine has: " +
+                                         string.Join(", ", DoomInfo.ActionNameList()));
+                        }
+                    }
+
+                    script.Append("    State(\"")
+                          .Append(FrameName(chain.Label, i + 1)).Append("\", \"")
+                          .Append(frame.Sprite).Append("\", \"")
+                          .Append(frame.Letter).Append("\", ")
+                          .Append(frame.Tics.ToString(CultureInfo.InvariantCulture)).Append(", \"")
+                          .Append(frame.Action).Append("\", \"")
+                          .Append(next).Append("\");\n");
+                }
+
+                var property = StatePropertyFor(chain.Label);
+
+                if (property != null)
+                {
+                    script.Append("    ").Append(property).Append("(\"")
+                          .Append(FrameName(chain.Label, 1)).Append("\");\n");
+                }
+            }
+        }
+
+        private static string FrameName(string label, int index)
+        {
+            return label + "#" + index.ToString(CultureInfo.InvariantCulture);
+        }
+
+        /// <summary>
+        /// What the last frame of a chain continues to.
+        ///
+        /// A chain with no terminator - which is legal and common, the next label simply
+        /// starting - falls through to the frame after it, and that is what this returns: the
+        /// next label's first frame, or the stop when there is none.
+        /// </summary>
+        private static string ResolveChainEnd(DecorateActor actor, StateChain chain, int frameCount)
+        {
+            if (chain.Next == "Loop")
+            {
+                return FrameName(chain.Label, 1);
+            }
+
+            if (chain.Next == "Stop" || chain.Next.Length == 0)
+            {
+                // A chain that ends without a terminator: stop. Falling through to the next
+                // label would be the literal reading, but a mod that meant that writes Goto.
+                return "";
+            }
+
+            if (chain.Next == "Wait")
+            {
+                return FrameName(chain.Label, frameCount);
+            }
+
+            if (chain.Next.StartsWith("Goto ", StringComparison.OrdinalIgnoreCase))
+            {
+                var target = chain.Next.Substring(5).Trim();
+
+                foreach (var other in actor.Chains)
+                {
+                    if (string.Equals(other.Label, target, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return FrameName(other.Label, 1);
+                    }
+                }
+
+                // Not one of this actor's labels, so it may be an engine state: "Goto See"
+                // from a mod's chain has to reach vanilla, or a mod could never hand control
+                // back.
+                MobjState engineState;
+
+                if (ScriptActorApi.TryParseEngineState(target, out engineState))
+                {
+                    return target;
+                }
+
+                return "";
+            }
+
+            return "";
+        }
+
+        /// <summary>
+        /// The engine state property a DECORATE label initialises, or null when the label is
+        /// only a jump target inside the actor.
+        /// </summary>
+        private static string StatePropertyFor(string label)
+        {
+            switch (label.ToLowerInvariant())
+            {
+                case "spawn": return "SpawnState";
+                case "see": return "SeeState";
+                case "pain": return "PainState";
+                case "melee": return "MeleeState";
+                case "missile": return "MissileState";
+                case "death": return "DeathState";
+                case "xdeath": return "XdeathState";
+                case "raise": return "RaiseState";
+                default: return null;
+            }
         }
 
         // ------------------------------------------------------------ reading
@@ -416,7 +596,7 @@ namespace DPTDOOM.Scripting
                 if (string.Equals(token.Text, "States", StringComparison.OrdinalIgnoreCase))
                 {
                     actor.HasStates = true;
-                    SkipBlock(reader, ref line, actor, problems);
+                    ReadStates(reader, ref line, actor, problems);
                     continue;
                 }
 
@@ -453,6 +633,26 @@ namespace DPTDOOM.Scripting
                     return;
                 }
 
+                if (string.Equals(token.Text, "spawnid", StringComparison.OrdinalIgnoreCase))
+                {
+                    // The doomednum as a property rather than after the actor name. Both
+                    // spellings are used in the wild, and ACE - the engine whose DECORATE
+                    // subset this converter is measured against - documents spawnid as the
+                    // way to give a new actor a map number.
+                    var number = value.IsNumber ? value.Number : -1;
+
+                    if (number < 0 && !int.TryParse(value.Text, NumberStyles.Integer,
+                                                    CultureInfo.InvariantCulture, out number))
+                    {
+                        problems.Add(actor.Name + " line " + value.Line +
+                                     ": 'spawnid' needs a whole number, found '" + value.Text + "'");
+                        continue;
+                    }
+
+                    actor.DoomEdNum = number;
+                    continue;
+                }
+
                 string mapped;
 
                 if (NumberProperties.TryGetValue(token.Text, out mapped))
@@ -478,15 +678,20 @@ namespace DPTDOOM.Scripting
         }
 
         /// <summary>
-        /// Skips a States section, tracking nesting.
+        /// Reads a States section into labelled chains.
         ///
-        /// Skipped rather than read, because the frame list is exactly the part this engine
-        /// cannot accept yet: a frame needs an entry in the state table and a sprite name,
-        /// and both are outside what an actor patch can change. Counting the braces is all
-        /// that is needed to find the end of it and nothing here is used afterwards.
+        /// The section is a list of labels and frames, and the only structural question is
+        /// where a frame ends - which DECORATE answers with a rule, not a delimiter: a frame
+        /// is a sprite name, a run of letters, then optional tics, then an optional action.
+        /// So the reader decides by looking at the next token: a number is tics, a name that
+        /// is a known action is an action, four capital letters are the next frame's sprite.
+        ///
+        /// Guessing wrong here produces a frame list that looks plausible and animates
+        /// wrongly, so anything genuinely ambiguous is reported rather than resolved by
+        /// preference.
         /// </summary>
-        private static void SkipBlock(Reader reader, ref int line, DecorateActor actor,
-                                      IList<string> problems)
+        private static void ReadStates(Reader reader, ref int line, DecorateActor actor,
+                                       IList<string> problems)
         {
             var open = reader.Next(ref line);
 
@@ -497,13 +702,9 @@ namespace DPTDOOM.Scripting
                 return;
             }
 
-            // Counted from the opening brace: the block ends at the brace that closes it,
-            // not at the first closing brace in sight. Stopping early - which the first
-            // version did - swallowed the actor's own closing brace and reported the whole
-            // block as unterminated, one line after reading it correctly.
-            var depth = 1;
+            StateChain chain = null;
 
-            while (depth > 0)
+            while (true)
             {
                 var token = reader.Next(ref line);
 
@@ -514,14 +715,246 @@ namespace DPTDOOM.Scripting
                     return;
                 }
 
-                if (token.Text == "{")
+                if (token.Text == "}")
                 {
-                    depth++;
+                    return;
                 }
-                else if (token.Text == "}")
+
+                // A label: a bare word followed by a colon. The reader hands over the colon as
+                // its own token, so both arrive here and the second one is simply dropped.
+                if (IsLabel(reader, token, ref line, out var labelLine))
                 {
-                    depth--;
+                    chain = new StateChain();
+                    chain.Label = token.Text;
+                    chain.Line = token.Line;
+                    actor.Chains.Add(chain);
+                    continue;
                 }
+
+                if (chain == null)
+                {
+                    problems.Add(actor.Name + " line " + token.Line +
+                                 ": a frame appears before any label, so it belongs to no chain");
+                    continue;
+                }
+
+                if (string.Equals(token.Text, "Loop", StringComparison.OrdinalIgnoreCase))
+                {
+                    chain.Next = "Loop";
+                    continue;
+                }
+
+                if (string.Equals(token.Text, "Stop", StringComparison.OrdinalIgnoreCase))
+                {
+                    chain.Next = "Stop";
+                    continue;
+                }
+
+                if (string.Equals(token.Text, "Wait", StringComparison.OrdinalIgnoreCase))
+                {
+                    chain.Next = "Wait";
+                    continue;
+                }
+
+                if (string.Equals(token.Text, "Goto", StringComparison.OrdinalIgnoreCase))
+                {
+                    var target = reader.Next(ref line);
+
+                    if (target == null || target.Text == "}")
+                    {
+                        problems.Add(actor.Name + " line " + token.Line + ": 'Goto' names nothing");
+                        chain.Next = "Stop";
+                        continue;
+                    }
+
+                    chain.Next = "Goto " + target.Text;
+                    continue;
+                }
+
+                if (string.Equals(token.Text, "Bright", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Belongs to the frame before it; the frame reader has already taken it
+                    // into account when it sees the word, so reaching here means a stray one.
+                    continue;
+                }
+
+                ReadFrame(reader, ref line, actor, chain, token, problems);
+            }
+        }
+
+        private static bool IsLabel(Reader reader, Token token, ref int line, out int labelLine)
+        {
+            labelLine = token.Line;
+
+            if (token.IsNumber || token.Text.Length == 0)
+            {
+                return false;
+            }
+
+            // If the next token is a colon this word is a label. Anything else means it was
+            // the start of a frame, and the caller has to look at it again - so the reader
+            // keeps a one-token pushback.
+            return reader.PeekIsColon(ref line);
+        }
+
+        private static void ReadFrame(Reader reader, ref int line, DecorateActor actor,
+                                      StateChain chain, Token spriteToken, IList<string> problems)
+        {
+            var sprite = spriteToken.Text;
+
+            if (!ScriptActorApi.TryParseSprite(sprite, out _))
+            {
+                problems.Add(actor.Name + " line " + spriteToken.Line + ": no such sprite '" +
+                             sprite + "'; sprites are four-letter WAD names such as TROO. " +
+                             "This frame is not converted");
+                SkipRestOfFrame(reader, ref line);
+                return;
+            }
+
+            var letters = reader.Next(ref line);
+
+            if (letters == null || letters.Text == "}" || letters.Text.Length == 0)
+            {
+                problems.Add(actor.Name + " line " + spriteToken.Line +
+                             ": '" + sprite + "' is followed by no frame letters");
+                return;
+            }
+
+            var bright = false;
+            var text = letters.Text;
+
+            if (text.EndsWith("^", StringComparison.Ordinal))
+            {
+                bright = true;
+                text = text.Substring(0, text.Length - 1);
+            }
+
+            foreach (var letter in text)
+            {
+                // Every letter in the run is its own frame, sharing the tics and action that
+                // follow. "TROO AABB 4 A_Chase" is four frames, not one, and this is the part
+                // of DECORATE most often misread by hand.
+                var frame = new StateFrame();
+                frame.Sprite = sprite;
+                frame.Letter = letter.ToString();
+                frame.Tics = 1;
+                frame.Action = "";
+                frame.Line = letters.Line;
+
+                if (bright)
+                {
+                    frame.Letter = "+" + frame.Letter;
+                }
+
+                chain.Frames.Add(frame);
+            }
+
+            StateFrame last = chain.Frames[chain.Frames.Count - 1];
+
+            var next = reader.Next(ref line);
+
+            if (next == null)
+            {
+                return;
+            }
+
+            if (next.IsNumber)
+            {
+                last.Tics = next.Number;
+
+                foreach (var frame in chain.Frames)
+                {
+                    frame.Tics = next.Number;
+                }
+
+                next = reader.Next(ref line);
+
+                if (next == null)
+                {
+                    return;
+                }
+            }
+
+            if (string.Equals(next.Text, "Bright", StringComparison.OrdinalIgnoreCase))
+            {
+                foreach (var frame in chain.Frames)
+                {
+                    frame.Letter = "+" + frame.Letter.TrimStart('+');
+                }
+
+                next = reader.Next(ref line);
+
+                if (next == null)
+                {
+                    return;
+                }
+            }
+
+            if (IsActionName(next.Text))
+            {
+                foreach (var frame in chain.Frames)
+                {
+                    frame.Action = next.Text;
+                }
+            }
+            else
+            {
+                // Not an action, so it begins whatever comes next: a keyword, a label or the
+                // sprite of the following frame. It goes back.
+                reader.PushBack(next, ref line);
+            }
+        }
+
+
+        private static bool IsActionName(string text)
+        {
+            if (text.Length == 0 || !(text[0] == 'A' || text[0] == 'a'))
+            {
+                // A frame's action is always spelled A_<Something>; anything else is the next
+                // frame or a keyword, which is what keeps "TROO A 10" followed by "SARG B 8"
+                // from reading "SARG" as an action name.
+                return false;
+            }
+
+            if (!text.StartsWith("A_", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            // Known to the engine, or reported later by the emitter with the full list.
+            return true;
+        }
+
+        private static void SkipRestOfFrame(Reader reader, ref int line)
+        {
+            // Only used after an unreadable sprite: the letters, tics and action of that frame
+            // are consumed so the next frame is read from a sane place.
+            var letters = reader.Next(ref line);
+
+            if (letters == null)
+            {
+                return;
+            }
+
+            var next = reader.Next(ref line);
+
+            if (next == null)
+            {
+                return;
+            }
+
+            if (!next.IsNumber)
+            {
+                reader.PushBack(next, ref line);
+                return;
+            }
+
+            var action = reader.Next(ref line);
+
+            if (action != null && !IsActionName(action.Text) &&
+                !string.Equals(action.Text, "Bright", StringComparison.OrdinalIgnoreCase))
+            {
+                reader.PushBack(action, ref line);
             }
         }
 
@@ -589,19 +1022,61 @@ namespace DPTDOOM.Scripting
         /// which is every separator DECORATE uses. Numbers are recognised by a leading digit
         /// or sign so that a doomednum can be told from an actor name, and hexadecimal is
         /// accepted because doomednums are often written that way.
+        ///
+        /// One token can be pushed back, because a frame ends where the next thing stops being
+        /// part of it and the reader has to look at that thing before deciding.
         /// </summary>
         private sealed class Reader
         {
             private readonly string text;
             private int position;
+            private Token pushed;
 
             public Reader(string text)
             {
                 this.text = text ?? "";
             }
 
+            public void PushBack(Token token, ref int line)
+            {
+                pushed = token;
+                line = token.Line;
+            }
+
+            /// <summary>
+            /// Whether the next token is a colon, without consuming anything else.
+            ///
+            /// Used to tell a label ("See:") from a frame ("TROO A 10"): the word and the
+            /// colon arrive as separate tokens, and looking one ahead is the whole difference.
+            /// </summary>
+            public bool PeekIsColon(ref int line)
+            {
+                var token = Next(ref line);
+
+                if (token == null)
+                {
+                    return false;
+                }
+
+                if (token.Text == ":")
+                {
+                    return true;
+                }
+
+                PushBack(token, ref line);
+                return false;
+            }
+
             public Token Next(ref int line)
             {
+                if (pushed != null)
+                {
+                    var saved = pushed;
+                    pushed = null;
+                    line = saved.Line;
+                    return saved;
+                }
+
                 SkipTrivia(ref line);
 
                 if (position >= text.Length)
