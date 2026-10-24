@@ -119,13 +119,9 @@ namespace DPTDOOM
         public static Node[] FromWad(Wad wad, int lump, Subsector[] subsectors)
         {
             var length = wad.GetLumpSize(lump);
-            if (length % Node.dataSize != 0)
-            {
-                throw new Exception();
-            }
 
             var data = wad.ReadLump(lump);
-            var count = length / Node.dataSize;
+            var count = LoadReport.WholeRecords("NODES", length, Node.dataSize);
             var nodes = new Node[count];
 
             for (var i = 0; i < count; i++)

@@ -43,13 +43,9 @@ namespace DPTDOOM
         public static Vertex[] FromWad(Wad wad, int lump)
         {
             var length = wad.GetLumpSize(lump);
-            if (length % dataSize != 0)
-            {
-                throw new Exception();
-            }
 
             var data = wad.ReadLump(lump);
-            var count = length / dataSize;
+            var count = LoadReport.WholeRecords("VERTEXES", length, dataSize);
             var vertices = new Vertex[count]; ;
 
             for (var i = 0; i < count; i++)

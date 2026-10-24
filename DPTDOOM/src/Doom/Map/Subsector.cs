@@ -48,13 +48,9 @@ namespace DPTDOOM
         public static Subsector[] FromWad(Wad wad, int lump, Seg[] segs)
         {
             var length = wad.GetLumpSize(lump);
-            if (length % Subsector.dataSize != 0)
-            {
-                throw new Exception();
-            }
 
             var data = wad.ReadLump(lump);
-            var count = length / Subsector.dataSize;
+            var count = LoadReport.WholeRecords("SSECTORS", length, Subsector.dataSize);
             var subsectors = new Subsector[count];
 
             for (var i = 0; i < count; i++)

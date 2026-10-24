@@ -68,7 +68,44 @@ namespace DPTDOOM
                     var frames = new SpriteFrame[list.Count];
                     for (var j = 0; j < frames.Length; j++)
                     {
-                        list[j].CheckCompletion();
+                        // A PWAD often draws the front view of a new monster and forgets
+                        // the rest. Throwing here meant the whole game refused to start
+                        // over one incomplete sprite; vanilla draws nothing for the
+                        // missing rotations, which makes the monster vanish when it
+                        // turns. The front view from every angle is the least wrong of
+                        // the three, so the gaps are filled and reported.
+                        var missing = list[j].MissingRotations();
+
+                        if (missing.Count > 0)
+                        {
+                            if (!list[j].FillMissingRotations())
+                            {
+                                // Nothing at all to copy from: the frame has no patches
+                                // and drawing it would mean indexing an empty array.
+                                // Reported rather than thrown, and the frame is left
+                                // out by giving it the previous frame's view.
+                                LoadReport.Add(
+                                    "empty sprite frame",
+                                    DoomInfo.SpriteNames[i] + " frame " + j,
+                                    "uses the previous frame");
+
+                                if (j == 0)
+                                {
+                                    throw new Exception(
+                                        "Sprite " + DoomInfo.SpriteNames[i] +
+                                        " has no frames at all.");
+                                }
+
+                                frames[j] = frames[j - 1];
+                                continue;
+                            }
+
+                            LoadReport.Add(
+                                "incomplete sprite rotation",
+                                DoomInfo.SpriteNames[i] + " frame " + j +
+                                " (" + missing.Count + " of 8)",
+                                "the front view is used for the missing angles");
+                        }
 
                         var frame = new SpriteFrame(list[j].HasRotation(), list[j].Patches, list[j].Flip);
                         frames[j] = frame;
@@ -274,7 +311,7 @@ namespace DPTDOOM
 
 
 
-        private class SpriteInfo
+        internal class SpriteInfo
         {
             public Patch[] Patches;
             public bool[] Flip;
@@ -294,6 +331,65 @@ namespace DPTDOOM
                         throw new Exception("Missing sprite!");
                     }
                 }
+            }
+
+            /// <summary>
+            /// The rotations this sprite is missing.
+            ///
+            /// A PWAD that adds a monster often draws the front view and forgets the
+            /// rest. Vanilla Doom draws nothing for a missing rotation - the monster
+            /// simply vanishes when it turns - which is worse than showing the front
+            /// view from every angle. So the caller fills the gaps and reports them.
+            /// </summary>
+            public List<int> MissingRotations()
+            {
+                var missing = new List<int>();
+
+                for (var i = 0; i < Patches.Length; i++)
+                {
+                    if (Patches[i] == null)
+                    {
+                        missing.Add(i);
+                    }
+                }
+
+                return missing;
+            }
+
+            /// <summary>
+            /// Fills every missing rotation with the first one that exists.
+            ///
+            /// Returns false when the whole set is empty, which is a different problem:
+            /// there is nothing to copy from, and the frame should be dropped rather
+            /// than drawn as a blank.
+            /// </summary>
+            public bool FillMissingRotations()
+            {
+                Patch source = null;
+
+                for (var i = 0; i < Patches.Length; i++)
+                {
+                    if (Patches[i] != null)
+                    {
+                        source = Patches[i];
+                        break;
+                    }
+                }
+
+                if (source == null)
+                {
+                    return false;
+                }
+
+                for (var i = 0; i < Patches.Length; i++)
+                {
+                    if (Patches[i] == null)
+                    {
+                        Patches[i] = source;
+                    }
+                }
+
+                return true;
             }
 
             public bool HasRotation()

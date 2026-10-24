@@ -122,13 +122,9 @@ namespace DPTDOOM
         public static LineDef[] FromWad(Wad wad, int lump, Vertex[] vertices, SideDef[] sides)
         {
             var length = wad.GetLumpSize(lump);
-            if (length % dataSize != 0)
-            {
-                throw new Exception();
-            }
 
             var data = wad.ReadLump(lump);
-            var count = length / dataSize;
+            var count = LoadReport.WholeRecords("LINEDEFS", length, dataSize);
             var lines = new LineDef[count]; ;
 
             for (var i = 0; i < count; i++)

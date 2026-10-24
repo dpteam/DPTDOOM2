@@ -79,13 +79,9 @@ namespace DPTDOOM
         public static Seg[] FromWad(Wad wad, int lump, Vertex[] vertices, LineDef[] lines)
         {
             var length = wad.GetLumpSize(lump);
-            if (length % Seg.dataSize != 0)
-            {
-                throw new Exception();
-            }
 
             var data = wad.ReadLump(lump);
-            var count = length / Seg.dataSize;
+            var count = LoadReport.WholeRecords("SEGS", length, Seg.dataSize);
             var segs = new Seg[count]; ;
 
             for (var i = 0; i < count; i++)

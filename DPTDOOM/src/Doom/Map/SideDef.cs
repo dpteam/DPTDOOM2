@@ -67,13 +67,9 @@ namespace DPTDOOM
         public static SideDef[] FromWad(Wad wad, int lump, ITextureLookup textures, Sector[] sectors)
         {
             var length = wad.GetLumpSize(lump);
-            if (length % dataSize != 0)
-            {
-                throw new Exception();
-            }
 
             var data = wad.ReadLump(lump);
-            var count = length / dataSize;
+            var count = LoadReport.WholeRecords("SIDEDEFS", length, dataSize);
             var sides = new SideDef[count]; ;
 
             for (var i = 0; i < count; i++)

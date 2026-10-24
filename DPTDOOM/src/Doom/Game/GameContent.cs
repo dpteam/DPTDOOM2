@@ -37,6 +37,11 @@ namespace DPTDOOM
         {
             wad = new Wad(ConfigUtilities.GetWadPaths(args));
 
+            // Collected across the whole load and printed once at the end: during the
+            // load the player is watching a progress list, and forty "skipping x" lines
+            // in the middle of it is noise.
+            LoadReport.Clear();
+
             DeHackEd.Initialize(args, wad);
 
             // A blank line between the groups, so a startup log of a dozen lines can be
@@ -50,6 +55,8 @@ namespace DPTDOOM
             flats = new FlatLookup(wad);
             sprites = new SpriteLookup(wad);
             animation = new TextureAnimation(textures, flats);
+
+            LoadReport.Print();
         }
 
         public static GameContent CreateDummy(params string[] wadPaths)

@@ -69,13 +69,9 @@ namespace DPTDOOM
         public static MapThing[] FromWad(Wad wad, int lump)
         {
             var length = wad.GetLumpSize(lump);
-            if (length % dataSize != 0)
-            {
-                throw new Exception();
-            }
 
             var data = wad.ReadLump(lump);
-            var count = length / dataSize;
+            var count = LoadReport.WholeRecords("THINGS", length, dataSize);
             var things = new MapThing[count];
 
             for (var i = 0; i < count; i++)

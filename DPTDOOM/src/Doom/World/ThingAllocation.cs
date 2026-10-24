@@ -129,7 +129,17 @@ namespace DPTDOOM
 
             if (i == DoomInfo.MobjInfos.Length)
             {
-                throw new Exception("Unknown type!");
+                // A thing type this port does not know. Very common in a PWAD built
+                // for a source port with more things than Doom has - a DECORATE actor,
+                // a ZDoom-only type - and throwing here meant the whole level refused
+                // to load over one object. Skipping it is what every port does: the
+                // room is still playable, and the report says what was left out.
+                LoadReport.Add(
+                    "unknown thing type",
+                    "type " + mt.Type + " at " + mt.X.ToIntFloor() + "," + mt.Y.ToIntFloor(),
+                    "the object is not placed");
+
+                return;
             }
 
             // Don't spawn keycards and players in deathmatch.

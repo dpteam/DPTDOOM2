@@ -67,7 +67,17 @@ namespace DPTDOOM
 
                     if (anim.NumPics < 2)
                     {
-                        throw new Exception("Bad animation cycle from " + animDef.StartName + " to " + animDef.EndName + "!");
+                        // A cycle that does not cycle: StartName and EndName are out of
+                        // order, or one of them is missing from this WAD. Vanilla simply
+                        // has no animation there, so the frame stays still, and the WAD
+                        // keeps working. Throwing here meant one bad entry in a PWAD
+                        // refused the whole game.
+                        LoadReport.Add(
+                            "bad animation cycle",
+                            animDef.StartName + " to " + animDef.EndName,
+                            "those textures do not animate");
+
+                        continue;
                     }
 
                     list.Add(anim);

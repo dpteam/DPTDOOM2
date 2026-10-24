@@ -93,6 +93,11 @@ namespace DPTDOOM
                 blockMap = BlockMap.FromWad(wad, map + 10, lines);
                 reject = Reject.FromWad(wad, map + 9, sectors);
 
+                // Every one of those tolerates a truncated lump through
+                // LoadReport.WholeRecords and reports the loss there. A map whose last
+                // line is missing still plays; refusing to load it is what used to
+                // happen and what the report exists to replace.
+
                 GroupLines();
 
                 skyTexture = GetSkyTextureByMapName(name);

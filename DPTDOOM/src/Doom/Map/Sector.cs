@@ -118,13 +118,9 @@ namespace DPTDOOM
         public static Sector[] FromWad(Wad wad, int lump, IFlatLookup flats)
         {
             var length = wad.GetLumpSize(lump);
-            if (length % dataSize != 0)
-            {
-                throw new Exception();
-            }
 
             var data = wad.ReadLump(lump);
-            var count = length / dataSize;
+            var count = LoadReport.WholeRecords("SECTORS", length, dataSize);
             var sectors = new Sector[count]; ;
 
             for (var i = 0; i < count; i++)

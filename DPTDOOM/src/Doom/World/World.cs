@@ -138,6 +138,11 @@ namespace DPTDOOM
 
             dummy = new Mobj(this);
 
+            // Things are spawned in this constructor, so this is the first moment the
+            // map's own problems are known. Printed here rather than at the end of the
+            // content load, which happens before any map exists.
+            LoadReport.Print();
+
             options.Music.StartMusic(Map.GetMapBgm(options), true);
         }
 
