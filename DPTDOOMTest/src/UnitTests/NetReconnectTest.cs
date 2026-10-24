@@ -111,7 +111,8 @@ namespace DPTDOOMTest.UnitTests
         private static void RunThroughDrop(Participant host, Participant guest, int dropAt, int target)
         {
             var dropped = false;
-            var sawReconnecting = false;
+            var hostDrops = host.Session.ReconnectCount;
+            var guestDrops = guest.Session.ReconnectCount;
             var watch = Stopwatch.StartNew();
 
             while ((host.Driver.CurrentTic < target || guest.Driver.CurrentTic < target) &&
@@ -119,11 +120,6 @@ namespace DPTDOOMTest.UnitTests
             {
                 Assert.IsFalse(host.Driver.Faulted, "the host did not fault: " + host.Driver.FaultReason);
                 Assert.IsFalse(guest.Driver.Faulted, "the guest did not fault: " + guest.Driver.FaultReason);
-
-                if (host.Driver.Reconnecting || guest.Driver.Reconnecting)
-                {
-                    sawReconnecting = true;
-                }
 
                 var moved = Step(host);
                 if (Step(guest))
@@ -149,7 +145,16 @@ namespace DPTDOOMTest.UnitTests
 
             // Without this the test would happily pass on a session that never
             // noticed the drop at all.
-            Assert.IsTrue(sawReconnecting, "the session actually went through a reconnect");
+            //
+            // Counted rather than observed through the Reconnecting flag: on
+            // loopback the whole reconnect finishes in a millisecond or two, so a
+            // test polling the flag loses the race most of the time. That is how
+            // this assertion failed in CI while the log showed a clean reconnect.
+            Assert.IsTrue(host.Session.ReconnectCount > hostDrops,
+                "the host handled the drop as a reconnect (" + hostDrops + " -> " + host.Session.ReconnectCount + ")");
+
+            Assert.IsTrue(guest.Session.ReconnectCount > guestDrops,
+                "the guest handled the drop as a reconnect (" + guestDrops + " -> " + guest.Session.ReconnectCount + ")");
 
             Assert.IsTrue(host.Driver.CurrentTic >= target,
                 "the host kept playing after the link came back (reached tic " + host.Driver.CurrentTic + ")");

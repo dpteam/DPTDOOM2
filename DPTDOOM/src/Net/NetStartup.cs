@@ -153,7 +153,8 @@ namespace DPTDOOM.Net
                 lines.Add("INPUT DELAY " + delayOverride + " TICS");
             }
 
-            lines.Add("WAITING FOR PLAYER 1/" + (players - bots - 1));
+            // Zero guests so far, and the slot count is what the loop below prints.
+            lines.Add("WAITING FOR PLAYER 0/" + (players - bots - 1));
 
             status("HOSTING", lines.ToArray());
 
@@ -190,9 +191,16 @@ namespace DPTDOOM.Net
                     throw new Exception("Timed out waiting for players.");
                 }
 
+                // Counted as guests, not as players: PlayerCount includes the host,
+                // so "1/1" was printed before anybody had joined and the bar was
+                // already full. A progress bar that reads complete while the host is
+                // still waiting is worse than no bar - it says the one thing that is
+                // definitely not true.
+                var guests = session.PlayerCount - 1;
+                var guestSlots = session.HumansNeeded - 1;
+
                 var waiting = new System.Collections.Generic.List<string>(lines);
-                waiting[waiting.Count - 1] = "WAITING FOR PLAYER " + session.PlayerCount + "/" +
-                                             (session.HumansNeeded - 1);
+                waiting[waiting.Count - 1] = "WAITING FOR PLAYER " + guests + "/" + guestSlots;
 
                 status("HOSTING", waiting.ToArray());
 

@@ -266,6 +266,17 @@ namespace DPTDOOM.Net
         private volatile bool reconnecting;
         private int reconnectDeadline;
         private int reconnectAttempts;
+
+        /// <summary>
+        /// How many times a dropped link was handled as a reconnect rather than as
+        /// the end of the session.
+        ///
+        /// A counter, not just the <see cref="Reconnecting"/> flag: a reconnect on
+        /// loopback completes in a couple of milliseconds, so anything watching the
+        /// flag has to be lucky to ever see it set. Tests need a fact that survives
+        /// the race, and so does anyone diagnosing a flapping connection from a log.
+        /// </summary>
+        private int reconnectCount;
         private readonly Dictionary<int, int> awaitingResume = new Dictionary<int, int>();
 
         /// <summary>
@@ -1404,6 +1415,7 @@ namespace DPTDOOM.Net
                 peers.Remove(peer);
                 awaitingResume[peer.PlayerIndex] = unchecked(Environment.TickCount + reconnectGraceSeconds * 1000);
                 reconnecting = true;
+                reconnectCount++;
             }
 
             Console.WriteLine("Net: lost '" + peer.Name + "', holding the game for up to " +
@@ -1437,6 +1449,7 @@ namespace DPTDOOM.Net
                 reconnecting = true;
                 reconnectAttempts = 0;
                 reconnectDeadline = unchecked(Environment.TickCount + reconnectGraceSeconds * 1000);
+                reconnectCount++;
                 peers.Remove(peer);
             }
 
@@ -1701,6 +1714,16 @@ namespace DPTDOOM.Net
         }
 
         public bool Reconnecting => reconnecting;
+
+        /// <summary>
+        /// How many dropped links this session has handled by reconnecting.
+        ///
+        /// The flag above is the live state; this is the durable fact. On loopback a
+        /// reconnect is over in milliseconds, so anything that polls the flag has to
+        /// be lucky to catch it - which is exactly how a test asserting "a reconnect
+        /// happened" can fail on a session that reconnected perfectly.
+        /// </summary>
+        public int ReconnectCount => reconnectCount;
 
         public int ReconnectSecondsLeft
         {

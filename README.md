@@ -1,146 +1,49 @@
-# DPT.DOOM
+<p align="center">
+  <img src="docs/images/game-map01.png" alt="DPT.DOOM — Doom II, MAP01" width="640">
+</p>
 
-Свой source port Doom на C#. Основан на [Managed Doom](https://github.com/sinshu/managed-doom)
-(перевод Linux Doom на C#) и продолжает идеи первого DPT.DOOM на C/DoomGeneric.
-Цель — **полностью standalone** сборка под **.NET Framework 4.0**, включая Windows XP:
-без сторонних библиотек, без OpenGL, без WebView2.
+<h1 align="center">DPT.DOOM</h1>
 
-![DPT.DOOM — Doom II, MAP01](docs/images/game-map01.png)
+<p align="center">
+  <b>Свой source port Doom на C# — от Windows XP до Windows 11, без единой сторонней библиотеки.</b>
+</p>
 
-## Что уже работает
+<p align="center">
+  <img alt=".NET Framework 4.0" src="https://img.shields.io/badge/.NET%20Framework-4.0-512BD4?style=flat-square">
+  <img alt="Windows XP — 11" src="https://img.shields.io/badge/Windows-XP%20%E2%80%94%2011-0078D6?style=flat-square">
+  <img alt="GPL-2.0" src="https://img.shields.io/badge/license-GPL--2.0%2B-blue?style=flat-square">
+  <img alt="Без зависимостей" src="https://img.shields.io/badge/dependencies-none-success?style=flat-square">
+</p>
 
-- **Программный рендерер** — BSP, текстуры стен/полов/потолков, спрайты, свет,
-  небо, fuzz, палитровые эффекты, интерполяция кадров.
-- **Игра** — физика, монстры, двери/лифты, оружие, сохранения, демо,
-  DeHackEd, automap, интермиссия, титры.
-- **Свой Win32-бэкенд** — окно через `user32` + вывод кадра через `gdi32`
-  (`StretchDIBits`), звук через `winmm` (`waveOut`, свой программный микшер),
-  музыка — MUS → MIDI через системный синтезатор. Никаких DLL рядом с EXE.
-- **Headless** — прогон без окна, с дампом кадра и хешами мира (для тестов).
-- **Кооператив по сети** — lockstep TCP-сессия host/join на 2–4 игроков.
-  Ввод отправляется с упреждением, поэтому 100 мс пинга не замедляют игру.
-- **Relay** — игра без проброса порта: хост и гость подключаются наружу к master,
-  он соединяет их потоки. Снимает и NAT hairpin.
-- **Кооп-боты** — `-coopbots 1..3` добавляет ботов в одиночную игру, а у хоста —
-  и в сетевую: команды ботов идут по сети как команды игроков.
-- **Чат** — `T` в сетевой игре; хост пересылает сообщения между гостями.
-- **Экран подключения** — состояние крупно, детали под линейкой, полоса ожидания.
+---
 
-![Хостинг](docs/images/net-hosting.png)
-- **Правила коопа** — проход сквозь друга, общие ключи, дубли DM-оружия.
-- **HTML-лаунчер** — интерфейс на HTML/CSS/JS внутри EXE.
-- **Master server** — нативный сервер списка сессий.
+## Что это
 
-| MAP07 | MAP11 |
-|---|---|
-| ![MAP07](docs/images/game-map07.png) | ![MAP11](docs/images/game-map11.png) |
+Порт Doom на C#, выросший из [Managed Doom](https://github.com/sinshu/managed-doom)
+(перевод Linux Doom на C#) и продолжающий идеи первого DPT.DOOM на C/DoomGeneric.
 
-Кадры сняты автоматически из кадрового буфера движка (`tools/capture-game.ps1`).
-Doom II и его графика принадлежат правообладателям, **IWAD в комплект не входит**.
+Ограничение, из которого выросла вся архитектура: **сборка должна работать на
+Windows XP** и не тащить за собой ничего. Отсюда свой Win32-бэкенд вместо SDL,
+программный рендерер вместо OpenGL, MSHTML вместо WebView2 и свой микшер вместо
+стороннего аудио. Рядом с `dptdoom.exe` не лежит ни одного чужого DLL.
 
-## Кооператив с ботами
+## Возможности
 
-![Три кооп-бота на MAP01](docs/images/game-coop-bots.png)
+| Движок | Сеть | Инструменты |
+|---|---|---|
+| Программный рендерер: BSP, стены, полы и потолки, спрайты, свет, небо, fuzz, интерполяция кадров | Lockstep-кооператив на 2–4 игроков по TCP | Headless-прогон: хеши мира, кадр в BMP |
+| Полная игра: физика, монстры, двери и лифты, оружие, сохранения, демо, DeHackEd, automap, интермиссия | Упреждение ввода: 100 мс пинга — по-прежнему 35 тиков/с | Профайлер кадра по секциям (`-profile`) |
+| Boom: обобщённые линии, скроллеры, пушеры, перенос света | Relay — игра без проброса порта и без NAT hairpin | Трасса бота по тикам и карта его пути |
+| Свой Win32: `user32` + `gdi32`, `winmm`, MUS → MIDI | Восстановление связи после обрыва | Отладочные оверлеи: блокмап, триггеры |
 
-```powershell
-dptdoom.exe -iwad doom2.wad -coopbots 3 -warp 1 -skill 3
-```
-
-Ты первый игрок, остальные трое — боты в том же мире. Их видно, они стреляют,
-открывают двери, ищут предметы, **обходят карту и находят выход**: MAP01
-завершают все четыре характера, от 0:32 (Sweeper) до 0:59 (Cautious) на skill 3,
-ни разу не погибнув.
-Это способ проверить кооператив в одиночку и основа для сетевых ботов, где бот
-будет отправлять свой `TicCmd` по сети.
-
-Карты, где единственный путь идёт через лифт или поднимающийся пол, граф пока не
-проходит — подробности и цифры в `docs/BOTS.md`.
-
-Навигация — nav-mesh из точек внутри секторов, построенный из данных карты при
-загрузке: никакой предварительной компиляции, как в Half-Life, не нужно.
-
-Боты **учатся на своих прохождениях**: держат файл знаний на карту, запоминают
-маршрут до выхода и лучшее время, пробуют четыре стиля игры (напролом, зачистка,
-охота, осторожный) и постепенно выбирают тот, что на этой карте выходит быстрее.
-Это не нейросеть: приём взят из проекта Fly в `refs/Fly`, где поведение
-складывается из сравнения частот нескольких популяций нейронов — десяток чисел
-на тик, а не глубокие сети.
-
-Чтобы разбирать поведение, есть `-botdump`: трасса по тикам (позиция, угол,
-движение, цель, причина решения) и PNG-карта с путём и направлением взгляда.
-
-```powershell
-dptdoom.exe -headless -iwad doom2.wad -bots -botstyle 0 -warp 1 -skill 3 `
-    -tics 3000 -botdump artifacts/bottrace/run.json
-powershell -NoProfile -File tools/render-bot-trace.ps1 -Trace artifacts/bottrace/run.json
-```
-
-Подробности и честный список того, что бот пока не умеет, —
-[docs/BOTS.md](docs/BOTS.md).
-
-## Лаунчер
-
-| Тёмная тема | Светлая тема |
-|---|---|
-| ![Лаунчер, тёмная тема](docs/images/launcher-dark.png) | ![Лаунчер, светлая тема](docs/images/launcher-light.png) |
-
-Интерфейс — настоящий HTML/CSS/JS, но рендерит его **MSHTML** (движок Internet
-Explorer, он же `mshtml.dll`), а не WebView2. Это осознанное решение: WebView2
-не устанавливается на Windows XP, а MSHTML есть в системе всегда и не требует
-ни рантайма, ни скачивания, ни интернета.
-
-Связь страницы с C# идёт через навигацию на приватную схему `dptdoom://<verb>`:
-хост отменяет переход и забирает payload из страницы. Это работает на всех
-поддерживаемых версиях Windows и не требует COM-регистрации.
-
-## Меню и трей
-
-| Счётчик кадров и меню |
-|---|
-| ![Меню и счётчик кадров](docs/images/game-overlay.png) |
-
-Оконный режим имеет обычное меню Win32 — Игра, Вид, Звук, Отладка, Справка.
-Там то, что не выражается клавишами: размер окна, полный экран, громкость,
-гамма и отладочные инструменты. Пункты с галочками показывают реальное
-состояние. Игра умеет сворачиваться в трей, как программы Windows 3.x.
-
-В меню «Отладка» есть каркас геометрии, режим «только карта», заморозка
-монстров, замедление, телепорт по картам, спавн предметов, «убить всех» и
-сохранение кадра/лога. Подробности — [docs/BUILDING.md](docs/BUILDING.md).
-
-## Боты
-
-### Кооп с ботами — «я и три напарника»
-
-```powershell
-dptdoom.exe -iwad refs\iwads\doom2.wad -coopbots 3 -warp 1 -skill 3
-```
-
-Ты играешь за первого игрока, ещё трое — боты в том же мире: их видно, они
-стреляют, открывают двери и идут к выходу. Это локальная игра (не по сети), так
-что можно тестировать кооп в одиночку.
-
-Число ботов: `-coopbots 1..3` (всего до 4 игроков). Сочетать с `-net` нельзя.
-
-### Бот вместо игрока
-
-```powershell
-dptdoom.exe -iwad doom2.wad -bots -warp 1
-```
-
-Тут бот управляет **твоим** игроком — удобно, чтобы посмотреть, как он проходит
-карту, или прогнать мир под нагрузкой.
-
-### Честное состояние
-
-Бот строит маршрут по графу секторов (Doom не требует nav-меша, он уже есть в
-карте), стреляет по видимым целям и идёт к выходу. Но карту до конца он пока
-**не проходит**: застревает у части дверных проёмов. Детали, что работает и что
-нет — [docs/BOTS.md](docs/BOTS.md).
+<p align="center">
+  <img src="docs/images/game-coop-bots.png" alt="Три кооп-бота на MAP01" width="49%">
+  <img src="docs/images/net-hosting.png" alt="Экран ожидания игрока" width="49%">
+</p>
 
 ## Быстрый старт
 
-Нужен .NET SDK 9+ (для сборки) и свой IWAD. Для локальной разработки положить
+Нужен .NET SDK 9+ (только для сборки) и свой IWAD. Для разработки положить
 Doom II в `refs/iwads/doom2.wad` — папка `refs/` в Git не попадает.
 
 ```powershell
@@ -148,29 +51,82 @@ dotnet build DPTDOOM.slnx -c Release
 .\DPTDOOM\bin\Release\net40\dptdoom.exe -iwad refs\iwads\doom2.wad
 ```
 
-Или через лаунчер:
+Или через лаунчер — он сам спросит IWAD и покажет список серверов:
 
 ```powershell
 .\DPTDOOM.Launcher\bin\Release\net40\dptdoom-launcher.exe
 ```
 
-## Режимы запуска
+## Кооператив и боты
+
+**С другом.** Хост ждёт на порту, гость подключается:
+
+```powershell
+dptdoom.exe -iwad doom2.wad -net host -players 2 -port 5029 -warp 1
+dptdoom.exe -iwad doom2.wad -net join -address 192.168.1.10:5029
+```
+
+Порт пробрасывать не обязательно: с `-relay` хост публикуется на master и
+открывает канал наружу, а гость заходит по id сессии. Это же снимает NAT hairpin.
+`T` открывает чат, `Enter` отправляет.
+
+**С ботами.** `-coopbots 1..3` добавляет напарников в тот же мир — их видно, они
+стреляют, открывают двери и ищут выход. В сетевой игре ботов водит **только хост**,
+а их команды идут по сети как команды игроков: гость не считает бота у себя, и
+две копии не расходятся.
+
+```powershell
+dptdoom.exe -iwad doom2.wad -coopbots 3 -warp 1 -skill 3
+```
+
+MAP01 проходят все четыре характера бота — от 0:32 (Sweeper) до 0:59 (Cautious)
+на skill 3, ни разу не погибнув. Карты, где единственный путь идёт через лифт или
+поднимающийся пол, граф пока не проходит: цифры и честный список ограничений —
+в [docs/BOTS.md](docs/BOTS.md).
+
+## Лаунчер
+
+<p align="center">
+  <img src="docs/images/launcher-dark.png" alt="Лаунчер, тёмная тема" width="420">
+  <img src="docs/images/launcher-light.png" alt="Лаунчер, светлая тема" width="420">
+</p>
+
+Настоящий HTML/CSS/JS, встроенный в EXE, но рендерит его **MSHTML** — движок
+Internet Explorer. WebView2 на Windows XP не ставится, а MSHTML есть в системе
+всегда: ни рантайма, ни скачивания, ни интернета. Связь страницы с C# идёт через
+навигацию на приватную схему `dptdoom://`, без COM-регистрации.
+
+## Документация
+
+| | |
+|---|---|
+| [docs/BUILDING.md](docs/BUILDING.md) | сборка, флаги командной строки, отладка, профилирование |
+| [docs/NETWORK.md](docs/NETWORK.md) | устройство lockstep, упреждение ввода, обрыв и возврат |
+| [docs/BOTS.md](docs/BOTS.md) | как устроены боты, замеры, известные ограничения |
+| [docs/MASTER.md](docs/MASTER.md) · [docs/RELAY.md](docs/RELAY.md) | сервер списка сессий и relay |
+| [docs/LAUNCHER.md](docs/LAUNCHER.md) | лаунчер: страница, мост, темы |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | что сделано, что осталось, что не сработало и почему |
+| [docs/CI.md](docs/CI.md) | что проверяет CI |
+
+<details>
+<summary><b>Все режимы запуска</b></summary>
 
 ```powershell
 # Обычная игра
 dptdoom.exe -iwad doom2.wad -warp 1 -skill 3
 
-# Хост кооператива (ждёт игрока на порту)
+# Хост кооператива
 dptdoom.exe -iwad doom2.wad -net host -players 2 -port 5029 -warp 1
 
 # Подключение к хосту
 dptdoom.exe -iwad doom2.wad -net join -address 192.168.1.10:5029
 
-# Без проброса порта: хост публикуется на master и открывает relay-канал
+# Через relay: без проброса порта
 dptdoom.exe -iwad doom2.wad -net host -players 2 -master play.dartpower.xyz:25135 -relay
-
-# Гость идёт туда же по id, который напечатал хост
 dptdoom.exe -iwad doom2.wad -net join -relay-master play.dartpower.xyz:25135 -relay-session <id>
+
+# Кооп с ботами
+dptdoom.exe -iwad doom2.wad -coopbots 3 -warp 1 -skill 3
 
 # Headless: 70 тиков и кадр в BMP
 dptdoom.exe -headless -iwad doom2.wad -warp 1 -tics 70 -shot frame.bmp
@@ -182,7 +138,10 @@ dptdoom.exe -headless -iwad doom2.wad -timedemo demo1
 dptdoom-master.exe --bind 0.0.0.0 --port 25135 --relay
 ```
 
-## Структура
+</details>
+
+<details>
+<summary><b>Структура репозитория</b></summary>
 
 ```
 DPTDOOM/            игра (net40 + net9.0 для тестов)
@@ -196,44 +155,54 @@ DPTDOOM.Launcher/   HTML-лаунчер (Assets/ — сама страница)
 DPTDOOMTest/        unit и compatibility тесты
 ```
 
-## Тесты
+</details>
+
+<details>
+<summary><b>Тесты и CI</b></summary>
 
 ```powershell
 dotnet test DPTDOOMTest\DPTDOOMTest.csproj -c Release
-powershell -NoProfile -File tools/test-master.ps1
-powershell -NoProfile -File tools/test-relay.ps1
-powershell -NoProfile -File tools/test-net-latency.ps1
-powershell -NoProfile -File tools/test-launcher.ps1
-powershell -NoProfile -File tools/check-standalone.ps1
+powershell -NoProfile -File tools\test-headless.ps1
+powershell -NoProfile -File tools\test-bots.ps1
+powershell -NoProfile -File tools\test-net-bots.ps1
+powershell -NoProfile -File tools\test-net-latency.ps1
+powershell -NoProfile -File tools\test-reconnect.ps1
+powershell -NoProfile -File tools\test-relay.ps1
+powershell -NoProfile -File tools\test-launcher.ps1
+powershell -NoProfile -File tools\check-standalone.ps1
 ```
 
-Тесты совместимости требуют IWAD; без него они помечаются как пропущенные, а не
-падают. Геймплейные тесты сравнивают хеши состояния мира с эталонами Managed Doom,
-то есть проверяют, что порт остался демо-совместимым.
+284 теста. Геймплейные сверяют хеши мира с эталонами Managed Doom — то есть
+проверяют, что порт остался демо-совместимым, а не только что он компилируется.
+Тесты, которым нужен IWAD, без него помечаются пропущенными, а не падают.
 
-## CI
+CI (`.github/workflows/ci.yml`) гоняет тесты на Windows и Linux, собирает `net40`,
+проверяет обещание «без сторонних библиотек» и кладёт готовый ZIP в артефакты.
+Подробности: [docs/CI.md](docs/CI.md).
 
-`.github/workflows/ci.yml`: тесты на Windows и Linux, сборка `net40`, проверка
-обещания «без сторонних библиотек», тесты master-протокола и лаунчера, и ZIP в
-артефактах. Подробности: [docs/CI.md](docs/CI.md).
+</details>
 
-Артефакт `dptdoom-windows-<commit>.zip` — готовая сборка для друзей: игра, master,
-лаунчер, лицензия и исходники этого коммита. IWAD в него не входит.
+<details>
+<summary><b>Переносимость</b></summary>
 
-## Переносимость
+- **net40** — то, что поставляется: Windows XP SP3 и новее.
+- **net9.0** — только чтобы гонять тесты на современном SDK.
+- `portable.txt` рядом с EXE переключает конфиг и сохранения в `user/`.
 
-- **net40** — то, что поставляется: работает на Windows XP SP3 и новее.
-- **net9.0** — только для запуска тестов на современном SDK.
-- `portable.txt` рядом с EXE переключает конфиг/сейвы в `user/`.
+</details>
 
 ## Лицензия и происхождение
 
 GPL v2 или новее, см. [LICENSE](licenses/LICENSE_DPTDOOM.txt). Проект сохраняет
 происхождение Managed Doom (Nobuaki Tanaka), Chocolate Doom и оригинального Doom
-от id Software. Коммерческие игровые данные не включены, лицензия движка не даёт
-прав на IWAD.
+от id Software. Игровые данные не включены: **IWAD в комплект не входит**, и
+лицензия движка не даёт прав на него.
 
-Подробности: [docs/ROADMAP.md](docs/ROADMAP.md), [docs/BUILDING.md](docs/BUILDING.md),
-[docs/LAUNCHER.md](docs/LAUNCHER.md), [docs/MASTER.md](docs/MASTER.md),
-[docs/NETWORK.md](docs/NETWORK.md), [docs/BOTS.md](docs/BOTS.md), [docs/CI.md](docs/CI.md),
-[docs/REFERENCE-SOURCES.md](docs/REFERENCE-SOURCES.md), [PROMPT.md](PROMPT.md).
+Скриншоты — настоящие кадры работающего движка и лаунчера: без рабочего стола,
+чужих окон и тени окна. Кадры игры снимаются из кадрового буфера
+(`tools/capture-game.ps1`), окно — по видимым границам DWM
+(`tools/capture-window.ps1`).
+
+<p align="center">
+  <sub>Doom — торговая марка id Software. Этот проект не связан с id Software и не одобрен ею.</sub>
+</p>

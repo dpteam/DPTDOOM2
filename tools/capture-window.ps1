@@ -15,7 +15,14 @@
 param(
     [Parameter(Mandatory = $true)][string]$Process,
     [Parameter(Mandatory = $true)][string]$Out,
-    [int]$WaitSeconds = 10
+    [int]$WaitSeconds = 10,
+
+    # Capture only the client area: no title bar, no menu strip, no border.
+    #
+    # Needed for the in-game screenshots in README.md. The window frame is not part
+    # of what the project renders, and a title bar with a version number in it dates
+    # the image the moment the version changes.
+    [switch]$ClientOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -30,8 +37,43 @@ public static class DptWindow {
     public struct RECT { public int Left, Top, Right, Bottom; }
 
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+    [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr h, out RECT r);
+    [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr h, ref POINT p);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
     [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct POINT { public int X, Y; }
+
+    /// <summary>
+    /// The client area in screen coordinates.
+    ///
+    /// GetClientRect reports the client size with its origin at (0,0), so the
+    /// top-left corner has to be converted separately - a client rect alone is not
+    /// a screen rectangle, and using it as one captures whatever is in the top-left
+    /// of the desktop.
+    /// </summary>
+    public static bool TryGetClientBounds(IntPtr hwnd, out RECT bounds) {
+        RECT client;
+        if (!GetClientRect(hwnd, out client)) {
+            bounds = default(RECT);
+            return false;
+        }
+
+        POINT origin = new POINT();
+        if (!ClientToScreen(hwnd, ref origin)) {
+            bounds = default(RECT);
+            return false;
+        }
+
+        bounds = client;
+        bounds.Right = origin.X + client.Right;
+        bounds.Bottom = origin.Y + client.Bottom;
+        bounds.Left = origin.X;
+        bounds.Top = origin.Y;
+
+        return bounds.Right > bounds.Left && bounds.Bottom > bounds.Top;
+    }
 
     // Returns the bounds the compositor actually draws: no shadow, no invisible
     // resize border. Absent before Windows Vista, hence the fallback.
@@ -74,10 +116,21 @@ if ($proc.MainWindowHandle -eq 0) { throw "Process '$Process' has no main window
 Start-Sleep -Milliseconds 700
 
 $rect = New-Object DptWindow+RECT
-$usedVisibleBounds = [DptWindow]::TryGetVisibleBounds($proc.MainWindowHandle, [ref]$rect)
+$usedVisibleBounds = $false
 
-if (-not $usedVisibleBounds) {
-    [void][DptWindow]::GetWindowRect($proc.MainWindowHandle, [ref]$rect)
+if ($ClientOnly) {
+    if (-not [DptWindow]::TryGetClientBounds($proc.MainWindowHandle, [ref]$rect)) {
+        throw "Could not read the client area."
+    }
+
+    $usedVisibleBounds = $true
+}
+else {
+    $usedVisibleBounds = [DptWindow]::TryGetVisibleBounds($proc.MainWindowHandle, [ref]$rect)
+
+    if (-not $usedVisibleBounds) {
+        [void][DptWindow]::GetWindowRect($proc.MainWindowHandle, [ref]$rect)
+    }
 }
 
 $width = $rect.Right - $rect.Left
@@ -95,5 +148,7 @@ $bitmap.Save((Join-Path (Get-Location) $Out), [System.Drawing.Imaging.ImageForma
 $graphics.Dispose()
 $bitmap.Dispose()
 
-$source = if ($usedVisibleBounds) { "visible bounds" } else { "window rect (no DWM)" }
+$source = if ($ClientOnly) { "client area" }
+          elseif ($usedVisibleBounds) { "visible bounds" }
+          else { "window rect (no DWM)" }
 Write-Host "Saved $Out ($width x $height, $source)"
