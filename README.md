@@ -1,11 +1,9 @@
 <p align="center">
-  <img src="docs/images/game-map01.png" alt="DPT.DOOM — Doom II, MAP01" width="640">
+  <img src="docs/images/logo.png" alt="DPT.DOOM" width="420">
 </p>
 
-<h1 align="center">DPT.DOOM</h1>
-
 <p align="center">
-  <b>Свой source port Doom на C# — от Windows XP до Windows 11, без единой сторонней библиотеки.</b>
+  <b>DPT.DOOM — source port Doom на C# — от Windows XP до Windows 11, без единой сторонней библиотеки.</b>
 </p>
 
 <p align="center">
@@ -202,6 +200,10 @@ GPL v2 или новее, см. [LICENSE](licenses/LICENSE_DPTDOOM.txt). Про�
 чужих окон и тени окна. Кадры игры снимаются из кадрового буфера
 (`tools/capture-game.ps1`), окно — по видимым границам DWM
 (`tools/capture-window.ps1`).
+
+Логотип в шапке — исходник из `refs/`, увеличенный целыми пикселями
+(`tools/make-logo.ps1`, nearest-neighbour): сглаживание превратило бы пиксельную
+графику в мыло.
 
 <p align="center">
   <sub>Doom — торговая марка id Software. Этот проект не связан с id Software и не одобрен ею.</sub>
