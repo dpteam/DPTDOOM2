@@ -254,7 +254,17 @@ namespace DPTDOOM.Win32
                     DebugSettings.Wireframe = !DebugSettings.Wireframe;
                     break;
 
-                case MenuCommand.DebugMapOnly:
+                case MenuCommand.DebugShowTriggers:
+                DebugSettings.ShowTriggers = !DebugSettings.ShowTriggers;
+                EnsureMapVisible();
+                break;
+
+            case MenuCommand.DebugShowBlockmap:
+                DebugSettings.ShowBlockmap = !DebugSettings.ShowBlockmap;
+                EnsureMapVisible();
+                break;
+
+            case MenuCommand.DebugMapOnly:
                     DebugSettings.MapOnly = !DebugSettings.MapOnly;
                     ToggleMapOnly();
                     break;
@@ -486,6 +496,26 @@ namespace DPTDOOM.Win32
             return false;
         }
 
+        /// <summary>
+        /// Debug overlays only draw on the automap, so switching one on shows the
+        /// automap. Turning it on and seeing nothing would look like a broken
+        /// command rather than a view the player is not looking at.
+        /// </summary>
+        private void EnsureMapVisible()
+        {
+            var world = doom.Game != null ? doom.Game.World : null;
+
+            if (world == null)
+            {
+                return;
+            }
+
+            if (!world.AutoMap.Visible)
+            {
+                world.AutoMap.Open();
+            }
+        }
+
         private void ToggleMapOnly()
         {
             var world = doom.Game != null ? doom.Game.World : null;
@@ -633,6 +663,8 @@ namespace DPTDOOM.Win32
             menu.SetChecked(MenuCommand.AudioMuteMusic, music != null && music.Volume == 0);
 
             menu.SetChecked(MenuCommand.DebugWireframe, DebugSettings.Wireframe);
+            menu.SetChecked(MenuCommand.DebugShowTriggers, DebugSettings.ShowTriggers);
+            menu.SetChecked(MenuCommand.DebugShowBlockmap, DebugSettings.ShowBlockmap);
             menu.SetChecked(MenuCommand.DebugMapOnly, DebugSettings.MapOnly);
             menu.SetChecked(MenuCommand.DebugFreeze, DebugSettings.FreezeMonsters);
 

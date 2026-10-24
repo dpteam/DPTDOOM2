@@ -78,6 +78,8 @@ dotnet build DPTDOOM\DPTDOOM.csproj -f net40 -c Release
 | `-noblock` | игроки проходят друг сквозь друга (при 4+ игроках и так) |
 | `-coopweapons` | спавнить дубли оружия с дезматч-карт (по умолчанию нет) |
 | `-nosharedkeys` | ключи у каждого свои (по умолчанию общие) |
+| `-showblockmap` | сетка блокмапа на automap (отладка коллизий) |
+| `-showtriggers` | линии со special и теги секторов на automap |
 | `-userdir <dir>` | каталог конфига и сохранений |
 | `-botinput` | детерминированный ввод (автотесты сети) |
 | `-version` | версия и выход |

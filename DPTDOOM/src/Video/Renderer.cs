@@ -147,7 +147,13 @@ namespace DPTDOOM.Video
                 var consolePlayer = game.World.ConsolePlayer;
                 var displayPlayer = game.World.DisplayPlayer;
 
-                if (game.World.AutoMap.Visible)
+                // MapOnly is a view override, not a world change: it forces the
+                // automap without touching the session, which is why it can be
+                // honoured here rather than by opening the automap somewhere in the
+                // game loop. It used to be applied only by the window's own toggle,
+                // so "-maponly" in a headless run did nothing and a screenshot of
+                // the debug overlays was impossible to take.
+                if (game.World.AutoMap.Visible || DebugSettings.MapOnly)
                 {
                     autoMap.Render(consolePlayer);
                     statusBar.Render(consolePlayer, true);

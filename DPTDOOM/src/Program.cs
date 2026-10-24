@@ -53,6 +53,8 @@ namespace DPTDOOM
                 DebugSettings.Wireframe = cmd.wireframe.Present;
                 DebugSettings.FreezeMonsters = cmd.freeze.Present;
                 DebugSettings.MapOnly = cmd.maponly.Present;
+                DebugSettings.ShowTriggers = cmd.showtriggers.Present;
+                DebugSettings.ShowBlockmap = cmd.showblockmap.Present;
 
                 if (cmd.headless.Present)
                 {

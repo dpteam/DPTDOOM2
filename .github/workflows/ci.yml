@@ -123,6 +123,13 @@ jobs:
         shell: pwsh
         run: ./tools/test-net-bots.ps1
 
+      - name: Automap debug overlays actually draw
+        # "-maponly" was in the command line and did nothing: it was applied only by
+        # the window's own toggle, so a headless run ignored it and every screenshot
+        # of a debug overlay was identical to the plain frame.
+        shell: pwsh
+        run: ./tools/test-debug-overlays.ps1
+
       - name: Window menu and tray
         shell: pwsh
         run: ./tools/test-menu.ps1

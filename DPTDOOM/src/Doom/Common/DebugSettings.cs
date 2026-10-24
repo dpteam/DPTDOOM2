@@ -42,8 +42,11 @@ namespace DPTDOOM
         /// <summary>Skip every Nth tic. 1 is normal speed, 2 is half, 4 is a quarter.</summary>
         public static int SlowMotion = 1;
 
-        /// <summary>Show the map's linedef specials as an overlay count.</summary>
+        /// <summary>Show the map's linedef specials and sector tags on the automap.</summary>
         public static bool ShowTriggers;
+
+        /// <summary>Draw the blockmap grid over the automap.</summary>
+        public static bool ShowBlockmap;
 
         /// <summary>Marks the geometry pass so the overlay can report it.</summary>
         public static int LastLineCount;
@@ -70,6 +73,7 @@ namespace DPTDOOM
             FreezeMonsters = false;
             SlowMotion = 1;
             ShowTriggers = false;
+            ShowBlockmap = false;
             LastLineCount = 0;
         }
     }

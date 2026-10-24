@@ -1,4 +1,4 @@
-//
+﻿//
 // Copyright (C) 2026 DartPower Team
 //
 // This program is free software; you can redistribute it and/or modify
@@ -55,6 +55,8 @@ namespace DPTDOOM.Win32
         DebugGiveAll,
         DebugWireframe,
         DebugMapOnly,
+        DebugShowTriggers,
+        DebugShowBlockmap,
         DebugFreeze,
         DebugSlowMotion,
         DebugKillAll,
@@ -190,6 +192,8 @@ namespace DPTDOOM.Win32
 
             Item(popup, MenuCommand.DebugWireframe, "Каркас геометрии");
             Item(popup, MenuCommand.DebugMapOnly, "Только карта");
+            Item(popup, MenuCommand.DebugShowTriggers, "Триггеры и теги");
+            Item(popup, MenuCommand.DebugShowBlockmap, "Блокмап");
             Item(popup, MenuCommand.DebugFreeze, "Заморозить монстров");
             Item(popup, MenuCommand.DebugSlowMotion, "Замедление x1");
             Separator(popup);

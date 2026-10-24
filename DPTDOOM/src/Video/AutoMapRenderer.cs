@@ -149,7 +149,13 @@ namespace DPTDOOM.Video
                 var v1 = ToScreenPos(line.Vertex1);
                 var v2 = ToScreenPos(line.Vertex2);
 
-                var cheating = am.State != AutoMapState.None;
+                // A debug overlay is a debugging view of the *whole* level, so it
+                // shows the whole level. Waiting for the player to walk somewhere
+                // before its geometry appears defeats the purpose - the map is being
+                // inspected precisely because something in it does not work.
+                var cheating = am.State != AutoMapState.None ||
+                               DebugSettings.ShowTriggers ||
+                               DebugSettings.ShowBlockmap;
 
                 if (cheating || (line.Flags & LineFlags.Mapped) != 0)
                 {
@@ -241,6 +247,147 @@ namespace DPTDOOM.Video
                 0,
                 amHeight - scale,
                 scale);
+
+            // Debug overlays last, so they sit on top of the map and are not
+            // overwritten by the lines they are meant to annotate.
+            if (DebugSettings.ShowBlockmap)
+            {
+                DrawBlockmap(world);
+            }
+
+            if (DebugSettings.ShowTriggers)
+            {
+                DrawTriggers(world);
+            }
+        }
+
+        /// <summary>
+        /// Draws the blockmap grid.
+        ///
+        /// This is the collision grid, and the thing it is for is seeing why a body
+        /// stops where it does: an actor is only tested against the things in its
+        /// own 128-unit cell and the eight around it, so a monster that seems to
+        /// ignore the player is often in a cell the test never looked at. That is
+        /// invisible without the grid drawn.
+        /// </summary>
+        private void DrawBlockmap(World world)
+        {
+            var bm = world.Map.BlockMap;
+            var color = grays + 6;
+
+            var originX = bm.OriginX.ToFloat();
+            var originY = bm.OriginY.ToFloat();
+            var cell = (float)BlockMap.IntBlockSize;
+
+            var right = originX + bm.Width * cell;
+            var top = originY + bm.Height * cell;
+
+            for (var bx = 0; bx <= bm.Width; bx++)
+            {
+                var x = originX + bx * cell;
+
+                var a = ToScreenPosition(x, originY);
+                var b = ToScreenPosition(x, top);
+
+                // Skip columns entirely off screen: the grid is drawn every frame,
+                // and a line outside the window is still work for DrawLine.
+                if ((a.X < 0 && b.X < 0) || (a.X > amWidth && b.X > amWidth))
+                {
+                    continue;
+                }
+
+                screen.DrawLine(a.X, a.Y, b.X, b.Y, color);
+            }
+
+            for (var by = 0; by <= bm.Height; by++)
+            {
+                var y = originY + by * cell;
+
+                var a = ToScreenPosition(originX, y);
+                var b = ToScreenPosition(right, y);
+
+                if ((a.Y < 0 && b.Y < 0) || (a.Y > amHeight && b.Y > amHeight))
+                {
+                    continue;
+                }
+
+                screen.DrawLine(a.X, a.Y, b.X, b.Y, color);
+            }
+        }
+
+        /// <summary>
+        /// Marks the lines and sectors that carry a special.
+        ///
+        /// The reason a map "does nothing" is almost always a broken pairing: a
+        /// switch whose tag nothing responds to, or a sector whose tag no line
+        /// targets. Seeing both sets drawn together answers that in one look, where
+        /// reading the WAD answers it in an hour.
+        ///
+        /// Lines with a special are drawn in one colour, and sector tags are printed
+        /// at the sector's centre, so the pairing can be followed by eye.
+        /// </summary>
+        private void DrawTriggers(World world)
+        {
+            var specialColor = grays + 4;
+
+            foreach (var line in world.Map.Lines)
+            {
+                if ((int)line.Special == 0)
+                {
+                    continue;
+                }
+
+                var v1 = ToScreenPos(line.Vertex1);
+                var v2 = ToScreenPos(line.Vertex2);
+
+                screen.DrawLine(v1.X, v1.Y, v2.X, v2.Y, specialColor);
+            }
+
+            foreach (var sector in world.Map.Sectors)
+            {
+                if (sector.Tag == 0)
+                {
+                    continue;
+                }
+
+                // Centre of the bounding box of the sector's lines: close enough to
+                // label a tag, and far cheaper than a true centroid.
+                var cx = 0F;
+                var cy = 0F;
+                var count = 0;
+
+                foreach (var line in sector.Lines)
+                {
+                    cx += (line.Vertex1.X.ToFloat() + line.Vertex2.X.ToFloat()) * 0.5F;
+                    cy += (line.Vertex1.Y.ToFloat() + line.Vertex2.Y.ToFloat()) * 0.5F;
+                    count++;
+                }
+
+                if (count == 0)
+                {
+                    continue;
+                }
+
+                var pos = ToScreenPosition(cx / count, cy / count);
+
+                if (pos.X < 0 || pos.X >= amWidth || pos.Y < 0 || pos.Y >= amHeight)
+                {
+                    continue;
+                }
+
+                screen.DrawText(sector.Tag.ToString(), (int)pos.X - 4, (int)pos.Y - 4, scale);
+            }
+        }
+
+        /// <summary>
+        /// Map position to screen, for overlays that have no Vertex to convert.
+        /// </summary>
+        private DrawPos ToScreenPosition(float x, float y)
+        {
+            var posX = zoom * ppu * (x - renderViewX) + amWidth / 2;
+            var posY = -zoom * ppu * (y - renderViewY) + amHeight / 2;
+
+            return new DrawPos(posX, posY);
         }
 
         private void DrawPlayers(World world)

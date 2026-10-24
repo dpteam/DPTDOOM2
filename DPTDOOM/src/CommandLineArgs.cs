@@ -79,6 +79,8 @@ namespace DPTDOOM
         public readonly Arg wireframe;
         public readonly Arg freeze;
         public readonly Arg maponly;
+        public readonly Arg showtriggers;
+        public readonly Arg showblockmap;
         public readonly Arg bots;
         public readonly Arg<int> coopbots;
         public readonly Arg<string> botdump;
@@ -144,6 +146,8 @@ namespace DPTDOOM
             wireframe = new Arg(args.Contains("-wireframe"));
             freeze = new Arg(args.Contains("-freeze"));
             maponly = new Arg(args.Contains("-maponly"));
+            showtriggers = new Arg(args.Contains("-showtriggers"));
+            showblockmap = new Arg(args.Contains("-showblockmap"));
             bots = new Arg(args.Contains("-bots"));
             coopbots = GetInt(args, "-coopbots");
             botdump = GetString(args, "-botdump");
