@@ -71,6 +71,27 @@ namespace DPTDOOM.Net
         /// </summary>
         public const ushort TypeDelay = 9;
 
+        /// <summary>
+        /// Host to guests: a player is gone for good and their slot has been
+        /// abandoned.
+        ///
+        /// The slot is not freed and the session does not end: the host keeps sending
+        /// that player's commands as empty ones, so the world stays identical on every
+        /// machine and the remaining players continue. Nothing but a notice has to
+        /// travel, because the commands that carry the absence travel already.
+        /// </summary>
+        public const ushort TypeLeave = 10;
+
+        /// <summary>
+        /// Host to guests: the session is paused waiting for a peer, and for how long.
+        ///
+        /// Guests have to know, because on their side nothing is wrong: their own link
+        /// is fine and no command is missing that they could ask for. Without this they
+        /// simply stop - the tic never completes, no message appears, and the player
+        /// sees a frozen game with no explanation.
+        /// </summary>
+        public const ushort TypeHold = 11;
+
         public static byte[] BuildFrame(ushort type, byte[] payload)
         {
             var frame = new byte[HeaderSize + payload.Length];

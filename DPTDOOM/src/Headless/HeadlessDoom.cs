@@ -155,7 +155,17 @@ namespace DPTDOOM.Headless
                         // the run actually reached rather than the one before it.
                         if (simulated == lastSimulated)
                         {
-                            stalledUpdates++;
+                            // A network session holding the game for a peer is not a
+                            // stall: the tic cannot advance until the peer's command
+                            // arrives, and that is the design rather than a fault. The
+                            // grace period is thirty seconds, which is several thousand
+                            // updates, so counting them stopped a legitimate run with
+                            // "simulation is not advancing (paused?)" - a wrong answer
+                            // that looked like a stall.
+                            if (driver == null || !driver.Reconnecting)
+                            {
+                                stalledUpdates++;
+                            }
                         }
                         else
                         {

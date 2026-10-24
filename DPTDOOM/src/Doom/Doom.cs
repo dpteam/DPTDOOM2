@@ -1962,7 +1962,18 @@ namespace DPTDOOM
                             // losing the level to a two-second router hiccup.
                             if (netDriver.Reconnecting)
                             {
-                                ShowReconnectStatus();
+                                // The grace period has to be checked here, because
+                                // this branch deliberately skips TryAdvance - and that
+                                // is where the check normally lives. Without it the
+                                // session waits for a peer that never comes back, for
+                                // ever, with the screen saying "waiting".
+                                netDriver.PollReconnect();
+
+                                if (!netDriver.Faulted && !netDriver.Finished)
+                                {
+                                    ShowReconnectStatus();
+                                }
+
                                 break;
                             }
 

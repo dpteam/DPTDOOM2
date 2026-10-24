@@ -368,7 +368,7 @@ namespace DPTDOOM.Net
         /// The full message still goes to the console and the log, where a person
         /// debugging can read it; the screen gets what is readable and actionable.
         /// </summary>
-        private static string DescribeFailure(string host, int port, Exception error)
+        internal static string DescribeFailure(string host, int port, Exception error)
         {
             // The socket error can be wrapped: NetSession turns a connect timeout
             // into a plain Exception and leaves the SocketException underneath.
@@ -399,16 +399,34 @@ namespace DPTDOOM.Net
                 }
             }
 
-            // No socket error at all: the timeout we raise ourselves, or a refusal
-            // from the host's own handshake.
+            // An answer from the host's own handshake. It must come before the
+            // "refused" heuristic below, or "Host refused the connection: session is
+            // full" is shown as "REFUSED - IS THE HOST RUNNING?" - a wrong diagnosis
+            // pointing at the one thing that is definitely working.
+            //
+            // The reason travels with it, because the host knows exactly why and the
+            // player cannot act on a guess: a full session, a stale token and an
+            // abandoned slot are three different problems.
+            var refusal = error as NetRefusalException;
+
+            if (refusal != null)
+            {
+                var reason = refusal.Message;
+
+                var separator = reason.IndexOf(": ", StringComparison.Ordinal);
+
+                if (separator >= 0)
+                {
+                    reason = reason.Substring(separator + 2);
+                }
+
+                return host.ToUpperInvariant() + ":" + port + " REFUSED: " + reason.ToUpperInvariant();
+            }
+
+            // No socket error at all: the timeout we raise ourselves.
             if (error.Message.IndexOf("timed out", StringComparison.OrdinalIgnoreCase) >= 0)
             {
                 return host.ToUpper() + ":" + port + " NO ANSWER - FIREWALL OR WRONG ADDRESS?";
-            }
-
-            if (error.Message.IndexOf("refused", StringComparison.OrdinalIgnoreCase) >= 0)
-            {
-                return host.ToUpper() + ":" + port + " REFUSED - IS THE HOST RUNNING?";
             }
 
             return host.ToUpper() + ":" + port + " FAILED - SEE THE LOG";

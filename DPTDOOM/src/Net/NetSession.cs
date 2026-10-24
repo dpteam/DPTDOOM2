@@ -198,6 +198,24 @@ namespace DPTDOOM.Net
     }
 
     /// <summary>
+    /// The host said no, and meant it.
+    ///
+    /// Distinct from a connection error on purpose. A timeout, a refused socket, a
+    /// reset connection - all of those are worth retrying, because the far end may
+    /// come back. A refusal is an answer: the session is full, the token is stale, or
+    /// the slot was given up on. Retrying against an answer only delays the moment the
+    /// player learns what happened, and buries the reason in a pile of identical log
+    /// lines.
+    /// </summary>
+    public sealed class NetRefusalException : Exception
+    {
+        public NetRefusalException(string reason)
+            : base(reason)
+        {
+        }
+    }
+
+    /// <summary>
     /// Transport for a small co-op session. One host accepts up to three
     /// guests; tics travel over TCP and the host relays them, so every client
     /// only needs a connection to the host.
@@ -282,6 +300,31 @@ namespace DPTDOOM.Net
         /// </summary>
         private int reconnectCount;
         private readonly Dictionary<int, int> awaitingResume = new Dictionary<int, int>();
+
+        /// <summary>
+        /// Guest side: the host is holding the game while it waits for another player.
+        ///
+        /// Nothing is wrong with this link - that is exactly why the guest cannot
+        /// deduce it. Its own read loop is healthy, no command it could ask for is
+        /// missing, and the tic simply never completes. Reported through
+        /// <see cref="Reconnecting"/> so the pause is explained on screen and by the
+        /// headless harness instead of looking like a hang.
+        /// </summary>
+        private volatile bool hostHolding;
+
+        /// <summary>
+        /// Slots whose player is gone for good: the connection is dead, the grace
+        /// period ran out, and nobody is coming back.
+        ///
+        /// The slot stays in the session and the world, because taking it out would
+        /// change the world on one machine and not the other. Instead the host sends
+        /// empty commands for it - an inert player standing where they were - so every
+        /// end applies exactly the same thing and the session carries on.
+        ///
+        /// This is the difference between a co-op game and a phone call: one player
+        /// losing their connection used to end the game for everybody.
+        /// </summary>
+        private readonly HashSet<int> abandoned = new HashSet<int>();
 
         /// <summary>
         /// The token issued to each slot, kept for the life of the session.
@@ -676,6 +719,23 @@ namespace DPTDOOM.Net
                     }
                 }
 
+                // A slot that was given up on cannot be taken back. The game moved on
+                // without it, and the returning machine is further behind than the
+                // replay window - a few hundred commands, enough for a stall but not
+                // for a minute of play. Catching up would need a world snapshot, which
+                // lockstep does not have.
+                //
+                // Saying so is the important part. The alternative is a guest that
+                // reconnects into a slot the host stopped waiting for, waits for tics
+                // that will never be replayed, and hangs with no explanation.
+                if (abandoned.Contains(playerIndex))
+                {
+                    SendFrame(stream, NetProtocol.TypeReject,
+                        EncodeReason("your slot was given up on; start a new session"), null);
+                    CloseGuest(client, stream);
+                    return;
+                }
+
                 slotName = playerIndex < names.Count ? names[playerIndex] : guestName;
             }
 
@@ -714,7 +774,9 @@ namespace DPTDOOM.Net
                 }
             }
 
-            Console.WriteLine("Net: '" + guestName + "' reconnected as player " + (playerIndex + 1) + ".");
+            BroadcastHold(false);
+
+            Console.WriteLine("Net: '" + slotName + "' reconnected as player " + (playerIndex + 1) + ".");
 
             if (old != null)
             {
@@ -1521,7 +1583,7 @@ namespace DPTDOOM.Net
                             reason = NetProtocol.ReadString(payloadReader);
                         }
 
-                        throw new Exception("Host refused the connection: " + reason);
+                        throw new NetRefusalException("Host refused the connection: " + reason);
                     }
 
                     if (frame.Type != NetProtocol.TypeWelcome)
@@ -1651,7 +1713,42 @@ namespace DPTDOOM.Net
             Console.WriteLine("Net: lost '" + peer.Name + "', holding the game for up to " +
                               reconnectGraceSeconds + " s.");
 
+            BroadcastHold(true);
+
             CloseGuest(peer.Client, peer.Stream);
+        }
+
+        /// <summary>
+        /// Tells the guests whether the game is paused waiting for a peer.
+        ///
+        /// They cannot work this out for themselves: their own links are healthy and no
+        /// command they could ask for is missing. Without the notice a paused session
+        /// looks like a hung one, both on screen and to the headless harness, which
+        /// counts it as a stall and stops the run.
+        /// </summary>
+        private void BroadcastHold(bool holding)
+        {
+            if (!isHost)
+            {
+                return;
+            }
+
+            var payload = new byte[] { (byte)(holding ? 1 : 0) };
+
+            List<Peer> targets;
+
+            lock (sync)
+            {
+                targets = new List<Peer>(peers);
+            }
+
+            foreach (var peer in targets)
+            {
+                if (peer.Stream != null)
+                {
+                    SendFrame(peer.Stream, NetProtocol.TypeHold, payload, peer);
+                }
+            }
         }
 
         /// <summary>
@@ -1752,6 +1849,18 @@ namespace DPTDOOM.Net
                     ReplayHistory(null);
 
                     Console.WriteLine("Net: reconnected to the host after " + reconnectAttempts + " attempt(s).");
+                    return;
+                }
+                catch (NetRefusalException refusal)
+                {
+                    // An answer, not a failure. Retrying would only delay the moment
+                    // the player learns why they are not in the game, and fill the log
+                    // with the same line.
+                    if (!disposed && !finished && !faulted)
+                    {
+                        Fault(refusal.Message);
+                    }
+
                     return;
                 }
                 catch (Exception e)
@@ -1881,7 +1990,7 @@ namespace DPTDOOM.Net
 
                 if (expired >= 0)
                 {
-                    Fault("player " + (expired + 1) + " did not come back");
+                    AbandonSlot(expired);
                 }
 
                 return;
@@ -1896,6 +2005,68 @@ namespace DPTDOOM.Net
             }
 
             Fault("connection to the host was lost");
+        }
+
+        /// <summary>
+        /// Gives up on a slot and keeps playing.
+        ///
+        /// The alternative - ending the session - is what this used to do, and it
+        /// made one player's bad connection everybody's problem. The slot cannot be
+        /// removed, because a world built with three players and a world built with
+        /// two are different worlds; so it is kept and filled with empty commands by
+        /// the host, which means every end applies the same thing.
+        ///
+        /// What the player loses is their character, not the game: their body stays
+        /// where it stood. Anything else would need a state transfer, which lockstep
+        /// does not have and does not want.
+        /// </summary>
+        private void AbandonSlot(int playerIndex)
+        {
+            var name = "player " + (playerIndex + 1);
+
+            lock (sync)
+            {
+                awaitingResume.Remove(playerIndex);
+                abandoned.Add(playerIndex);
+
+                // names is filled in slot order, so the slot number is the index.
+                if (playerIndex < names.Count && !string.IsNullOrEmpty(names[playerIndex]))
+                {
+                    name = names[playerIndex];
+                }
+
+                if (awaitingResume.Count == 0)
+                {
+                    reconnecting = false;
+                }
+            }
+
+            BroadcastHold(false);
+
+            Console.WriteLine("Net: '" + name + "' did not come back; player " + (playerIndex + 1) +
+                              " is now inert and the session continues without them.");
+
+            BroadcastLeave(playerIndex);
+        }
+
+        private void BroadcastLeave(int playerIndex)
+        {
+            var payload = new byte[] { (byte)playerIndex };
+
+            List<Peer> targets;
+
+            lock (sync)
+            {
+                targets = new List<Peer>(peers);
+            }
+
+            foreach (var peer in targets)
+            {
+                if (peer.Stream != null)
+                {
+                    SendFrame(peer.Stream, NetProtocol.TypeLeave, payload, peer);
+                }
+            }
         }
 
         /// <summary>
@@ -1943,7 +2114,7 @@ namespace DPTDOOM.Net
             }
         }
 
-        public bool Reconnecting => reconnecting;
+        public bool Reconnecting => reconnecting || hostHolding;
 
         /// <summary>
         /// Moves the input buffer as if the link had changed, and tells the guests.
@@ -2018,9 +2189,17 @@ namespace DPTDOOM.Net
         {
             get
             {
-                if (!reconnecting)
+                if (!Reconnecting)
                 {
                     return null;
+                }
+
+                // A guest that is only holding for somebody else has no deadline of
+                // its own to show; the host's number is the one that matters and it
+                // tells how long it intends to wait.
+                if (hostHolding && !reconnecting)
+                {
+                    return "WAITING FOR PLAYER";
                 }
 
                 var seconds = ReconnectSecondsLeft;
@@ -2068,6 +2247,39 @@ namespace DPTDOOM.Net
 
                 case NetProtocol.TypeChat:
                     HandleChat(peer, payload);
+                    break;
+
+                case NetProtocol.TypeHold:
+                    // The host is waiting for somebody else. Nothing is missing on
+                    // this side, which is why it has to be told: the tic simply never
+                    // completes and there is no command to ask for.
+                    if (!isHost)
+                    {
+                        hostHolding = payload.Length >= 1 && payload[0] != 0;
+                    }
+                    break;
+
+                case NetProtocol.TypeLeave:
+                    // A notice, not a state change: the commands that carry the
+                    // absence already arrive as ordinary empty tics from the host, so
+                    // the world was already consistent before this frame. All that is
+                    // left is to say so, once.
+                    if (payload.Length >= 1 && payload[0] < NetProtocol.MaxPlayers)
+                    {
+                        var who = payload[0];
+                        var changed = false;
+
+                        lock (sync)
+                        {
+                            changed = abandoned.Add(who);
+                        }
+
+                        if (changed)
+                        {
+                            Console.WriteLine("Net: player " + (who + 1) +
+                                              " left the game; the session continues without them.");
+                        }
+                    }
                     break;
 
                 case NetProtocol.TypePong:
@@ -2642,13 +2854,21 @@ namespace DPTDOOM.Net
 
         public bool IsHost => isHost;
         public int LocalPlayer => localPlayer;
+
+        /// <summary>
+        /// People actually in the session right now.
+        ///
+        /// Slots minus the ones given up on: the slot stays in the world so that every
+        /// machine builds the same world, but counting it as a connected player would
+        /// make the status line claim somebody is there who is not.
+        /// </summary>
         public int PlayerCount
         {
             get
             {
                 lock (sync)
                 {
-                    return connectedPlayers;
+                    return connectedPlayers - abandoned.Count;
                 }
             }
         }
@@ -2666,7 +2886,7 @@ namespace DPTDOOM.Net
         public int BotCount => botCount;
 
         /// <summary>Slots that have to be filled by a real connection.</summary>
-        public int HumansNeeded => expectedPlayers - botCount;
+        public int HumansNeeded => expectedPlayers - botCount - LeftCount;
 
         public void AttachBots(int count)
         {
@@ -2744,6 +2964,53 @@ namespace DPTDOOM.Net
         /// <summary>How many times the input buffer was resized during the session.</summary>
         public int DelayChanges => delayChanges;
 
+        /// <summary>
+        /// Slots whose player is gone for good, so the caller can say who is left.
+        ///
+        /// The session keeps simulating these slots - an inert player standing where
+        /// they were - because a world with three players and a world with two are
+        /// different worlds. From the outside that means "left", from the inside it
+        /// means "never moves again".
+        /// </summary>
+        public int LeftCount
+        {
+            get
+            {
+                lock (sync)
+                {
+                    return abandoned.Count;
+                }
+            }
+        }
+
+        public bool IsAbandoned(int player)
+        {
+            lock (sync)
+            {
+                return abandoned.Contains(player);
+            }
+        }
+
+        /// <summary>
+        /// The player indices the host has to generate empty commands for.
+        ///
+        /// A copy rather than the live set: the driver asks for this on every tic, and
+        /// holding the session's lock while it builds commands would put the network
+        /// lock inside the simulation loop.
+        /// </summary>
+        public int[] AbandonedSlots
+        {
+            get
+            {
+                lock (sync)
+                {
+                    var result = new int[abandoned.Count];
+                    abandoned.CopyTo(result);
+                    return result;
+                }
+            }
+        }
+
         /// <summary>Tics simulated so far on this machine.</summary>
         public int TicsSimulated
         {
@@ -2806,7 +3073,14 @@ namespace DPTDOOM.Net
                     .Append("% of tics");
             }
 
-            text.Append(", reconnects ").Append(reconnectCount).Append('\n');
+            text.Append(", reconnects ").Append(reconnectCount);
+
+            if (LeftCount > 0)
+            {
+                text.Append(", left ").Append(LeftCount);
+            }
+
+            text.Append('\n');
 
             if (faulted)
             {

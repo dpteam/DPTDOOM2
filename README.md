@@ -163,6 +163,7 @@ dotnet test DPTDOOMTest\DPTDOOMTest.csproj -c Release
 powershell -NoProfile -File tools\test-headless.ps1
 powershell -NoProfile -File tools\test-bots.ps1
 powershell -NoProfile -File tools\test-net-bots.ps1
+powershell -NoProfile -File tools\test-net-leave.ps1
 powershell -NoProfile -File tools\test-net-latency.ps1
 powershell -NoProfile -File tools\test-reconnect.ps1
 powershell -NoProfile -File tools\test-relay.ps1
@@ -170,7 +171,7 @@ powershell -NoProfile -File tools\test-launcher.ps1
 powershell -NoProfile -File tools\check-standalone.ps1
 ```
 
-435 тестов. Геймплейные сверяют хеши мира с эталонами Managed Doom — то есть
+445 тестов. Геймплейные сверяют хеши мира с эталонами Managed Doom — то есть
 проверяют, что порт остался демо-совместимым, а не только что он компилируется.
 Тесты, которым нужен IWAD, без него помечаются пропущенными, а не падают.
 

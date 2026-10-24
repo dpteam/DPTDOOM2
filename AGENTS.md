@@ -44,6 +44,7 @@ powershell -NoProfile -File tools\test-relay.ps1
 powershell -NoProfile -File tools\test-net-latency.ps1
 powershell -NoProfile -File tools\test-bots.ps1
 powershell -NoProfile -File tools\test-net-bots.ps1
+powershell -NoProfile -File tools\test-net-leave.ps1
 powershell -NoProfile -File tools\test-reconnect.ps1
 powershell -NoProfile -File tools\test-profile.ps1
 powershell -NoProfile -File tools\test-view.ps1
@@ -190,6 +191,20 @@ powershell -NoProfile -File tools\test-launcher.ps1
   `tools/test-reconnect.ps1` (реальный разрыв, хеши мира).
 - Молча умерший сокет ловится по тишине (`LinkSilenceMs`, 8 с): `Read` на нём
   висит вечно, и без этого игру не спасает никакой reconnect.
+- Ушедший навсегда игрок **не завершает сессию**. Слот убрать нельзя (мир на трёх
+  и мир на двух — разные миры), поэтому слот остаётся инертным: хост шлёт за него
+  **пустые** команды, все концы применяют одно и то же. Пустые — только там, где у
+  хоста нет настоящей команды (иначе расхождение), и **не** под флагом «раз за
+  тик» (иначе сессия встаёт ровно на тике ухода). Вернуться после отказа нельзя:
+  игра ушла вперёд дальше окна повтора; хост отвечает `NetRefusalException`, и это
+  ответ, а не сбой — попытки прекращаются сразу. Проверка — `NetLeaveTest` (5) и
+  `tools/test-net-leave.ps1`.
+- Пока сессия держит игру, **гости должны об этом знать** (`TypeHold`): на их
+  стороне канал здоров и недостающей команды нет, тик просто не завершается.
+  Без уведомления это неотличимо от зависания, и `headless` считает это застоем.
+  И срок удержания проверяется **вне** `TryAdvance`: `Doom` при удержании выходит
+  из обработки до него, поэтому `PollReconnect` вызывается явно из той ветки —
+  иначе «игрок не вернулся» не наступает никогда и хост ждёт вечно.
 - Правила коопа (`TeammatesBlock`, `CoopDeathmatchWeapons`, `SharedKeys`) меняют
   симуляцию, поэтому живут в `SessionSettings` (флаги байта 127) и приезжают
   гостю в welcome. Нельзя читать их из командной строки на стороне гостя и

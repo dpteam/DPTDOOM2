@@ -40,6 +40,19 @@ param(
     # no longer capped by the round trip: the old ceiling at 50 ms was 17.5.
     [double]$MinTicsPerSecond = 30,
 
+    # How many extra tics the host is given.
+    #
+    # The host used to be started with the same -tics as the guest, and both run
+    # unthrottled: the host reaches the limit first and its process exits while the
+    # guest is still a few tics behind. The guest then has nobody to talk to, spends
+    # its whole reconnect grace period failing to redial a dead port, and its measured
+    # rate collapses to a third of the real one - a failure that has nothing to do with
+    # latency, and that got more likely as the input buffer learned to grow.
+    #
+    # The host would still quit early on "the other player left the game" if it were
+    # the guest who finished first, so it needs a margin, not an infinite run.
+    [int]$HostLingerTics = 120,
+
     # The tic both sides print a world hash at.
     #
     # Comparing the final State lines compares different tics: the host reaches its
@@ -121,7 +134,7 @@ for ($case = 0; $case -lt $cases.Count; $case++) {
         $hostProcess = Start-Process -FilePath $Exe -PassThru -WindowStyle Hidden `
             -RedirectStandardOutput $hostOut `
             -ArgumentList @('-headless', '-iwad', $Iwad, '-net', 'host', '-players', '2',
-                            '-port', "$hostPort", '-warp', '1', '-skill', '3', '-tics', "$Tics",
+                            '-port', "$hostPort", '-warp', '1', '-skill', '3', '-tics', "$($Tics + $HostLingerTics)",
                             '-stateat', "$CompareTic")
 
         Start-Sleep -Seconds 5

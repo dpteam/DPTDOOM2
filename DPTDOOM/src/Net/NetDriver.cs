@@ -55,6 +55,17 @@ namespace DPTDOOM.Net
         string ReconnectStatus { get; }
 
         /// <summary>
+        /// Expires a reconnect that never completed.
+        ///
+        /// On the interface because the game loop skips <see cref="TryAdvance"/> while
+        /// the session is being held: it shows the status and leaves the world where it
+        /// is, which means nothing inside the driver runs. Without this being called
+        /// from there, the grace period is never checked and a session waits for a peer
+        /// that is never coming back - for ever, with the screen saying "waiting".
+        /// </summary>
+        void PollReconnect();
+
+        /// <summary>
         /// Several lines of session statistics, for the "netstats" command.
         ///
         /// On the interface rather than reached through the concrete session, because
@@ -184,6 +195,61 @@ namespace DPTDOOM.Net
             }
         }
 
+        /// <summary>
+        /// Sends empty commands for the players who left.
+        ///
+        /// The slot cannot be removed from the world - a world built with three
+        /// players and a world built with two are different worlds - so the host
+        /// keeps it alive with zeroes. Every end then applies exactly the same thing
+        /// and nobody desynchronises, which is why one player's bad connection no
+        /// longer ends the game for everyone.
+        ///
+        /// Deliberately not behind the once-per-tic bot flag. That flag exists so a
+        /// bot is not sampled twice for one tic; these commands are not sampled from
+        /// anything, and the whole point is that they have to be produced on the
+        /// attempt that finally completes the tic. Behind the flag, the first attempt
+        /// (which failed for want of exactly this command) consumed the flag and every
+        /// retry was blocked - the session stopped dead at the tic where the player
+        /// left, which is the failure this feature exists to prevent.
+        ///
+        /// Duplicate sends are harmless: a tic is keyed by number and a receiver
+        /// ignores a number it already has, and the check below produces the same
+        /// answer every time.
+        /// </summary>
+        private void SendEmptyTicsForAbandoned()
+        {
+            if (!session.IsHost)
+            {
+                return;
+            }
+
+            foreach (var player in session.AbandonedSlots)
+            {
+                if (bots != null && player < bots.Length && bots[player] != null)
+                {
+                    // A slot cannot be both, but if a bot ever shared a slot with a
+                    // departed human the bot's command is the real one.
+                    continue;
+                }
+
+                if (session.HasTic(player, tic))
+                {
+                    // The player's own command for this tic already arrived before
+                    // they vanished, and every other end already has it - the relay
+                    // runs over TCP, so a command the host wrote is a command the
+                    // guests got. Sending a zero over the top would be ignored where
+                    // the real one is known and applied where it is not, which is
+                    // exactly how two ends drift apart.
+                    continue;
+                }
+
+                var netTic = new NetTic();
+                netTic.Number = tic;
+
+                session.SendTic(player, netTic);
+            }
+        }
+
         public bool TryAdvance(TicCmd[] cmds, IUserInput input, ref bool pause)
         {
             // Expire a reconnect that never completed. The game loop is the only
@@ -237,6 +303,7 @@ namespace DPTDOOM.Net
             // as a human's: stored for this tic and broadcast. The guest therefore
             // never runs bot logic and cannot disagree about what a bot did.
             SendBotTics();
+            SendEmptyTicsForAbandoned();
 
             var count = session.ExpectedPlayers;
 
@@ -397,6 +464,11 @@ namespace DPTDOOM.Net
         public int LocalPlayer => session.LocalPlayer;
         public bool Reconnecting => session.Reconnecting;
         public string ReconnectStatus => session.ReconnectStatus;
+
+        public void PollReconnect()
+        {
+            session.PollReconnect();
+        }
         public string Stats => session.Report();
 
         /// <summary>
