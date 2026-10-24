@@ -176,9 +176,17 @@ namespace DPTDOOM.Net
             // Zero guests so far, and the slot count is what the loop below prints.
             lines.Add("WAITING FOR PLAYER 0/" + (players - bots - 1));
 
-            status("HOSTING", lines.ToArray());
-
             var session = NetSession.StartHost(port, players, name, settings, delayOverride, guard);
+
+            // Forwarded before the screen goes up, so the address a friend has to type is
+            // part of it and stays there. Bounded by a deadline: a router that does not
+            // answer must not become a startup delay.
+            if (args.upnp.Present)
+            {
+                lines.Add(UpnpForward(session, port));
+            }
+
+            status("HOSTING", lines.ToArray());
 
             if (presence != null)
             {
@@ -316,6 +324,62 @@ namespace DPTDOOM.Net
 
             return guard;
         }
+
+        /// <summary>
+        /// Asks the router to forward the game port, and returns the line for the status
+        /// screen.
+        ///
+        /// Best-effort in both directions. A router without UPnP, a router that refuses,
+        /// a network with no gateway: none of them stop the host, because the host still
+        /// works on a LAN and still works through the relay. What must not happen is the
+        /// game claiming a forward that does not exist - a friend trying an address that
+        /// goes nowhere is worse than being told to forward the port by hand.
+        ///
+        /// The mapping is handed to the session so it is removed when the session ends:
+        /// a forward nobody takes down is a port left open in the router's table until it
+        /// reboots.
+        /// </summary>
+        private static string UpnpForward(NetSession session, int port)
+        {
+            string reason;
+
+            var mapping = UpnpPortMapper.TryMapWithDeadline(
+                port, ApplicationInfo.Name, UpnpDeadlineSeconds, out reason);
+
+            if (mapping == null)
+            {
+                Console.WriteLine("Net: could not forward port " + port + " over UPnP: " + reason + ".");
+
+                // On the screen as a fact, not as a sentence: the status lines are drawn
+                // in Doom's font and printed in capitals by the renderer anyway.
+                return "UPnP: NOT FORWARDED";
+            }
+
+            session.AttachUpnpMapping(mapping);
+
+            if (string.IsNullOrEmpty(mapping.ExternalAddress))
+            {
+                Console.WriteLine("Net: port " + port + " forwarded over UPnP; the router did not " +
+                                  "report its external address.");
+
+                return "UPnP: FORWARDED";
+            }
+
+            Console.WriteLine("Net: port " + port + " forwarded over UPnP; friends can reach " +
+                              mapping.ExternalAddress + ":" + port + ".");
+
+            return "UPnP: " + mapping.ExternalAddress + ":" + port;
+        }
+
+        /// <summary>
+        /// How long the whole UPnP attempt may take before the host carries on without it.
+        ///
+        /// Long enough for a slow router to answer an SSDP search and a SOAP call, short
+        /// enough that a network with no gateway does not look like a hang. The discovery
+        /// itself waits three seconds per search target, so the deadline is measured
+        /// across the whole attempt rather than per step.
+        /// </summary>
+        private const int UpnpDeadlineSeconds = 12;
 
         private static NetSession Join(CommandLineArgs args, GameContent content, StatusHandler status, int port, string name)
         {

@@ -119,6 +119,15 @@ namespace DPTDOOM
         public readonly bool passwordValueLookedLikeAnOption;
         public readonly Arg<string> master;
         public readonly Arg relay;
+
+        /// <summary>
+        /// Whether to ask the router to forward the game port, using UPnP.
+        ///
+        /// Opt-in rather than automatic: a program that silently opens a port on the
+        /// internet the first time it runs is a program that asked no permission. A host
+        /// who wants it says so.
+        /// </summary>
+        public readonly Arg upnp;
         public readonly Arg<string> relayMaster;
         public readonly Arg<string> relaySession;
         public readonly Arg<int> netdelay;
@@ -202,6 +211,7 @@ namespace DPTDOOM
             netlog = GetString(args, "-netlog");
             master = GetString(args, "-master");
             relay = new Arg(args.Contains("-relay"));
+            upnp = new Arg(args.Contains("-upnp"));
             relayMaster = GetString(args, "-relay-master");
             relaySession = GetString(args, "-relay-session");
             netdelay = GetInt(args, "-netdelay");

@@ -3026,6 +3026,57 @@ namespace DPTDOOM.Net
             return new Frame { Type = type, Payload = payload };
         }
 
+        /// <summary>
+        /// The forwarded port this session opened on the router, if any.
+        ///
+        /// Held by the session so it is taken down when the session is disposed. A
+        /// mapping nobody removes survives in the router's table until the next reboot,
+        /// which is a port open to the internet for a game that ended days ago.
+        /// </summary>
+        private UpnpMapping upnp;
+
+        public void AttachUpnpMapping(UpnpMapping mapping)
+        {
+            upnp = mapping;
+        }
+
+        /// <summary>
+        /// Asks the router to forget the forwarded port.
+        ///
+        /// On a worker thread with a short wait, because there are two competing
+        /// requirements: the game must not hang on exit, and the port must not stay open.
+        /// Two seconds covers a router on the same LAN and bounds the worst case.
+        /// </summary>
+        private void ReleaseUpnp()
+        {
+            var mapping = upnp;
+
+            if (mapping == null)
+            {
+                return;
+            }
+
+            upnp = null;
+
+            var thread = new Thread(() =>
+            {
+                try
+                {
+                    UpnpPortMapper.TryUnmap(mapping);
+                }
+                catch (Exception)
+                {
+                    // Nothing a closing game can do about it.
+                }
+            });
+
+            thread.IsBackground = true;
+            thread.Name = "DPTDOOM UPnP close";
+            thread.Start();
+
+            thread.Join(2000);
+        }
+
         public void AttachPresence(Presence value)
         {
             presence = value;
@@ -3120,6 +3171,12 @@ namespace DPTDOOM.Net
             catch
             {
             }
+
+            // The forwarded port goes away with the session. Attempted on a worker and
+            // waited for only briefly: the game is closing and a slow router must not
+            // hold the exit, but a mapping left behind is a port open to the internet
+            // long after the game ended.
+            ReleaseUpnp();
 
             // The list is copied before iterating: shutting a peer down makes its read
             // loop unwind, and that loop removes the peer from the list. Iterating the

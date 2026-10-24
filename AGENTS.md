@@ -49,6 +49,7 @@ powershell -NoProfile -File tools\test-host-bans.ps1
 powershell -NoProfile -File tools\test-master-allow.ps1
 powershell -NoProfile -File tools\test-master-config.ps1
 powershell -NoProfile -File tools\test-scripts.ps1
+powershell -NoProfile -File tools\test-upnp.ps1
 powershell -NoProfile -File tools\test-reconnect.ps1
 powershell -NoProfile -File tools\test-profile.ps1
 powershell -NoProfile -File tools\test-view.ps1
@@ -246,6 +247,15 @@ powershell -NoProfile -File tools\test-launcher.ps1
   политика, а не предел; не путать одно с другим.
 - Сохранения в сети не поддерживаются. Не добавлять заглушки, выглядящие
   рабочими.
+- UPnP (`-upnp`, `src/Net/UpnpProtocol.cs`, `UpnpPortMapper.cs`) — **своими
+  сокетами**, не через COM: `refs/NATUPNPLib` это декомпилированный interop из
+  коммерческой игры, брать его нельзя, а COM тянет `CustomMarshalers.dll` рядом с
+  exe. Шаги UPnP: SSDP-поиск (все цели разом, одно окно), разбор описания устройства,
+  SOAP POST на controlURL. Проброс **снимается** при выходе — правило, оставшееся в
+  роутере, это открытый в интернет порт через неделю после игры. Флаг явный, не
+  автоматический: молча открывать порт нельзя. Отказ (нет шлюза, 718 занят, 501 не
+  поддерживается) — не ошибка игры: хост работает в LAN и через relay, а игра обязана
+  сказать правду, а не изобразить проброс.
 - SharpScript (`src/SharpScript/`, `docs/SCRIPTS.md`) — свой язык, а не встроенный
   C#: любой встраиваемый C# требует рантайма, а рантайм — то, чего не должно быть у
   скачанного PWAD. **Песочница — свойство грамматики**: точки в языке нет, поэтому
