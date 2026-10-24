@@ -88,8 +88,17 @@ namespace DPTDOOM
         public int audio_soundvolume;
         public int audio_musicvolume;
         public bool audio_randompitch;
-        public string audio_soundfont;
-        public bool audio_musiceffect;
+
+        // Two settings used to live here and did nothing: audio_soundfont and
+        // audio_musiceffect. Both were read, validated and written back, and neither
+        // was connected to anything - this port has no MIDI synthesiser to point at a
+        // soundfont, and no music effect stage. Keeping them would mean a player
+        // tuning a value that cannot have an effect, which is worse than the value not
+        // existing: they would go looking for the bug in the wrong place.
+        //
+        // A soundfont would need a real MIDI backend (the player currently streams the
+        // MUS events through waveOut), which is a project of its own; see
+        // docs/ROADMAP.md.
 
         private bool isRestoredFromFile;
 
@@ -202,8 +211,6 @@ namespace DPTDOOM
             audio_soundvolume = 8;
             audio_musicvolume = 8;
             audio_randompitch = true;
-            audio_soundfont = "TimGM6mb.sf2";
-            audio_musiceffect = true;
 
             isRestoredFromFile = false;
         }
@@ -261,8 +268,6 @@ namespace DPTDOOM
                 audio_soundvolume = GetInt(dic, nameof(audio_soundvolume), audio_soundvolume);
                 audio_musicvolume = GetInt(dic, nameof(audio_musicvolume), audio_musicvolume);
                 audio_randompitch = GetBool(dic, nameof(audio_randompitch), audio_randompitch);
-                audio_soundfont = GetString(dic, nameof(audio_soundfont), audio_soundfont);
-                audio_musiceffect = GetBool(dic, nameof(audio_musiceffect), audio_musiceffect);
 
                 isRestoredFromFile = true;
 
@@ -317,9 +322,7 @@ namespace DPTDOOM
                     writer.WriteLine(nameof(audio_soundvolume) + " = " + audio_soundvolume);
                     writer.WriteLine(nameof(audio_musicvolume) + " = " + audio_musicvolume);
                     writer.WriteLine(nameof(audio_randompitch) + " = " + BoolToString(audio_randompitch));
-                    writer.WriteLine(nameof(audio_soundfont) + " = " + audio_soundfont);
-                    writer.WriteLine(nameof(audio_musiceffect) + " = " + BoolToString(audio_musiceffect));
-                }
+                                }
             }
             catch
             {

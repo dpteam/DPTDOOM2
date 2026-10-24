@@ -16,6 +16,7 @@
 
 
 using System;
+using DPTDOOM.Shared;
 
 namespace DPTDOOM
 {
@@ -257,6 +258,18 @@ namespace DPTDOOM
                     value => video.DisplayMessage = value,
                     "Pickup text in the message line."),
 
+                new ToggleTextItem(
+                    "HI-RES",
+                    () => config.video_highresolution,
+                    value => config.video_highresolution = value,
+                    "640x400 instead of 320x200. Next start."),
+
+                new ToggleTextItem(
+                    "RANDOM PITCH",
+                    () => config.audio_randompitch,
+                    value => config.audio_randompitch = value,
+                    "Sounds vary in pitch, as on the original."),
+
                 new SliderTextItem(
                     "SCREEN SIZE", 0, video.MaxWindowSize,
                     () => video.WindowSize,
@@ -302,6 +315,12 @@ namespace DPTDOOM
                     () => config.game_alwaysrun,
                     value => config.game_alwaysrun = value,
                     "Run by default. Shift walks."),
+
+                new ToggleTextItem(
+                    "MOUSE Y AXIS",
+                    () => !config.mouse_disableyaxis,
+                    value => config.mouse_disableyaxis = !value,
+                    "Off ignores vertical mouse entirely."),
 
                 new ActionTextItem(
                     "KEYS", () => ShowPage(settingsKeys),
@@ -391,6 +410,12 @@ namespace DPTDOOM
                     value => config.hud_profiler = value,
                     "How much the counter in the corner shows."),
 
+                new SliderTextItem(
+                    "FRAME SCALE", 1, 4,
+                    () => MathEx.Clamp(config.video_fpsscale, 1, 4),
+                    value => config.video_fpsscale = value,
+                    "Frames per tic. Next start."),
+
                 new ToggleTextItem(
                     "FRAME PROFILE",
                     () => video.Profile != null && video.Profile.Enabled,
@@ -447,7 +472,7 @@ namespace DPTDOOM
                 null,
 
                 new InfoTextItem("PROGRAM", () => ApplicationInfo.Title,
-                    "DPT.DOOM, a source port of Doom."),
+                    Branding.Name + ", " + Branding.Tagline + "."),
 
                 new InfoTextItem("ENGINE", () => "GNU GPL v2 or later",
                     "The source is free software; game data is not."),

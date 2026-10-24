@@ -418,7 +418,7 @@ namespace DPTDOOM.Video
             // Layout is measured from the *top* of each line. DrawText anchors at
             // the baseline and grows upward by 7*scale, so mixing the two made the
             // double-size state climb back over the line above it.
-            DrawTextTop("DPT.DOOM", y, titleScale);
+            DrawTextTop(ApplicationInfo.Name, y, titleScale);
             y += TextHeight(titleScale) + 5 * scale;
 
             DrawTextTop(title, y, stateScale);

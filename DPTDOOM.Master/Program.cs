@@ -21,10 +21,17 @@ using DPTDOOM.Shared;
 
 namespace DPTDOOM.Master
 {
+    /// <summary>
+    /// The identity of this build, as the master sees it.
+    ///
+    /// Delegates to <see cref="Branding"/> for the same reason the game does: the name
+    /// and version are one fact about the project, and a fork that renames it should
+    /// not have to find four console programs to edit.
+    /// </summary>
     public static class ApplicationInfo
     {
-        public const string Name = "DPT.DOOM master";
-        public const string Version = "0.1.0";
+        public const string Name = Branding.MasterName;
+        public const string Version = Branding.Version;
     }
 
     public static class Program
@@ -248,6 +255,8 @@ namespace DPTDOOM.Master
 
             using (var log = new MasterLog(config.LogPath))
             {
+                log.EventsEnabled = config.LogEvents;
+
                 foreach (var warning in warnings)
                 {
                     log.Warn(warning);
@@ -317,7 +326,7 @@ namespace DPTDOOM.Master
 
         private static void Usage()
         {
-            Console.WriteLine("DPT.DOOM master server " + ApplicationInfo.Version);
+            Console.WriteLine(ApplicationInfo.Name + " server " + ApplicationInfo.Version);
             Console.WriteLine();
             Console.WriteLine("Usage: dptdoom-master [options]");
             Console.WriteLine();

@@ -1,4 +1,4 @@
-/* DPT.DOOM launcher theme.
+/* __BRAND_NAME__ launcher theme.
    Adapted from the ANOM_Style reference: flat surfaces, one accent, soft
    borders. Written for the MSHTML (Trident) engine that ships with Windows XP
    and later, so: no CSS custom properties, no grid, no flex gap. */
@@ -62,7 +62,7 @@ html.dark .brand { color: #edf1fa; }
 
 .brand em {
   font-style: normal;
-  color: #0088ff;
+  color: __BRAND_PRIMARY__;
 }
 
 html.dark .brand em { color: #9fceff; }
@@ -140,7 +140,7 @@ html.dark .sidebar-foot { color: #b2bed2; }
   height: 6px;
   margin-right: 6px;
   border-radius: 50%;
-  background: #0088ff;
+  background: __BRAND_PRIMARY__;
 }
 
 .main {
@@ -242,7 +242,7 @@ html.dark .panel {
   margin-right: 8px;
   font-family: Consolas, monospace;
   font-size: 11px;
-  color: #0088ff;
+  color: __BRAND_PRIMARY__;
 }
 
 html.dark .panel h2 .num { color: #9fceff; }
@@ -333,7 +333,7 @@ html.dark input[readonly] {
 
 input:focus,
 select:focus {
-  border-color: #0088ff;
+  border-color: __BRAND_PRIMARY__;
 }
 
 input[type=checkbox] {
@@ -396,8 +396,8 @@ button:disabled {
 }
 
 button.primary {
-  border-color: #006cc9;
-  background: #0088ff;
+  border-color: __BRAND_DARK__;
+  background: __BRAND_PRIMARY__;
   color: #ffffff;
   font-weight: bold;
 }
@@ -418,7 +418,7 @@ html.dark button.primary {
 }
 
 .mode button.selected {
-  border-color: #006cc9;
+  border-color: __BRAND_DARK__;
   background: #d9ecff;
   color: #064a85;
   font-weight: bold;

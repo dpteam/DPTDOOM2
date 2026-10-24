@@ -47,6 +47,7 @@ powershell -NoProfile -File tools\test-net-bots.ps1
 powershell -NoProfile -File tools\test-net-leave.ps1
 powershell -NoProfile -File tools\test-host-bans.ps1
 powershell -NoProfile -File tools\test-master-allow.ps1
+powershell -NoProfile -File tools\test-master-config.ps1
 powershell -NoProfile -File tools\test-reconnect.ps1
 powershell -NoProfile -File tools\test-profile.ps1
 powershell -NoProfile -File tools\test-view.ps1

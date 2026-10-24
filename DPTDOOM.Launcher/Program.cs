@@ -15,6 +15,7 @@
 using System;
 using System.IO;
 using System.Windows.Forms;
+using DPTDOOM.Shared;
 using Microsoft.Win32;
 
 namespace DPTDOOM.Launcher
@@ -75,7 +76,7 @@ namespace DPTDOOM.Launcher
             }
             catch (Exception e)
             {
-                MessageBox.Show(e.ToString(), "DPT.DOOM Launcher", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(e.ToString(), Branding.LauncherName, MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
     }

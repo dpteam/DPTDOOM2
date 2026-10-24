@@ -18,6 +18,12 @@
          net9.0 test build working on Linux, where CI also runs. -->
     <ApplicationIcon Condition="'$(OS)' == 'Windows_NT'">..\resources\dptdoom.ico</ApplicationIcon>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <!--
+      The version resource is a *build* property, so it cannot read Branding.cs.
+      A fork renames itself in two places: DPTDOOM.Shared/Branding.cs for everything
+      the program draws and prints, and these lines for what Windows shows in the
+      file properties. See docs/LAUNCHER.md, "Брендинг".
+    -->
     <AssemblyTitle>DPT.DOOM</AssemblyTitle>
     <Product>DPT.DOOM</Product>
     <Company>DartPower Team</Company>
@@ -46,6 +52,7 @@
     <Compile Include="..\DPTDOOM.Shared\MasterProtocol.cs" Link="Shared\MasterProtocol.cs" />
     <Compile Include="..\DPTDOOM.Shared\MasterSessionInfo.cs" Link="Shared\MasterSessionInfo.cs" />
     <Compile Include="..\DPTDOOM.Shared\MasterClient.cs" Link="Shared\MasterClient.cs" />
+    <Compile Include="..\DPTDOOM.Shared\Branding.cs" Link="Shared\Branding.cs" />
   </ItemGroup>
 
 </Project>

@@ -64,6 +64,23 @@ function Assert-True([bool]$condition, [string]$message) {
 $seen = Invoke-Page "String(window.__dptHostSeen === true)"
 Assert-True ($seen -eq "True") "the page reached the host"
 
+# 1b. The page carries the project's name and colours, substituted at load.
+#
+# A fork that renames the project should not have to hand-edit an embedded asset: the
+# name and the accent colour live in Branding, and the page is assembled from it. What
+# this checks is that the substitution actually happened - a leftover placeholder means
+# the fork's name would appear as __BRAND_NAME__ on screen.
+$title = Invoke-Page "document.title"
+Assert-True ($title -notlike "*__BRAND*") "the page title was substituted ($title)"
+Assert-True ($title -like "*DPT*") "and carries the project name ($title)"
+
+$brand = Invoke-Page "document.getElementsByTagName('div')[0].innerHTML"
+Assert-True ($brand -notlike "*__BRAND*") "the brand block was substituted"
+Assert-True ($brand -like "*em*") "and keeps its accent around the dot ($brand)"
+
+$html = $browser.Document.Body.OuterHtml
+Assert-True ($html -notlike "*__BRAND_*") "no brand placeholder survived anywhere in the document"
+
 # 2. The status line came from the host, not from the page fallback.
 $status = Invoke-Page "document.getElementById('status').innerHTML"
 Assert-True ($status.Length -gt 0) "host status is displayed"

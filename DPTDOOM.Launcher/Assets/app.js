@@ -412,6 +412,10 @@ var DPT = (function () {
         window.__dptHostSeen = true;
 
         switch (verb) {
+            case 'branding':
+                applyBranding(String(payload || ''));
+                break;
+
             case 'state':
                 apply(payload);
                 break;

@@ -30,9 +30,9 @@ namespace DPTDOOM.Master
     internal sealed class MasterServer
     {
         private const int RequestDeadlineMs = 3000;
-        private const int RateLimitWindowMs = 10000;
-        private const int RateLimitRequests = 60;
-        private const int RateLimitIps = 512;
+
+
+
 
         private readonly MasterConfig config;
         private readonly MasterLog log;
@@ -103,7 +103,7 @@ namespace DPTDOOM.Master
 
             startTime = Now();
 
-            log.Info("DPT.DOOM master v" + ApplicationInfo.Version + " listening on " + bind + ":" + config.Port);
+            log.Info(ApplicationInfo.Name + " v" + ApplicationInfo.Version + " listening on " + bind + ":" + config.Port);
             log.Info("lease=" + config.LeaseSeconds + "s bans=" + bans.Count +
                      " allow=" + allowed.Count + " mode=" + (config.AllowListOnly ? "allowlist" : "open"));
 
@@ -161,14 +161,14 @@ namespace DPTDOOM.Master
 
                     lock (buckets)
                     {
-                        if (buckets.Count > RateLimitIps)
+                        if (buckets.Count > config.RateLimitAddresses)
                         {
                             var stale = new List<uint>();
                             var now = Now();
 
                             foreach (var pair in buckets)
                             {
-                                if (now - pair.Value.WindowStart > RateLimitWindowMs * 6)
+                                if (now - pair.Value.WindowStart > config.RateLimitWindowSeconds * 1000L * 6)
                                 {
                                     stale.Add(pair.Key);
                                 }
@@ -473,7 +473,7 @@ namespace DPTDOOM.Master
                 RateBucket bucket;
                 if (!buckets.TryGetValue(key, out bucket))
                 {
-                    if (buckets.Count >= RateLimitIps)
+                    if (buckets.Count >= config.RateLimitAddresses)
                     {
                         return false;
                     }
@@ -483,14 +483,14 @@ namespace DPTDOOM.Master
                     buckets.Add(key, bucket);
                 }
 
-                if (now - bucket.WindowStart > RateLimitWindowMs)
+                if (now - bucket.WindowStart > config.RateLimitWindowSeconds * 1000L)
                 {
                     bucket.WindowStart = now;
                     bucket.Count = 0;
                 }
 
                 bucket.Count++;
-                return bucket.Count <= RateLimitRequests;
+                return bucket.Count <= config.RateLimitRequests;
             }
         }
 

@@ -8,6 +8,8 @@
     <LangVersion>latest</LangVersion>
     <UseWindowsForms>true</UseWindowsForms>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <!-- Build-time metadata; the runtime name comes from Branding.cs. See the note
+         in DPTDOOM/DPTDOOM.csproj. -->
     <AssemblyTitle>DPT.DOOM Launcher</AssemblyTitle>
     <Product>DPT.DOOM</Product>
     <Company>DartPower Team</Company>

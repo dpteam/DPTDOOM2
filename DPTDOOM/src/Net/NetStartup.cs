@@ -561,9 +561,13 @@ namespace DPTDOOM.Net
 
             var version = typeof(NetStartup).Assembly.GetName().Version.ToString();
 
+            // The fingerprint identifies the *wire protocol and build*, never the
+            // product name. Mixing the two would mean a fork that only renames itself
+            // could no longer see unforked hosts, or the other way round - a
+            // compatibility failure caused by cosmetics, which nobody would look for.
             using (var sha1 = System.Security.Cryptography.SHA1.Create())
             {
-                var digest = sha1.ComputeHash(Encoding.ASCII.GetBytes("DPT.DOOM " + version));
+                var digest = sha1.ComputeHash(Encoding.ASCII.GetBytes("DPTDOOM-WIRE-1 " + version));
                 Array.Copy(digest, info.BuildFingerprint, 20);
             }
 
@@ -574,7 +578,7 @@ namespace DPTDOOM.Net
         {
             if (string.IsNullOrEmpty(text))
             {
-                return "DPT.DOOM";
+                return Branding.Name;
             }
 
             var chars = text.ToCharArray();

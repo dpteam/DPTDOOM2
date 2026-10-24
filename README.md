@@ -166,6 +166,7 @@ powershell -NoProfile -File tools\test-net-bots.ps1
 powershell -NoProfile -File tools\test-net-leave.ps1
 powershell -NoProfile -File tools\test-host-bans.ps1
 powershell -NoProfile -File tools\test-master-allow.ps1
+powershell -NoProfile -File tools\test-master-config.ps1
 powershell -NoProfile -File tools\test-net-latency.ps1
 powershell -NoProfile -File tools\test-reconnect.ps1
 powershell -NoProfile -File tools\test-relay.ps1
@@ -173,7 +174,7 @@ powershell -NoProfile -File tools\test-launcher.ps1
 powershell -NoProfile -File tools\check-standalone.ps1
 ```
 
-503 теста. Геймплейные сверяют хеши мира с эталонами Managed Doom — то есть
+506 тестов. Геймплейные сверяют хеши мира с эталонами Managed Doom — то есть
 проверяют, что порт остался демо-совместимым, а не только что он компилируется.
 Тесты, которым нужен IWAD, без него помечаются пропущенными, а не падают.
 

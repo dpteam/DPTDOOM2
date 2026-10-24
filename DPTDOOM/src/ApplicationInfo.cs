@@ -15,13 +15,23 @@
 //
 
 using System;
+using DPTDOOM.Shared;
 
 namespace DPTDOOM
 {
+    /// <summary>
+    /// The identity of this build, as the game sees it.
+    ///
+    /// Everything comes from <see cref="Branding"/>, which lives in the shared assembly
+    /// because the launcher and the master need the same strings and the page inside the
+    /// launcher cannot reference C# at all. This class stays as the game's short name for
+    /// it: the rest of the engine already asks <c>ApplicationInfo.Title</c>, and moving
+    /// that call everywhere would be churn for no gain.
+    /// </summary>
     public static class ApplicationInfo
     {
-        public const string Name = "DPT.DOOM";
-        public const string Version = "0.1.0";
-        public const string Title = Name + " v" + Version;
+        public const string Name = Branding.Name;
+        public const string Version = Branding.Version;
+        public const string Title = Branding.Title;
     }
 }

@@ -7,6 +7,8 @@
     <RootNamespace>DPTDOOM.Master</RootNamespace>
     <LangVersion>latest</LangVersion>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <!-- Build-time metadata; the runtime name comes from Branding.cs. See the note
+         in DPTDOOM/DPTDOOM.csproj. -->
     <AssemblyTitle>DPT.DOOM master server</AssemblyTitle>
     <Product>DPT.DOOM</Product>
     <Company>DartPower Team</Company>

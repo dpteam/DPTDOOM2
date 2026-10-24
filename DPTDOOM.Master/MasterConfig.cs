@@ -35,7 +35,39 @@ namespace DPTDOOM.Master
         public string AllowListPath;
         public bool AllowListOnly;
         public string LogPath;
+
+        /// <summary>
+        /// Whether per-request events are logged, or only warnings and startup lines.
+        ///
+        /// A public master writes an event line for every LIST, which is the noisiest
+        /// thing it does and also the least interesting: the record that a session was
+        /// registered is useful, the record that somebody asked for the list is not.
+        /// Off is a legitimate choice for an operator whose log is mostly that.
+        /// </summary>
+        public bool LogEvents = true;
+
         public int MaxClients = 24;
+
+        /// <summary>
+        /// How many directory requests one address may make per window.
+        ///
+        /// These three used to be constants. They are policy, and policy that cannot be
+        /// changed is a guess with no way to correct it: a master behind one NAT'd
+        /// office or a launcher that polls too often hits the limit with every user,
+        /// and the only fix available was to rebuild.
+        /// </summary>
+        public int RateLimitRequests = 60;
+
+        /// <summary>The window those requests are counted over.</summary>
+        public int RateLimitWindowSeconds = 10;
+
+        /// <summary>
+        /// How many addresses the rate limiter tracks at once.
+        ///
+        /// A bound, because an unbounded table is a memory leak pointed at the internet:
+        /// every source address that ever connects would be remembered for ever.
+        /// </summary>
+        public int RateLimitAddresses = 512;
 
         // Relay is opt-in. Enabling it turns the master into a proxy for other
         // people's game traffic, which is a different promise than "a directory
@@ -147,6 +179,34 @@ namespace DPTDOOM.Master
 
                     case "log":
                         config.LogPath = Resolve(baseDirectory, value);
+                        break;
+
+                    case "log-events":
+                        if (value == "on" || value == "yes" || value == "true")
+                        {
+                            config.LogEvents = true;
+                        }
+                        else if (value == "off" || value == "no" || value == "false")
+                        {
+                            config.LogEvents = false;
+                        }
+                        else
+                        {
+                            throw new Exception("log-events must be 'on' or 'off'");
+                        }
+
+                        break;
+
+                    case "rate-limit-requests":
+                        config.RateLimitRequests = ParseInt(value, 1, 100000, "rate-limit-requests");
+                        break;
+
+                    case "rate-limit-window-seconds":
+                        config.RateLimitWindowSeconds = ParseInt(value, 1, 3600, "rate-limit-window-seconds");
+                        break;
+
+                    case "rate-limit-addresses":
+                        config.RateLimitAddresses = ParseInt(value, 16, 1048576, "rate-limit-addresses");
                         break;
 
                     case "relay":

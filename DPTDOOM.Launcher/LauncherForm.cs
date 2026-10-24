@@ -57,7 +57,7 @@ namespace DPTDOOM.Launcher
             settings = LauncherSettings.Load();
             state = settings.State;
 
-            Text = "DPT.DOOM Launcher";
+            Text = Branding.LauncherName;
             ClientSize = new Size(1000, 720);
             MinimumSize = new Size(860, 600);
             StartPosition = FormStartPosition.CenterScreen;
@@ -96,9 +96,45 @@ namespace DPTDOOM.Launcher
         public static string AssemblePage()
         {
             var html = ReadAsset("ui.html");
-            html = html.Replace("/*__STYLE__*/", ReadAsset("theme.css"));
+            html = html.Replace("/*__STYLE__*/", Brand(ReadAsset("theme.css")));
             html = html.Replace("/*__SCRIPT__*/", ReadAsset("app.js"));
-            return html;
+            return Brand(html);
+        }
+
+        /// <summary>
+        /// Substitutes the project's own name and colours into a page asset.
+        ///
+        /// The name appears in four places inside the launcher - the window title, the
+        /// brand block, the CSS accent and the About line - and a fork that renames the
+        /// project should not have to hand-edit an embedded asset to stop the window
+        /// saying one thing and the page another. Substitution at load time rather than
+        /// a runtime message: the values never change while the page is open, and a
+        /// bridge verb for data that is fixed would be one more thing to keep in step.
+        ///
+        /// The brand name is split at its first dot so the stylesheet's accent <c>em</c>
+        /// keeps working: "DPT.DOOM" is drawn as DPT<em>.</em>DOOM, and a name without a
+        /// dot simply has no accent.
+        /// </summary>
+        private static string Brand(string asset)
+        {
+            var dot = Branding.Name.IndexOf('.');
+
+            var marked = dot > 0 && dot < Branding.Name.Length - 1
+                ? Branding.Name.Substring(0, dot) + "<em>" +
+                  Branding.Name.Substring(dot, 1) + "</em>" +
+                  Branding.Name.Substring(dot + 1)
+                : Branding.Name;
+
+            return asset
+                .Replace("__BRAND_NAME__", Branding.Name)
+                .Replace("__BRAND_MARKED__", marked)
+                .Replace("__BRAND_TITLE__", Branding.LauncherName)
+                .Replace("__BRAND_TAGLINE__", Branding.Tagline)
+                .Replace("__BRAND_VERSION__", Branding.Version)
+                .Replace("__BRAND_PRIMARY__", Branding.PrimaryColor)
+                .Replace("__BRAND_SECONDARY__", Branding.SecondaryColor)
+                .Replace("__BRAND_DARK__", Branding.DarkColor)
+                .Replace("__BRAND_ONDARK__", Branding.OnDarkColor);
         }
 
         private static string ReadAsset(string name)

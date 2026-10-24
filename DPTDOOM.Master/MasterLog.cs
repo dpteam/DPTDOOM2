@@ -28,13 +28,34 @@ namespace DPTDOOM.Master
         private readonly object sync = new object();
         private readonly StreamWriter writer;
 
+        /// <summary>
+        /// Whether per-request events are written.
+        ///
+        /// A field rather than a constructor parameter so nothing else has to change:
+        /// every caller already uses one MasterLog, and the only thing that varies is
+        /// how much it says.
+        /// </summary>
+        private bool eventsEnabled = true;
+
+        /// <summary>
+        /// Turns per-request logging on or off.
+        ///
+        /// Startup lines and warnings are never suppressed: the one thing an operator
+        /// needs from a quiet log is that it still says what the master is doing and
+        /// what went wrong.
+        /// </summary>
+        public bool EventsEnabled
+        {
+            get { return eventsEnabled; }
+            set { eventsEnabled = value; }
+        }
+
         public MasterLog(string path)
         {
             if (path == null)
             {
                 return;
             }
-
             try
             {
                 var directory = Path.GetDirectoryName(Path.GetFullPath(path));
@@ -59,6 +80,11 @@ namespace DPTDOOM.Master
 
         public void Event(string message)
         {
+            if (!eventsEnabled)
+            {
+                return;
+            }
+
             Write("event", message);
         }
 

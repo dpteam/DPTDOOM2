@@ -17,6 +17,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Text;
+using DPTDOOM.Shared;
 
 namespace DPTDOOM.Launcher
 {
@@ -338,7 +339,7 @@ namespace DPTDOOM.Launcher
         public void Save()
         {
             var builder = new StringBuilder();
-            builder.AppendLine("# DPT.DOOM launcher settings");
+            builder.AppendLine("# " + Branding.LauncherName + " settings");
             builder.AppendLine("theme=" + Theme);
             builder.AppendLine("master=" + Master);
             builder.AppendLine("state=" + Escape(State.Encode()));
