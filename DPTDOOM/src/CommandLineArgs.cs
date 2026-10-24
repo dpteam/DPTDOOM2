@@ -157,6 +157,26 @@ namespace DPTDOOM
         public readonly Arg<string> botdump;
         public readonly Arg<int> botstyle;
 
+        /// <summary>
+        /// Do not load or save the bots' learned map knowledge.
+        ///
+        /// The brain is a text file beside the executable that grows with every run, which
+        /// is what makes bots better over time. It also makes two runs of the same command
+        /// behave differently, so anything that measures a bot - the bot test, a
+        /// reproduction of a reported bug - has to be able to turn it off.
+        /// </summary>
+        public readonly Arg nobotbrain;
+
+        /// <summary>
+        /// Where the bots' learned map knowledge lives. Defaults to "bots" beside the
+        /// executable.
+        ///
+        /// Exists so a test can point at a throwaway directory: the knowledge is real
+        /// state that survives between runs, and a check that reads the developer's
+        /// accumulated file is measuring the developer's file.
+        /// </summary>
+        public readonly Arg<string> botbraindir;
+
         public CommandLineArgs(string[] args)
         {
             iwad = GetString(args, "-iwad");
@@ -251,6 +271,8 @@ namespace DPTDOOM
             coopbots = GetInt(args, "-coopbots");
             botdump = GetString(args, "-botdump");
             botstyle = GetInt(args, "-botstyle");
+            nobotbrain = new Arg(args.Contains("-nobotbrain"));
+            botbraindir = GetString(args, "-botbraindir");
 
             // Check for drag & drop.
             if (args.Length > 0 && args.All(arg => arg.FirstOrDefault() != '-'))

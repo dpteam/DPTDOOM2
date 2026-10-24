@@ -175,6 +175,18 @@ namespace DPTDOOM
         private BotBrain botBrain;
         private string botBrainKey;
 
+        /// <summary>
+        /// Set by -nobotbrain: do not read or write the learned map knowledge.
+        ///
+        /// The brain makes a bot better with every run, which is the point of it, but it
+        /// also makes two runs of the same command behave differently. A test that measures
+        /// whether a bot can finish a level has to start from the same place every time.
+        /// </summary>
+        private readonly bool botBrainDisabled;
+
+        /// <summary>Directory for the learned map knowledge, or null for the default.</summary>
+        private readonly string botBrainDir;
+
         // Optional per-tic record of where the bots went, for -botdump.
         private BotTrace botTrace;
         private int botTraceIndex;
@@ -280,6 +292,13 @@ namespace DPTDOOM
 
                 recordPath = ResolveRecordPath(args.record.Value);
             }
+
+            // Learning off for a run that must be repeatable. The brain is a text file
+            // next to the executable, so without this every run of the bot test starts
+            // from whatever the previous run left behind - and a check that says "the bot
+            // finishes MAP01" then measures the state of a file rather than the bot.
+            botBrainDisabled = args.nobotbrain.Present;
+            botBrainDir = args.botbraindir.Value;
 
             events = new List<DoomEvent>();
 
@@ -401,7 +420,17 @@ namespace DPTDOOM
                 return botBrain;
             }
 
-            var folder = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "bots");
+            if (botBrainDisabled)
+            {
+                // Same reason as above, for the tests: a check that measures the bot has
+                // to measure the bot, not the file the previous run wrote.
+                botBrain = BotBrain.Disabled;
+                return botBrain;
+            }
+
+            var folder = string.IsNullOrEmpty(botBrainDir)
+                ? Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "bots")
+                : botBrainDir;
 
             botBrain = new BotBrain(folder, key);
 

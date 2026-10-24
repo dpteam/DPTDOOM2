@@ -114,6 +114,12 @@ namespace DPTDOOM
         private readonly Player player;
         private readonly NavGraph nav;
         private readonly int[] path;
+
+        /// <summary>
+        /// Scratch buffer for the "can I still get out" check, kept apart from
+        /// <see cref="path"/> so the check does not destroy the route being built.
+        /// </summary>
+        private readonly int[] escapePath;
         private readonly bool[] visitedSector;
 
         // Sectors the bot failed to route to. Kept apart from visitedSector so a
@@ -123,6 +129,21 @@ namespace DPTDOOM
         private readonly bool[] triedSector;
 
         private int lastSector = -1;
+
+        /// <summary>
+        /// Whether the exit can no longer be reached from where the bot is standing.
+        ///
+        /// The graph is directional, so parts of a map are one-way: a ledge can be dropped
+        /// off and not climbed. A bot that ends up past such a ledge is not stuck in any
+        /// sense the stuck counter notices - it moves, it explores, and it will never finish
+        /// the level. MAP01 has exactly this around sector 43.
+        /// </summary>
+        private bool trapped;
+
+        /// <summary>The last position from which the exit was still reachable.</summary>
+        private float retreatX;
+        private float retreatY;
+        private bool retreatValid;
 
         private readonly BotBrain brain;
         private readonly BotStyle style;
@@ -233,6 +254,111 @@ namespace DPTDOOM
             get { return useTic % 4 == 0; }
         }
 
+        /// <summary>
+        /// Whether pressing Use at this sector would help rather than hurt.
+        ///
+        /// A door with an active thinker is a door in motion, and Use on a moving door
+        /// reverses it. That is what turned "open the door" into "slam it": pressing every
+        /// fourth tic opened the door and immediately shut it again, over and over, which is
+        /// the door spam reported in co-op. So the bot presses only where pressing starts
+        /// something - at a door that is shut.
+        ///
+        /// The height test is the second half: a sector whose gap is already taller than
+        /// the bot is a doorway it can walk through, door or not, and pressing there is
+        /// wasted in the best case.
+        /// </summary>
+        private bool IsDoorPressable(int sectorNumber)
+        {
+            var sectors = world.Map.Sectors;
+
+            if (sectorNumber < 0 || sectorNumber >= sectors.Length)
+            {
+                // No sector means no information; pressing is the old behaviour and is
+                // the safer default for a bot that has to get through something.
+                return true;
+            }
+
+            var sector = sectors[sectorNumber];
+
+            if (sector.SpecialData != null)
+            {
+                // Any door with a thinker is a door in motion, and Use on a moving door
+                // reverses it. Allowing the press while a door was closing was tried, on the
+                // theory that reopening it is what a player would do; it is worse, because
+                // the bot presses every fourth tic for as long as it is on that leg and the
+                // door then never finishes a cycle. Measured: four bot tests went from
+                // passing to not finishing MAP01 at all.
+                return false;
+            }
+
+            return sector.CeilingHeight - sector.FloorHeight < Fixed.FromInt(56);
+        }
+
+        /// <summary>
+        /// Whether a door that is already moving touches the sector the bot stands in.
+        ///
+        /// This is the guard for the second, separate way door spam happened: the "try Use
+        /// because I am blocked" branch. It has no route, so it does not know what is in
+        /// front of it, and it used to press on the theory that a doorway is the usual
+        /// reason for being blocked - including at doors that were already opening, where
+        /// Use reverses them shut.
+        ///
+        /// The check is deliberately narrow. Requiring a *shut* door instead was tried and
+        /// is wrong: a blocked bot often stands one step short of the door line, in a sector
+        /// that does not contain it, and Use reaches through the neighbouring sector. Asked
+        /// for a shut door it saw none and refused to press - measured, the Hunter style
+        /// stopped finishing MAP01. Refusing only while touching a moving door has neither
+        /// problem.
+        ///
+        /// Both sides are examined because a door line is shared: the bot may be standing
+        /// in either of the two sectors it joins.
+        /// </summary>
+        private bool IsTouchingBusyDoor(Mobj mobj)
+        {
+            var sector = mobj.Subsector == null ? null : mobj.Subsector.Sector;
+
+            if (sector == null)
+            {
+                return false;
+            }
+
+            foreach (var line in sector.Lines)
+            {
+                if (!NavGraph.IsDoorSpecial((int)line.Special))
+                {
+                    continue;
+                }
+
+                var front = line.FrontSide == null ? null : line.FrontSide.Sector;
+                var back = line.BackSide == null ? null : line.BackSide.Sector;
+
+                if (front != null && front != sector && !IsDoorPressable(front.Number))
+                {
+                    return true;
+                }
+
+                if (back != null && back != sector && !IsDoorPressable(back.Number))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// The door rule, exposed so a test can check it without a whole run.
+        ///
+        /// Internal rather than public: it is not part of what a bot offers the game, it
+        /// is a decision the game needs to be able to verify. A run trace can show that a
+        /// bot stopped at a door, but not why - and the "why" here is the entire bug that
+        /// was fixed.
+        /// </summary>
+        internal bool WouldPressDoor(int sectorNumber)
+        {
+            return IsDoorPressable(sectorNumber);
+        }
+
         private bool headingToExit;
         private int exitNode;
 
@@ -305,6 +431,7 @@ namespace DPTDOOM
             brain = sharedBrain;
             nav = sharedNav ?? new NavGraph(world.Map);
             path = new int[nav.NodeCount];
+            escapePath = new int[nav.NodeCount];
             visitedSector = new bool[world.Map.Sectors.Length];
             triedSector = new bool[world.Map.Sectors.Length];
 
@@ -403,6 +530,7 @@ namespace DPTDOOM
             {
                 lastSector = sector;
                 Array.Clear(triedSector, 0, triedSector.Length);
+                UpdateTrapped(mobj);
             }
 
             useTic++;
@@ -487,6 +615,34 @@ namespace DPTDOOM
             // Not fighting this tic: the circle is over, and the budget resets so
             // the next monster gets a fair share of it.
             strafeTics = 0;
+
+            if (trapped && retreatValid)
+            {
+                // There is no route to the exit from here, and there was from a place the
+                // bot has already been. Walk back to it.
+                //
+                // This is the only cure for walking into a one-way part of a map. Every
+                // other guard in this file assumes the graph tells the truth about where
+                // the bot can go; here the graph is right and the bot has already gone too
+                // far. Banning passages and marking sectors tried were both tried and both
+                // fail for the same reason - they cannot build an exit that does not exist.
+                //
+                // Measured on MAP01: a Sweeper with a fresh brain crossed a one-way ledge at
+                // tic 481 and spent the remaining fifteen hundred tics of the run in a
+                // pocket that reaches six of the map's fifty-nine sectors.
+                Steer(cmd, mobj, retreatX, retreatY, aim);
+
+                decision = "retreat";
+
+                if (Math.Abs(retreatX - mobj.X.ToFloat()) + Math.Abs(retreatY - mobj.Y.ToFloat()) < 40F)
+                {
+                    // Standing on the remembered spot. The sector check that follows will
+                    // say whether that was enough.
+                    retreatValid = false;
+                }
+
+                return;
+            }
 
             if (wanderActive)
             {
@@ -696,11 +852,20 @@ namespace DPTDOOM
 
             if (legIsDoor)
             {
-                // Doors open on Use from the side you face. Press it every tic
-                // while walking in: one press can be wasted on the frame before
-                // the engine registers contact, and a door still rising blocks
-                // movement.
-                if (WantUse)
+                // Press Use only while the door is genuinely shut.
+                //
+                // The old comment here said "press every tic while walking in", and it
+                // was wrong in a way that only shows up in play: pressing Use on a door
+                // that is already opening reverses it. UseSpecialLine flips a door's
+                // direction from +1 to -1 for the "open" specials, so a bot that pressed
+                // every fourth tic opened the door and then slammed it, over and over -
+                // the door spam reported in co-op, and the reason a bot could stand at
+                // one door for the rest of a level.
+                //
+                // "Shut" is readable from the sector: an active door thinker means the
+                // door is opening, waiting or closing, and in all three cases pressing
+                // either does nothing useful or undoes what is happening.
+                if (WantUse && IsDoorPressable(nav.GetSector(path[pathIndex])))
                 {
                     cmd.Buttons |= TicCmdButtons.Use;
                 }
@@ -863,7 +1028,21 @@ namespace DPTDOOM
                     }
                     else
                     {
+                        // Penalising the node alone is not enough on its own: when the
+                        // unreachable node *is* the destination, extra cost does not make
+                        // it stop being the destination, so the next plan can hand it back
+                        // and the bot orbits it thirty-five tics at a time. Remembering that
+                        // the sector was tried is what stops that; the flag is cleared
+                        // whenever the bot changes sector, so a spot that fails from here is
+                        // not written off from everywhere - the lesson of the earlier bug
+                        // where permanent "unreachable" removed half the map, exit included.
+                        //
+                        // Closing the passage instead was tried and is worse: a waypoint can
+                        // be unreachable for a moment (a lift, a monster, a corner) and the
+                        // ban then lasts the whole level. Measured, it cost the Hunter style
+                        // three times its time and eight deaths on MAP01.
                         nav.Penalize(path[pathIndex]);
+                        triedSector[nav.GetSector(path[pathIndex])] = true;
                     }
 
                     pathLength = 0;
@@ -1102,13 +1281,20 @@ namespace DPTDOOM
             cmd.SideMove = (sbyte)MathEx.Clamp(side, -40, 40);
 
             // Blocked for a while: keep pressing forward and use. Doors need
-            // contact to open, and a doorway is the usual reason for being
-            // blocked. Reversing and strafing here, as the first version did,
-            // is what turned a bot that was briefly stuck into one that traced
-            // circles around the same corner for the rest of the level.
+            // contact to open, and a doorway is the usual reason for being blocked.
+            // Reversing and strafing here, as the first version did, is what turned a
+            // bot that was briefly stuck into one that traced circles around the same
+            // corner for the rest of the level.
+            //
+            // The pulse stays at every fourth tic. Slowing it down was tried twice - once a
+            // second, then once every eight tics - and both made bots stop finishing MAP01,
+            // because a sparse pulse misses the window in which a door becomes pressable.
+            // What does change is that the press is skipped at a door that is already
+            // moving, where the engine flips it shut; that is the reported spam, and the
+            // check deliberately says nothing about anywhere else.
             if (noProgressTics > 8)
             {
-                if (WantUse)
+                if (WantUse && !IsTouchingBusyDoor(mobj))
                 {
                     cmd.Buttons |= TicCmdButtons.Use;
                 }
@@ -1136,6 +1322,74 @@ namespace DPTDOOM
         /// over, which is a circle with a 14-unit radius and a heading that never
         /// settles.
         /// </summary>
+        /// <summary>
+        /// Whether a route to this node leaves the bot able to reach the exit.
+        ///
+        /// The navigation graph is directional on purpose - its edges are filtered by step
+        /// height and clearance, because a ledge can be dropped off and not climbed - and a
+        /// directional graph can contain one-way pockets. A bot that walks into one is not
+        /// stuck in any sense the stuck handler recognises: it keeps moving, it keeps
+        /// exploring, and it will never finish the level.
+        ///
+        /// Measured on MAP01: the sector 43 area reaches six sectors of fifty-nine and the
+        /// exit is not one of them. That is exactly where a Sweeper with a fresh brain
+        /// spent the rest of its run - fifteen hundred tics of walking around one room.
+        ///
+        /// So a detour is taken only if the exit is still reachable from where it ends.
+        /// The first half of the check is skipped when the bot cannot reach the exit from
+        /// where it already stands: being trapped is not a reason to refuse every move, it
+        /// is the moment any move is worth trying.
+        /// </summary>
+        /// <summary>
+        /// Recomputes whether the exit is still reachable, and remembers the last place
+        /// where it was.
+        ///
+        /// Called on entering a new sector rather than every tic: a search per tic would
+        /// cost more than the rendering it competes with, while a sector is exactly the
+        /// granularity at which the answer changes - the bot cannot cross a one-way edge
+        /// without changing sector.
+        /// </summary>
+        private void UpdateTrapped(Mobj mobj)
+        {
+            if (exitSector < 0)
+            {
+                return;
+            }
+
+            var node = nav.NodeAt(mobj.X, mobj.Y);
+
+            if (node < 0)
+            {
+                return;
+            }
+
+            if (nav.FindPathToSector(node, exitSector, escapePath) > 0)
+            {
+                trapped = false;
+                retreatX = mobj.X.ToFloat();
+                retreatY = mobj.Y.ToFloat();
+                retreatValid = true;
+                return;
+            }
+
+            trapped = true;
+        }
+
+        internal bool CanStillLeave(int node, int fromNode)
+        {
+            if (exitSector < 0)
+            {
+                return true;
+            }
+
+            if (fromNode >= 0 && nav.FindPathToSector(fromNode, exitSector, escapePath) <= 0)
+            {
+                return true;
+            }
+
+            return nav.FindPathToSector(node, exitSector, escapePath) > 0;
+        }
+
         private void PlanExplore(int continueFrom)
         {
             pathLength = 0;
@@ -1198,7 +1452,8 @@ namespace DPTDOOM
                     // many map units the bot is willing to walk for this thing.
                     // A medikit at thirty health is worth several hundred; a clip
                     // when nothing is running low is worth nothing at all.
-                    if (lootLength > 1 && pickup.Value.Worth > lootLength)
+                    if (lootLength > 1 && pickup.Value.Worth > lootLength &&
+                        CanStillLeave(pickup.Value.Node, start))
                     {
                         pathLength = lootLength;
                         pathIndex = 0;
@@ -1263,7 +1518,8 @@ namespace DPTDOOM
                 }
 
                 var length = nav.FindPath(start, target, path);
-                if (length > 0)
+
+                if (length > 0 && CanStillLeave(target, start))
                 {
                     pathLength = length;
                     return;
@@ -1274,6 +1530,10 @@ namespace DPTDOOM
                 // destroy the bot's map knowledge: after a few failed plans it
                 // believed it had seen every sector, stopped exploring, and then
                 // had nothing left to do at all.
+                //
+                // A detour that cannot be left counts as unreachable for the same
+                // reason: from here it is a place the bot must not go, and the route
+                // to it will be offered again on the next plan otherwise.
                 triedSector[nav.GetSector(target)] = true;
             }
 
@@ -1315,7 +1575,7 @@ namespace DPTDOOM
                 {
                     var explored = nav.FindPath(node, target, path);
 
-                    if (explored > 0)
+                    if (explored > 0 && CanStillLeave(target, node))
                     {
                         pathLength = explored;
                         pathIndex = 0;

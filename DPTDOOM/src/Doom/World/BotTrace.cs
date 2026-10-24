@@ -142,6 +142,12 @@ namespace DPTDOOM
             samples.Append(",\"fwd\":").Append(cmds[index].ForwardMove);
             samples.Append(",\"side\":").Append(cmds[index].SideMove);
             samples.Append(",\"turn\":").Append(cmds[index].AngleTurn);
+
+            // Buttons, because "the bot spams doors" is a claim about Use and a trace
+            // without it can only show that the bot stood still. With the bit flags in
+            // the sample, door spam is a number: count the Use bits over a level and
+            // compare against the number of doors on the map.
+            samples.Append(",\"buttons\":").Append(cmds[index].Buttons);
             samples.Append(",\"sector\":").Append(mobj.Subsector.Sector.Number);
             samples.Append(",\"health\":").Append(player.Health);
             samples.Append(",\"target\":\"").Append(Escape(runner.Status)).Append("\"");

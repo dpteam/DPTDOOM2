@@ -816,7 +816,7 @@ namespace DPTDOOM
             return true;
         }
 
-        private static bool IsDoorSpecial(int special)
+        internal static bool IsDoorSpecial(int special)
         {
             switch (special)
             {
