@@ -91,13 +91,23 @@ try {
 
     # Let the session actually start before pulling the plug, or the third player
     # never joins and nothing is being tested.
+    #
+    # Waits for the host to announce three players *and* for the third guest to have
+    # the level loaded. The budget is generous on purpose: this script runs alongside
+    # a build and eighteen others in the full check, and a loaded machine takes much
+    # longer to load a WAD than an idle one. A short budget fails here not because the
+    # feature is broken but because the machine was busy.
     $started = $false
     $watch = [Diagnostics.Stopwatch]::StartNew()
 
-    while ($watch.Elapsed.TotalSeconds -lt 40 -and -not $started) {
-        if (Test-Path $doomedOut) {
-            $started = [bool](Get-Content $doomedOut -ErrorAction SilentlyContinue |
+    while ($watch.Elapsed.TotalSeconds -lt 120 -and -not $started) {
+        if ((Test-Path $doomedOut) -and (Test-Path $hostOut)) {
+            $doomedLoaded = [bool](Get-Content $doomedOut -ErrorAction SilentlyContinue |
                 Select-String -SimpleMatch 'map MAP01' -Quiet)
+            $hostSeesThree = [bool](Get-Content $hostOut -ErrorAction SilentlyContinue |
+                Select-String -SimpleMatch 'STARTING (3 PLAYERS' -Quiet)
+
+            $started = $doomedLoaded -and $hostSeesThree
         }
 
         Start-Sleep -Milliseconds 200

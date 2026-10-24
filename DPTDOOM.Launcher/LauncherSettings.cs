@@ -83,6 +83,15 @@ namespace DPTDOOM.Launcher
         /// </summary>
         public int HostBots;
 
+        /// <summary>
+        /// The session password, or empty for an open game.
+        ///
+        /// Stored with the profile rather than asked every time: people host the same
+        /// game for the same friends, and a password nobody can remember is a password
+        /// that ends up in the chat, which is where it stops being one.
+        /// </summary>
+        public string Password = "";
+
         public string Encode()
         {
             var flags = 0;
@@ -112,7 +121,8 @@ namespace DPTDOOM.Launcher
                 RelaySession,
                 Relay ? "1" : "0",
                 Players.ToString(CultureInfo.InvariantCulture),
-                HostBots.ToString(CultureInfo.InvariantCulture)
+                HostBots.ToString(CultureInfo.InvariantCulture),
+                Password ?? ""
             });
         }
 
@@ -165,6 +175,7 @@ namespace DPTDOOM.Launcher
             state.Relay = Field(fields, 14).Trim() == "1";
             state.Players = ParseInt(Field(fields, 15), 2, 4, 2);
             state.HostBots = ParseInt(Field(fields, 16), 0, 3, 0);
+            state.Password = Field(fields, 17);
 
             return state;
         }

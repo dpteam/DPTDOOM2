@@ -57,6 +57,20 @@ namespace DPTDOOM.Launcher
 
         public static string BuildArguments(LauncherState state)
         {
+            return BuildArguments(state, false);
+        }
+
+        /// <summary>
+        /// The command line, optionally with the password replaced by asterisks.
+        ///
+        /// The launcher shows the command line it is about to run, which is useful right
+        /// up until the line contains a password: the panel is on screen while the game
+        /// is set up, and screenshots of it end up in bug reports. So the preview shows
+        /// that a password is set without showing which one, and only the string handed
+        /// to the process carries the real value.
+        /// </summary>
+        public static string BuildArguments(LauncherState state, bool maskPassword)
+        {
             var builder = new StringBuilder();
 
             Append(builder, "-iwad", state.Iwad);
@@ -125,6 +139,11 @@ namespace DPTDOOM.Launcher
                 Append(builder, "-players", state.Players.ToString());
                 Append(builder, "-port", state.Port.ToString());
 
+                // Host and guest both take it from the same field: the launcher
+                // remembers one password per profile, and typing it twice for one
+                // session is exactly the step people skip.
+                AppendPassword(builder, state.Password, maskPassword);
+
                 // Bots take the last slots, so the host must leave at least one
                 // for a guest: a session of bots and nobody else is what local
                 // co-op is for, and a network host waiting for a player who
@@ -167,6 +186,8 @@ namespace DPTDOOM.Launcher
                     Append(builder, "-relay-master", state.Master);
                     Append(builder, "-relay-session", relaySession);
                 }
+
+                AppendPassword(builder, state.Password, maskPassword);
             }
             else if (state.Mode == 3)
             {
@@ -359,6 +380,28 @@ namespace DPTDOOM.Launcher
             }
 
             return "\"" + value.Replace("\"", "\\\"") + "\"";
+        }
+
+        /// <summary>
+        /// Adds the session password, if there is one.
+        ///
+        /// Trimmed only at the ends: an accidental trailing space is a typo, while a
+        /// space in the middle is part of the password. A leading dash is refused by
+        /// the game itself (it would read as another option), so there is nothing to
+        /// work around here.
+        ///
+        /// <paramref name="mask"/> is for the on-screen preview only: the panel shows
+        /// the command line it is about to run, and screenshots of that panel end up in
+        /// bug reports.
+        /// </summary>
+        private static void AppendPassword(System.Text.StringBuilder builder, string password, bool mask)
+        {
+            var text = (password ?? "").Trim();
+
+            if (text.Length > 0)
+            {
+                Append(builder, "-password", mask ? "****" : text);
+            }
         }
     }
 }

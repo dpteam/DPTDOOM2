@@ -75,6 +75,26 @@ namespace DPTDOOM
         public readonly Arg<int> players;
         public readonly Arg<string> address;
         public readonly Arg<string> name;
+
+        /// <summary>
+        /// Session password. On the host it is the requirement, on a guest the answer.
+        ///
+        /// Kept out of every log line and out of the session settings that travel in
+        /// the welcome and get published to the master: a password printed once is a
+        /// password that no longer keeps anybody out.
+        /// </summary>
+        public readonly Arg<string> password;
+
+        /// <summary>
+        /// True when "-password" was given but its value parsed as another option.
+        ///
+        /// A password is the one string a player types freely, so "-password -secret"
+        /// is entirely plausible - and the argument reader treats a leading dash as the
+        /// next switch. Left alone that reads as "no password at all": the host thinks
+        /// the session is open, and it is. The flag is here so the caller can say so
+        /// instead of starting a game that silently has no password.
+        /// </summary>
+        public readonly bool passwordValueLookedLikeAnOption;
         public readonly Arg<string> master;
         public readonly Arg relay;
         public readonly Arg<string> relayMaster;
@@ -153,6 +173,8 @@ namespace DPTDOOM
             players = GetInt(args, "-players");
             address = GetString(args, "-address");
             name = GetString(args, "-name");
+            password = GetString(args, "-password");
+            passwordValueLookedLikeAnOption = args.Contains("-password") && !password.Present;
             master = GetString(args, "-master");
             relay = new Arg(args.Contains("-relay"));
             relayMaster = GetString(args, "-relay-master");

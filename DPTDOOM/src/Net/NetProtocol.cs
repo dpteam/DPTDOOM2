@@ -49,6 +49,18 @@ namespace DPTDOOM.Net
 
         public const int MaxNameLength = 31;
 
+        /// <summary>
+        /// Bits in the optional tail of a HELLO frame.
+        ///
+        /// The tail exists so that adding something to the handshake does not break
+        /// older builds: a peer that does not know a bit ignores the bytes behind it,
+        /// and a peer that sends nothing at all is still readable. Order matters -
+        /// the resume block comes first, so a build that predates the password still
+        /// finds the token where it expects it.
+        /// </summary>
+        public const byte HelloResume = 1;
+        public const byte HelloPassword = 2;
+
         public static readonly byte[] Magic = new byte[] { (byte)'D', (byte)'P', (byte)'T', (byte)'N' };
 
         public const ushort TypeHello = 1;
@@ -136,21 +148,88 @@ namespace DPTDOOM.Net
 
         public static void WriteString(BinaryWriter writer, string value)
         {
-            var bytes = Encoding.UTF8.GetBytes(Truncate(value, MaxNameLength));
+            WriteString(writer, value, MaxNameLength);
+        }
+
+        public static void WriteString(BinaryWriter writer, string value, int max)
+        {
+            var bytes = Encoding.UTF8.GetBytes(Truncate(value, max));
             writer.Write((byte)bytes.Length);
             writer.Write(bytes);
         }
 
         public static string ReadString(BinaryReader reader)
         {
+            return ReadString(reader, MaxNameLength);
+        }
+
+        public static string ReadString(BinaryReader reader, int max)
+        {
             var length = reader.ReadByte();
-            if (length > MaxNameLength)
+            if (length > max)
             {
                 throw new InvalidDataException("String too long.");
             }
 
             var bytes = reader.ReadBytes(length);
             return Encoding.UTF8.GetString(bytes);
+        }
+
+        /// <summary>
+        /// Strings that are not names: the session password.
+        ///
+        /// Separate from <see cref="WriteString"/> because a name is trimmed and
+        /// defaulted to "player", and a password must be neither: trimming would
+        /// silently change what the host typed, and defaulting would invent one.
+        ///
+        /// Clipped at a character boundary rather than by character count: the limit is
+        /// in bytes, and cutting a multi-byte character in half would corrupt it.
+        /// </summary>
+        public static void WritePassword(BinaryWriter writer, string value)
+        {
+            var text = value ?? "";
+
+            var bytes = Encoding.UTF8.GetBytes(text);
+
+            if (bytes.Length > ServerPassword.MaxLength)
+            {
+                bytes = Encoding.UTF8.GetBytes(ClipToBytes(text, ServerPassword.MaxLength));
+            }
+
+            writer.Write((byte)bytes.Length);
+            writer.Write(bytes);
+        }
+
+        /// <summary>
+        /// The longest prefix of <paramref name="text"/> that fits in this many bytes.
+        /// </summary>
+        private static string ClipToBytes(string text, int max)
+        {
+            var used = 0;
+            var index = 0;
+
+            while (index < text.Length)
+            {
+                // A surrogate pair is one character and four bytes; moving one char at a
+                // time would split it, so ask the encoder rather than guess.
+                var step = char.IsHighSurrogate(text[index]) && index + 1 < text.Length ? 2 : 1;
+                var size = Encoding.UTF8.GetByteCount(text.Substring(index, step));
+
+                if (used + size > max)
+                {
+                    break;
+                }
+
+                used += size;
+                index += step;
+            }
+
+            return text.Substring(0, index);
+        }
+
+        public static string ReadPassword(BinaryReader reader)
+        {
+            return ReadString(reader, ServerPassword.MaxLength);
         }
 
         private static string Truncate(string value, int max)

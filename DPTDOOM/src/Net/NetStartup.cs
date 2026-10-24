@@ -77,6 +77,11 @@ namespace DPTDOOM.Net
             var relay = args.relay.Present;
             var delayOverride = args.netdelay.Present ? args.netdelay.Value : -1;
 
+            // Validated here rather than at the first join: a password that was
+            // mistyped into something unusable should stop the host now, while they
+            // are looking at the screen, not produce a session nobody can enter.
+            var password = ParsePassword(args);
+
             string masterHost = null;
             var masterPort = MasterProtocol.DefaultPort;
 
@@ -153,12 +158,20 @@ namespace DPTDOOM.Net
                 lines.Add("INPUT DELAY " + delayOverride + " TICS");
             }
 
+            // Announced as a fact, never as a value: the status screen is photographed
+            // for bug reports, and the console is redirected into log files by most of
+            // the test scripts.
+            if (!string.IsNullOrEmpty(password))
+            {
+                lines.Add("PASSWORD ON");
+            }
+
             // Zero guests so far, and the slot count is what the loop below prints.
             lines.Add("WAITING FOR PLAYER 0/" + (players - bots - 1));
 
             status("HOSTING", lines.ToArray());
 
-            var session = NetSession.StartHost(port, players, name, settings, delayOverride);
+            var session = NetSession.StartHost(port, players, name, settings, delayOverride, password);
 
             if (presence != null)
             {
@@ -216,8 +229,35 @@ namespace DPTDOOM.Net
             return session;
         }
 
+        /// <summary>
+        /// The password from the command line, or null, with every way of getting it
+        /// wrong turned into a message instead of a silently open session.
+        /// </summary>
+        private static string ParsePassword(CommandLineArgs args)
+        {
+            if (args.passwordValueLookedLikeAnOption)
+            {
+                throw new Exception(
+                    "-password needs a value, and one starting with '-' reads as another option. " +
+                    "Use a password without a leading dash.");
+            }
+
+            var password = args.password.Present ? args.password.Value : null;
+
+            string error;
+
+            if (!ServerPassword.TryValidate(password, out error))
+            {
+                throw new Exception("-password: " + error + ".");
+            }
+
+            return password;
+        }
+
         private static NetSession Join(CommandLineArgs args, GameContent content, StatusHandler status, int port, string name)
         {
+            var password = ParsePassword(args);
+
             var directHost = (string)null;
             var directPort = port;
 
@@ -271,7 +311,7 @@ namespace DPTDOOM.Net
 
                 try
                 {
-                    session = NetSession.Join(directHost, directPort, name, 8000);
+                    session = NetSession.Join(directHost, directPort, name, 8000, password);
                 }
                 catch (Exception e)
                 {
@@ -299,7 +339,7 @@ namespace DPTDOOM.Net
                 try
                 {
                     var link = MasterClient.RelayJoin(masterHost, masterPort, relaySession, 12000);
-                    session = NetSession.JoinRelay(link, name);
+                    session = NetSession.JoinRelay(link, name, password);
                 }
                 catch (Exception e)
                 {

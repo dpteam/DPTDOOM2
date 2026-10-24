@@ -202,7 +202,57 @@ Pump 500
 $clampedPreview = Invoke-Page "document.getElementById('preview').innerHTML"
 Assert-True ($clampedPreview -like "*-coopbots 1*") "bots are clamped so a guest slot always remains"
 
-# 14. The server browser shows a round trip and sorts by it.
+# 14. The session password reaches the command line, on both sides - and the
+# preview does not show it.
+#
+# Hosting for friends and not for strangers is the whole point of the field, so a
+# box that looks right and builds nothing is the failure this script exists to
+# catch. The second half matters just as much: the preview panel displays the
+# command line on screen, and screenshots of that panel are how bug reports start,
+# so the real value must never appear there.
+Invoke-Page "document.getElementById('password').value='hunter 2';document.getElementById('password').onchange();" | Out-Null
+Pump 500
+
+$passwordPreview = Invoke-Page "document.getElementById('preview').innerHTML"
+Assert-True ($passwordPreview -like "*-password *****") "a password is set on the host command line"
+Assert-True ($passwordPreview -notlike "*hunter 2*") "and the preview does not show it"
+
+Invoke-Page "var b=document.querySelectorAll('[data-mode]');b[2].onclick();" | Out-Null
+Pump 500
+
+$guestPasswordPreview = Invoke-Page "document.getElementById('preview').innerHTML"
+Assert-True ($guestPasswordPreview -like "*-password *****") "and on the guest command line"
+Assert-True ($guestPasswordPreview -notlike "*hunter 2*") "and still not shown"
+
+# The value itself has to survive into the launch, not just into the preview.
+# Checked through the argument builder rather than the page payload: the host reads
+# the payload back on every navigation, so by the time the page is asked it is
+# empty. This is also the honest check - it is the string handed to the process.
+$gameRunner = $asm.GetType("DPTDOOM.Launcher.GameRunner")
+$stateType = $asm.GetType("DPTDOOM.Launcher.LauncherState")
+$build = $gameRunner.GetMethods() | Where-Object {
+    $_.Name -eq "BuildArguments" -and $_.GetParameters().Count -eq 2
+}
+
+$stateObject = [Activator]::CreateInstance($stateType)
+$stateObject.Mode = 1
+$stateObject.Iwad = "doom2.wad"
+$stateObject.Executable = "dptdoom.exe"
+$stateObject.Password = "hunter 2"
+
+$masked = $build.Invoke($null, @($stateObject, $true))
+$real = $build.Invoke($null, @($stateObject, $false))
+
+Assert-True ($masked -notlike "*hunter 2*") "the preview build masks the password"
+Assert-True ($real -like '*-password "hunter 2"*') "the launch build carries the real one, quoted"
+
+Invoke-Page "var b=document.querySelectorAll('[data-mode]');b[1].onclick();document.getElementById('password').value='';document.getElementById('password').onchange();" | Out-Null
+Pump 500
+
+$openPreview = Invoke-Page "document.getElementById('preview').innerHTML"
+Assert-True ($openPreview -notlike "*-password*") "an empty password stays an open session"
+
+# 15. The server browser shows a round trip and sorts by it.
 #
 # The ping is measured by the host as a TCP handshake to the game port, so what is
 # checked here is only that it reaches the page and orders the list: a row with no

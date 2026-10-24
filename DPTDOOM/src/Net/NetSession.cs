@@ -279,6 +279,17 @@ namespace DPTDOOM.Net
         private volatile int delay;
         private readonly int delayOverride;
 
+        /// <summary>
+        /// The session password. On the host: what a guest must offer. On a guest:
+        /// what to offer.
+        ///
+        /// Kept out of <see cref="SessionSettings"/> deliberately. Settings travel in
+        /// the welcome, are published to the master for the server list, and appear in
+        /// logs and diagnostics; the password must be in none of those, or it stops
+        /// keeping anybody out.
+        /// </summary>
+        private readonly string password;
+
         // Reconnection. See docs/NETWORK.md - the important property is that
         // lockstep makes this possible at all: neither side needs a world
         // snapshot, because both stalled at the same tic number and only the
@@ -380,16 +391,28 @@ namespace DPTDOOM.Net
         private bool reportPrinted;
 
         private NetSession(bool isHost, int expectedPlayers, string localName)
-            : this(isHost, expectedPlayers, localName, -1)
+            : this(isHost, expectedPlayers, localName, -1, null)
         {
         }
 
         private NetSession(bool isHost, int expectedPlayers, string localName, int delayOverride)
+            : this(isHost, expectedPlayers, localName, delayOverride, null)
+        {
+        }
+
+        private NetSession(bool isHost, int expectedPlayers, string localName, int delayOverride,
+                           string password)
         {
             this.isHost = isHost;
             this.expectedPlayers = MathEx.Clamp(expectedPlayers, 2, NetProtocol.MaxPlayers);
             this.localName = localName;
             this.delayOverride = delayOverride;
+
+            // On the host this is the requirement; on a guest it is what to offer.
+            // Never copied into the settings that travel in the welcome: the guest
+            // already knows the password it sent, and everybody else must not learn it
+            // from a frame, a listing or a log.
+            this.password = password ?? "";
 
             for (var i = 0; i < NetProtocol.MaxPlayers; i++)
             {
@@ -401,7 +424,13 @@ namespace DPTDOOM.Net
 
         public static NetSession StartHost(int port, int players, string name, SessionSettings settings)
         {
-            return StartHost(port, players, name, settings, -1);
+            return StartHost(port, players, name, settings, -1, null);
+        }
+
+        public static NetSession StartHost(int port, int players, string name, SessionSettings settings,
+                                           string password)
+        {
+            return StartHost(port, players, name, settings, -1, password);
         }
 
         /// <summary>
@@ -411,7 +440,13 @@ namespace DPTDOOM.Net
         /// </summary>
         public static NetSession StartHost(int port, int players, string name, SessionSettings settings, int delayOverride)
         {
-            var session = new NetSession(true, players, name, delayOverride);
+            return StartHost(port, players, name, settings, delayOverride, null);
+        }
+
+        public static NetSession StartHost(int port, int players, string name, SessionSettings settings,
+                                           int delayOverride, string password)
+        {
+            var session = new NetSession(true, players, name, delayOverride, password);
             session.settings = settings;
             session.localPlayer = 0;
             session.connectedPlayers = 1;
@@ -421,7 +456,13 @@ namespace DPTDOOM.Net
 
         public static NetSession Join(string address, int port, string name, int timeoutMs)
         {
-            var session = new NetSession(false, 2, name, -1);
+            return Join(address, port, name, timeoutMs, null);
+        }
+
+        public static NetSession Join(string address, int port, string name, int timeoutMs,
+                                      string password)
+        {
+            var session = new NetSession(false, 2, name, -1, password);
 
             try
             {
@@ -542,6 +583,7 @@ namespace DPTDOOM.Net
             var resume = false;
             var resumePlayer = -1;
             ulong resumeToken = 0;
+            var offeredPassword = "";
 
             using (var payload = new MemoryStream(hello.Value.Payload))
             using (var payloadReader = new BinaryReader(payload))
@@ -556,18 +598,39 @@ namespace DPTDOOM.Net
                 {
                     var flags = payloadReader.ReadByte();
 
-                    if ((flags & 1) != 0 && payload.Length - payload.Position >= 9)
+                    if ((flags & NetProtocol.HelloResume) != 0 && payload.Length - payload.Position >= 9)
                     {
                         resume = true;
                         resumeToken = payloadReader.ReadUInt64();
                         resumePlayer = payloadReader.ReadByte();
+                    }
+
+                    if ((flags & NetProtocol.HelloPassword) != 0 && payload.Position < payload.Length)
+                    {
+                        offeredPassword = NetProtocol.ReadPassword(payloadReader);
                     }
                 }
             }
 
             if (resume)
             {
+                // The token is proof of admission, and the slot has been held since
+                // then: asking for the password again would only mean that a host who
+                // changed it locks out the players already in the game.
                 AcceptResume(stream, client, reader, guestName, resumePlayer, resumeToken);
+                return;
+            }
+
+            if (!ServerPassword.Matches(password, offeredPassword))
+            {
+                // Said plainly, because there is nothing to protect here: the host is
+                // known, and a guest who mistyped a passphrase should learn that rather
+                // than stare at "connection refused". It is also the one refusal a
+                // player can act on.
+                SendFrame(stream, NetProtocol.TypeReject,
+                    EncodeReason(offeredPassword.Length == 0 ? "this session needs a password" : "wrong password"),
+                    null);
+                CloseGuest(client, stream);
                 return;
             }
 
@@ -730,8 +793,11 @@ namespace DPTDOOM.Net
                 // that will never be replayed, and hangs with no explanation.
                 if (abandoned.Contains(playerIndex))
                 {
+                    // Kept inside the name limit, which is what a refusal reason
+                    // travels in: a longer sentence would be cut off mid-word on the
+                    // wire and read like a broken client instead of an explanation.
                     SendFrame(stream, NetProtocol.TypeReject,
-                        EncodeReason("your slot was given up on; start a new session"), null);
+                        EncodeReason("slot given up; new session"), null);
                     CloseGuest(client, stream);
                     return;
                 }
@@ -1013,7 +1079,12 @@ namespace DPTDOOM.Net
         /// </summary>
         public static NetSession JoinRelay(RelayLink link, string name)
         {
-            var session = new NetSession(false, 2, name);
+            return JoinRelay(link, name, null);
+        }
+
+        public static NetSession JoinRelay(RelayLink link, string name, string password)
+        {
+            var session = new NetSession(false, 2, name, -1, password);
             session.relayLink = link;
             session.Relayed = true;
             session.Handshake(link.Stream);
@@ -1117,11 +1188,37 @@ namespace DPTDOOM.Net
             {
                 NetProtocol.WriteString(writer, localName);
 
+                // The tail is built as one flags byte followed by the blocks it
+                // announces. The resume block goes first so that a host which predates
+                // the password still finds the token where it expects it - it would
+                // otherwise read password bytes as a token and refuse a perfectly good
+                // reconnection.
+                var flags = (byte)0;
+
                 if (resume)
                 {
-                    writer.Write((byte)1);
-                    writer.Write(resumeToken);
-                    writer.Write((byte)localPlayer);
+                    flags |= NetProtocol.HelloResume;
+                }
+
+                if (!string.IsNullOrEmpty(password))
+                {
+                    flags |= NetProtocol.HelloPassword;
+                }
+
+                if (flags != 0)
+                {
+                    writer.Write(flags);
+
+                    if (resume)
+                    {
+                        writer.Write(resumeToken);
+                        writer.Write((byte)localPlayer);
+                    }
+
+                    if (!string.IsNullOrEmpty(password))
+                    {
+                        NetProtocol.WritePassword(writer, password);
+                    }
                 }
 
                 writer.Flush();

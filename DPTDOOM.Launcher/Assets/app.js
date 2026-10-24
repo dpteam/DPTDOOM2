@@ -12,7 +12,12 @@
 //
 // Payload layout (newline separated), shared with LauncherState.Encode:
 //   0 executable, 1 iwad, 2 map, 3 skill, 4 address, 5 port, 6 name,
-//   7 flag bits, 8 mode, 9 pwads (joined with \u001f), 10 profile slot
+//   7 flag bits, 8 mode, 9 pwads (joined with \u001f), 10 profile slot,
+//   11 local bots, 12 master, 13 relay session, 14 relay on, 15 players,
+//   16 host bots, 17 password
+//
+// Trailing fields are optional: a payload from an older build simply stops
+// earlier, and every field after the cut takes its default.
 
 'use strict';
 
@@ -94,6 +99,7 @@ var DPT = (function () {
         parts.push($('relay').checked ? '1' : '0');
         parts.push(String(parseInt($('players').value, 10) || 2));
         parts.push(String(parseInt($('hostbots').value, 10) || 0));
+        parts.push($('password').value);
 
         return parts.join('\n');
     }
@@ -152,6 +158,8 @@ var DPT = (function () {
             $('hostbots').value = String(hostBots);
         }
 
+        $('password').value = parts[FIELDS.length + 10] || '';
+
         syncMode();
         renderMods();
         requestPreview();
@@ -178,6 +186,7 @@ var DPT = (function () {
         $('relaySession').disabled = mode !== 2;
         $('players').disabled = mode !== 1;
         $('hostbots').disabled = mode !== 1;
+        $('password').disabled = mode !== 1 && mode !== 2;
     }
 
     function renderMods() {
@@ -467,7 +476,7 @@ var DPT = (function () {
         // These are not in FIELDS (they are launcher-only, not session fields),
         // so they need wiring by hand: without it editing them changes nothing,
         // because no preview is requested.
-        var extras = ['players', 'hostbots'];
+        var extras = ['players', 'hostbots', 'password'];
 
         for (i = 0; i < extras.length; i++) {
             $(extras[i]).onchange = changed;

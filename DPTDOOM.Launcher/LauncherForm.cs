@@ -373,7 +373,9 @@ namespace DPTDOOM.Launcher
 
             try
             {
-                Send("preview", GameRunner.BuildArguments(state));
+                // Masked: the preview panel is on screen while the game is set up, and
+                // a screenshot of it is how a bug report usually starts.
+                Send("preview", GameRunner.BuildArguments(state, true));
             }
             catch (Exception e)
             {

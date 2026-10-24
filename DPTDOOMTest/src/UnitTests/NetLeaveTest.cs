@@ -378,7 +378,7 @@ namespace DPTDOOMTest.UnitTests
                 }
 
                 Assert.IsTrue(survivor.Driver.Faulted, "the returning guest was told and stopped");
-                StringAssert.Contains(survivor.Driver.FaultReason, "given up on",
+                StringAssert.Contains(survivor.Driver.FaultReason, "slot given up",
                     "and the reason says what happened: " + survivor.Driver.FaultReason);
 
                 // And the host is still playing, which is the whole point.
