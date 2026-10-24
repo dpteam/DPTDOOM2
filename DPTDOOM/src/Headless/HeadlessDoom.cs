@@ -31,6 +31,38 @@ namespace DPTDOOM.Headless
         /// world does not exist yet (opening, menus, demo loading), so a run that
         /// never reaches a level still terminates.
         /// </summary>
+        /// <summary>
+        /// Prints whatever the in-game console has gained since the last call.
+        ///
+        /// There is no console panel in a headless run, so "-consolecmd" would
+        /// otherwise run and leave no trace at all - which is what makes a console
+        /// command impossible to test from a script. Output goes to stdout, where the
+        /// other diagnostics already are.
+        /// </summary>
+        private static void PrintConsoleOutput(Doom doom, ref int printed)
+        {
+            var console = doom.ConsoleOverlay;
+
+            if (console == null || console.LineCount <= printed)
+            {
+                return;
+            }
+
+            for (var i = printed; i < console.LineCount; i++)
+            {
+                var line = console.Lines[i];
+
+                var prefix = line.Kind == ConsoleLineKind.Error ? "! "
+                           : line.Kind == ConsoleLineKind.Echo ? "> "
+                           : line.Kind == ConsoleLineKind.Hint ? "- "
+                           : "  ";
+
+                Console.WriteLine(prefix + line.Text);
+            }
+
+            printed = console.LineCount;
+        }
+
         private static int GameTics(Doom doom, int updateCount)
         {
             var game = doom.Game;
@@ -79,6 +111,7 @@ namespace DPTDOOM.Headless
                     var faulted = false;
                     var lastMap = 0;
                     var levelTics = 0;
+                    var printedConsoleLines = 0;
 
                     while (true)
                     {
@@ -86,6 +119,12 @@ namespace DPTDOOM.Headless
                         {
                             break;
                         }
+
+                        // Console output is printed to stdout as well as into the
+                        // overlay. There is no overlay here, so without this a
+                        // "-consolecmd" would run and leave no trace - which is exactly
+                        // what makes a console command impossible to test.
+                        PrintConsoleOutput(doom, ref printedConsoleLines);
 
                         tics++;
 

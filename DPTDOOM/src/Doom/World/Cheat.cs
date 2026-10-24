@@ -24,20 +24,20 @@ namespace DPTDOOM
     {
         private static CheatInfo[] list = new CheatInfo[]
         {
-            new CheatInfo("idfa", (cheat, typed) => cheat.FullAmmo(), false),
-            new CheatInfo("idkfa", (cheat, typed) => cheat.FullAmmoAndKeys(), false),
-            new CheatInfo("iddqd", (cheat, typed) => cheat.GodMode(), false),
-            new CheatInfo("idclip", (cheat, typed) => cheat.NoClip(), false),
-            new CheatInfo("idspispopd", (cheat, typed) => cheat.NoClip(), false),
-            new CheatInfo("iddt", (cheat, typed) => cheat.FullMap(), true),
-            new CheatInfo("idbehold", (cheat, typed) => cheat.ShowPowerUpList(), false),
-            new CheatInfo("idbehold?", (cheat, typed) => cheat.DoPowerUp(typed), false),
-            new CheatInfo("idchoppers", (cheat, typed) => cheat.GiveChainsaw(), false),
-            new CheatInfo("tntem", (cheat, typed) => cheat.KillMonsters(), false),
-            new CheatInfo("killem", (cheat, typed) => cheat.KillMonsters(), false),
-            new CheatInfo("fhhall", (cheat, typed) => cheat.KillMonsters(), false),
-            new CheatInfo("idclev??", (cheat, typed) => cheat.ChangeLevel(typed), true),
-            new CheatInfo("idmus??", (cheat, typed) => cheat.ChangeMusic(typed), false)
+            new CheatInfo("idfa", (cheat, typed) => cheat.Execute(CheatAction.Idfa), false),
+            new CheatInfo("idkfa", (cheat, typed) => cheat.Execute(CheatAction.Idkfa), false),
+            new CheatInfo("iddqd", (cheat, typed) => cheat.Execute(CheatAction.God), false),
+            new CheatInfo("idclip", (cheat, typed) => cheat.Execute(CheatAction.NoClip), false),
+            new CheatInfo("idspispopd", (cheat, typed) => cheat.Execute(CheatAction.NoClip), false),
+            new CheatInfo("iddt", (cheat, typed) => cheat.Execute(CheatAction.FullMap), true),
+            new CheatInfo("idbehold", (cheat, typed) => cheat.Execute(CheatAction.PowerUpList), false),
+            new CheatInfo("idbehold?", (cheat, typed) => cheat.Execute(CheatAction.PowerUp, typed.Last()), false),
+            new CheatInfo("idchoppers", (cheat, typed) => cheat.Execute(CheatAction.Chainsaw), false),
+            new CheatInfo("tntem", (cheat, typed) => cheat.Execute(CheatAction.KillMonsters), false),
+            new CheatInfo("killem", (cheat, typed) => cheat.Execute(CheatAction.KillMonsters), false),
+            new CheatInfo("fhhall", (cheat, typed) => cheat.Execute(CheatAction.KillMonsters), false),
+            new CheatInfo("idclev??", (cheat, typed) => cheat.Execute(CheatAction.ChangeLevel, typed), true),
+            new CheatInfo("idmus??", (cheat, typed) => cheat.Execute(CheatAction.ChangeMusic, typed), false)
         };
 
         private static readonly int maxCodeLength = list.Max(info => info.Code.Length);
@@ -55,6 +55,122 @@ namespace DPTDOOM
             p = 0;
         }
 
+        /// <summary>
+        /// Whether cheats may be used at all right now.
+        ///
+        /// Exposed because the console needs the same rule: a cheat typed at the
+        /// prompt is the same cheat, and refusing it only in the keyboard path would
+        /// leave a way in that desynchronises every other player.
+        /// </summary>
+        public bool Allowed
+        {
+            get { return !world.Options.NetGame && !world.Options.DemoPlayback; }
+        }
+
+        /// <summary>Why a cheat was refused, in one sentence.</summary>
+        public string Refusal
+        {
+            get { return "Cheats are disabled in a network game and during demo playback."; }
+        }
+
+        /// <summary>
+        /// Runs one cheat by name, so the console and the typed codes share a single
+        /// implementation.
+        ///
+        /// A name rather than a method reference because the console parses what the
+        /// player typed: mapping a string to an enum here means the console does not
+        /// have to hold a table of delegates that could drift from this one.
+        ///
+        /// Returns false when the action is unknown.
+        /// </summary>
+        public bool Execute(CheatAction action)
+        {
+            return Execute(action, '\0');
+        }
+
+        public bool Execute(CheatAction action, char argument)
+        {
+            switch (action)
+            {
+                case CheatAction.God:
+                    GodMode();
+                    return true;
+
+                case CheatAction.NoClip:
+                    NoClip();
+                    return true;
+
+                case CheatAction.Weapons:
+                    GiveWeapons();
+                    world.ConsolePlayer.SendMessage(DoomInfo.Strings.STSTR_FAADDED);
+                    return true;
+
+                case CheatAction.Idfa:
+                    FullAmmo();
+                    return true;
+
+                case CheatAction.Idkfa:
+                    FullAmmoAndKeys();
+                    return true;
+
+                case CheatAction.Keys:
+                    GiveKeys();
+                    world.ConsolePlayer.SendMessage(DoomInfo.Strings.STSTR_KFAADDED);
+                    return true;
+
+                case CheatAction.FullMap:
+                    FullMap();
+                    return true;
+
+                case CheatAction.PowerUpList:
+                    ShowPowerUpList();
+                    return true;
+
+                case CheatAction.PowerUp:
+                    DoPowerUp(argument);
+                    return true;
+
+                case CheatAction.Chainsaw:
+                    GiveChainsaw();
+                    return true;
+
+                case CheatAction.KillMonsters:
+                    KillMonsters();
+                    return true;
+
+                case CheatAction.ChangeLevel:
+                    ChangeLevel(argument.ToString());
+                    return true;
+
+                case CheatAction.ChangeMusic:
+                    ChangeMusic(argument.ToString());
+                    return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Runs one cheat by its console name. Used by the console command, which
+        /// takes words rather than single characters.
+        /// </summary>
+        public bool Execute(CheatAction action, string argument)
+        {
+            if (action == CheatAction.ChangeLevel)
+            {
+                ChangeLevel(argument);
+                return true;
+            }
+
+            if (action == CheatAction.ChangeMusic)
+            {
+                ChangeMusic(argument);
+                return true;
+            }
+
+            return Execute(action);
+        }
+
         public bool DoEvent(DoomEvent e)
         {
             // Cheats change the world, and in a lockstep network game the other
@@ -62,11 +178,11 @@ namespace DPTDOOM
             // playback it corrupts what is being checked. Neither is fixable by
             // sending the cheat over the wire - it is a debugging tool, not a
             // game feature - so it is refused instead of quietly breaking things.
-            if (world.Options.NetGame || world.Options.DemoPlayback)
+            if (!Allowed)
             {
                 if (e.Type == EventType.KeyDown)
                 {
-                    Console.WriteLine("Cheats are disabled in a network game and during demo playback.");
+                    Console.WriteLine(Refusal);
                 }
 
                 return true;
@@ -173,13 +289,10 @@ namespace DPTDOOM
         private void FullAmmoAndKeys()
         {
             GiveWeapons();
+            GiveKeys();
             var player = world.ConsolePlayer;
             player.ArmorType = DoomInfo.DeHackEdConst.IdkfaArmorClass;
             player.ArmorPoints = DoomInfo.DeHackEdConst.IdkfaArmor;
-            for (var i = 0; i < (int)CardType.Count; i++)
-            {
-                player.Cards[i] = true;
-            }
             player.SendMessage(DoomInfo.Strings.STSTR_KFAADDED);
         }
 
@@ -226,9 +339,9 @@ namespace DPTDOOM
             player.SendMessage(DoomInfo.Strings.STSTR_BEHOLD);
         }
 
-        private void DoPowerUp(string typed)
+        private void DoPowerUp(char typed)
         {
-            switch (typed.Last())
+            switch (typed)
             {
                 case 'v':
                     ToggleInvulnerability();
@@ -248,6 +361,23 @@ namespace DPTDOOM
                 case 'l':
                     ToggleInfrared();
                     break;
+            }
+        }
+
+        /// <summary>
+        /// All six keycards and skulls.
+        ///
+        /// Split out of <see cref="FullAmmoAndKeys"/> so the console can give keys
+        /// without handing over a full arsenal - "give keys" is what a player wants
+        /// when they are stuck at a door, not "idkfa".
+        /// </summary>
+        private void GiveKeys()
+        {
+            var player = world.ConsolePlayer;
+
+            for (var i = 0; i < (int)CardType.Count; i++)
+            {
+                player.Cards[i] = true;
             }
         }
 

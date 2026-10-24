@@ -86,6 +86,7 @@ namespace DPTDOOM
         public readonly Arg showsettings;
         public readonly Arg showconsole;
         public readonly Arg<int> profiler;
+        public readonly Arg<string> consolecmd;
         public readonly Arg showtriggers;
         public readonly Arg showblockmap;
         public readonly Arg bots;
@@ -167,6 +168,11 @@ namespace DPTDOOM
             showsettings = new Arg(args.Contains("-showsettings"));
             showconsole = new Arg(args.Contains("-showconsole"));
             profiler = GetInt(args, "-profiler");
+
+            // One console command, run on the first frame of the level. Exists so a
+            // console command can be exercised by a script: without it the only way to
+            // type one is to drive the keyboard from outside the process.
+            consolecmd = GetString(args, "-consolecmd");
             showtriggers = new Arg(args.Contains("-showtriggers"));
             showblockmap = new Arg(args.Contains("-showblockmap"));
             bots = new Arg(args.Contains("-bots"));

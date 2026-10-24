@@ -48,6 +48,7 @@ powershell -NoProfile -File tools\test-reconnect.ps1
 powershell -NoProfile -File tools\test-profile.ps1
 powershell -NoProfile -File tools\test-view.ps1
 powershell -NoProfile -File tools\test-console.ps1
+powershell -NoProfile -File tools\test-cheats.ps1
 powershell -NoProfile -File tools\test-debug-overlays.ps1
 powershell -NoProfile -File tools\test-launcher.ps1
 ```

@@ -137,6 +137,15 @@ namespace DPTDOOM
         // Opened on the first frame of the level, for screenshots and for tests.
         private readonly bool showSettingsOnStart;
         private readonly bool showConsoleOnStart;
+
+        /// <summary>
+        /// One command from "-consolecmd", run on the first frame of the level.
+        ///
+        /// Runs without opening the console: the point is to exercise a command from a
+        /// script, not to photograph the panel.
+        /// </summary>
+        private readonly string consoleCommandOnStart;
+
         private bool startScreensShown;
 
         private DemoRecorder recorder;
@@ -226,6 +235,7 @@ namespace DPTDOOM
 
             showSettingsOnStart = args.showsettings.Present;
             showConsoleOnStart = args.showconsole.Present;
+            consoleCommandOnStart = args.consolecmd.Present ? args.consolecmd.Value : null;
 
             if (args.coopbots.Present)
             {
@@ -826,6 +836,15 @@ namespace DPTDOOM
 
             startScreensShown = true;
 
+            if (consoleCommandOnStart != null)
+            {
+                // Before the panels, so a command that fails prints its error into a
+                // console that is about to be shown rather than into one that does not
+                // exist yet.
+                overlay.Print("] " + consoleCommandOnStart, ConsoleLineKind.Echo);
+                commands.Execute(consoleCommandOnStart, overlay);
+            }
+
             if (showSettingsOnStart)
             {
                 menu.ShowSettings();
@@ -1236,6 +1255,115 @@ namespace DPTDOOM
                 });
 
             commands.Register(
+                "god", "god",
+                "Toggle god mode.",
+                call => RunCheat(call, CheatAction.God));
+
+            commands.Register(
+                "noclip", "noclip",
+                "Toggle walking through walls and things.",
+                call => RunCheat(call, CheatAction.NoClip));
+
+            commands.Register(
+                "give", "give <all|weapons|ammo|keys|saw>",
+                "Hand yourself things. Like the classic codes, but spelled out.",
+                call =>
+                {
+                    if (call.Args.Length == 0)
+                    {
+                        call.Hint("give all | weapons | ammo | keys | saw");
+                        return;
+                    }
+
+                    CheatAction action;
+
+                    switch (call.Args[0].ToLowerInvariant())
+                    {
+                        case "all":
+                            // idkfa: weapons, ammo, armour and every key. "all" means
+                            // all, and a player typing it at a locked door expects the
+                            // door to open.
+                            action = CheatAction.Idkfa;
+                            break;
+
+                        case "weapons":
+                            action = CheatAction.Weapons;
+                            break;
+
+                        case "ammo":
+                            action = CheatAction.Idfa;
+                            break;
+
+                        case "keys":
+                            action = CheatAction.Keys;
+                            break;
+
+                        case "saw":
+                            action = CheatAction.Chainsaw;
+                            break;
+
+                        default:
+                            call.Error("Expected all, weapons, ammo, keys or saw.");
+                            return;
+                    }
+
+                    RunCheat(call, action);
+                });
+
+            commands.Register(
+                "powerup", "powerup <v|s|i|r|a|l>",
+                "One power-up: v invuln, s strength, i invisibility, r radsuit, a allmap, l infrared.",
+                call =>
+                {
+                    if (call.Args.Length == 0)
+                    {
+                        RunCheat(call, CheatAction.PowerUpList);
+                        return;
+                    }
+
+                    var letter = call.Args[0].ToLowerInvariant();
+
+                    if (letter.Length == 0 || "vsiral".IndexOf(letter[0]) < 0)
+                    {
+                        call.Error("Expected v, s, i, r, a or l.");
+                        return;
+                    }
+
+                    RunCheat(call, CheatAction.PowerUp, letter[0]);
+                });
+
+            commands.Register(
+                "killem", "killem",
+                "Kill every monster on the level.",
+                call => RunCheat(call, CheatAction.KillMonsters));
+
+            commands.Register(
+                "revealmap", "revealmap",
+                "Toggle the full automap, and then things on it.",
+                call => RunCheat(call, CheatAction.FullMap));
+
+            commands.Register(
+                "cheats", "cheats",
+                "Whether cheats can be used right now, and why not.",
+                call =>
+                {
+                    if (game == null || game.World == null)
+                    {
+                        call.Error("No game in progress.");
+                        return;
+                    }
+
+                    if (game.World.Cheat.Allowed)
+                    {
+                        call.Write("Cheats are available.");
+                    }
+                    else
+                    {
+                        call.Write(game.World.Cheat.Refusal);
+                    }
+                });
+
+            commands.Register(
                 "players", "players",
                 "Who is in the session.",
                 call =>
@@ -1271,6 +1399,89 @@ namespace DPTDOOM
         /// Shared body of every numeric setting command: no argument shows the
         /// current value, one argument sets it, anything else explains itself.
         /// </summary>
+        /// <summary>
+        /// Runs one cheat from the console, under the same rules as the typed codes.
+        ///
+        /// The refusal is the important part. A cheat changes the world; in a lockstep
+        /// session the other end never learns about it, and during demo playback it
+        /// corrupts what is being checked. Sending the cheat over the wire does not fix
+        /// either - it is a debugging tool, not a game feature - so the console refuses
+        /// it for exactly the same reason the keyboard does, and says so instead of
+        /// doing nothing.
+        /// </summary>
+        private void RunCheat(ConsoleCall call, CheatAction action)
+        {
+            RunCheat(call, action, '\0');
+        }
+
+        private void RunCheat(ConsoleCall call, CheatAction action, char argument)
+        {
+            if (game == null || game.World == null)
+            {
+                call.Error("No game in progress.");
+                return;
+            }
+
+            var cheat = game.World.Cheat;
+
+            if (!cheat.Allowed)
+            {
+                call.Error(cheat.Refusal);
+                return;
+            }
+
+            if (!cheat.Execute(action, argument))
+            {
+                call.Error("That cheat is not available.");
+                return;
+            }
+
+            // The cheat itself puts its own message on the message line, but that line
+            // is behind the console while it is open - so the prompt has to say
+            // something too, or the player types a command and sees no reaction at all.
+            call.Write(Describe(action, argument));
+        }
+
+        /// <summary>A short confirmation, in the words the player typed.</summary>
+        private static string Describe(CheatAction action, char argument)
+        {
+            switch (action)
+            {
+                case CheatAction.God:
+                    return "god mode toggled";
+
+                case CheatAction.NoClip:
+                    return "noclip toggled";
+
+                case CheatAction.Weapons:
+                    return "all weapons";
+
+                case CheatAction.Idfa:
+                    return "weapons, ammo and armour";
+
+                case CheatAction.Idkfa:
+                    return "weapons, ammo, armour and keys";
+
+                case CheatAction.Keys:
+                    return "all keys";
+
+                case CheatAction.FullMap:
+                    return "automap toggled";
+
+                case CheatAction.PowerUp:
+                    return "powerup " + argument;
+
+                case CheatAction.Chainsaw:
+                    return "chainsaw";
+
+                case CheatAction.KillMonsters:
+                    return "monsters killed";
+
+                default:
+                    return "done";
+            }
+        }
+
         private static void SetNumber(ConsoleCall call, int min, int max, string name,
                                       Func<int> get, Action<int> set)
         {

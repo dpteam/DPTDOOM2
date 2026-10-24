@@ -150,6 +150,12 @@ jobs:
         shell: pwsh
         run: ./tools/test-console.ps1
 
+      - name: Cheat commands from the console
+        # Each command changes the world and none of them works in a network game: a
+        # cheat the other end never learns about desynchronises the session.
+        shell: pwsh
+        run: ./tools/test-cheats.ps1
+
       - name: Automap debug overlays actually draw
         # "-maponly" was in the command line and did nothing: it was applied only by
         # the window's own toggle, so a headless run ignored it and every screenshot
