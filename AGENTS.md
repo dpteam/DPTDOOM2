@@ -49,6 +49,7 @@ powershell -NoProfile -File tools\test-host-bans.ps1
 powershell -NoProfile -File tools\test-master-allow.ps1
 powershell -NoProfile -File tools\test-master-config.ps1
 powershell -NoProfile -File tools\test-scripts.ps1
+powershell -NoProfile -File tools\test-decorate.ps1
 powershell -NoProfile -File tools\test-upnp.ps1
 powershell -NoProfile -File tools\test-reconnect.ps1
 powershell -NoProfile -File tools\test-profile.ps1
@@ -120,6 +121,17 @@ powershell -NoProfile -File tools\test-launcher.ps1
   сети», а не выполнять его. Ноуклип проверяется через `CheatFlags.NoClip` в
   `CheckPosition`, а не копированием флага на моб — иначе он теряется при
   респавне.
+- DECORATE (`-decorate`, лампа `DECORATE`, `src/SharpScript/DecorateConverter.cs`) —
+  **конвертируется в SharpScript**, а не применяется вторым путём: иначе понадобится
+  вторая копия разбора, песочницы и однократного применения, и копии разойдутся. Числа и
+  флаги переносятся; `States` — нет (кадру нужна запись в таблице состояний и имя спрайта,
+  которых патч актора не даёт) и это **обязано** попасть в отчёт: актор, выглядящий
+  сконвертированным и ведущий себя как оригинал, хуже строки в отчёте. Имена акторов —
+  только монстры: неверный номер не падает, а молча правит другого актора, поэтому таблица
+  по памяти хуже её отсутствия. `scripts: OK` при непреобразованных состояниях — намеренно:
+  скрипт, который не разобрался, это провал, а непринятое движком состояние — нет.
+  Проверка — `DecorateConverterTest` (применение сгенерированного текста к настоящей
+  таблице) и `tools/test-decorate.ps1` (хеш мира меняется от чисел в `.dec`).
 - Боты: навигация — граф **секторов**, не субсекторов (см. `docs/BOTS.md`).
   Рёбра направленные и фильтруются по высоте шага и просвету. Маршрут
   продвигается только по факту входа в следующий сектор.

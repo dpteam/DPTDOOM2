@@ -31,6 +31,20 @@ namespace DPTDOOM
         private TextureAnimation animation;
         private ScriptLibrary scripts;
 
+        /// <summary>
+        /// The SharpScript this run's DECORATE was converted into, or null when there was
+        /// none.
+        ///
+        /// Kept so the <c>decorate</c> console command can print it. A modder whose actor
+        /// came out wrong has exactly one question - "what did my DECORATE become" - and
+        /// without the text the only way to answer it is to read this project's source.
+        /// </summary>
+        private string decorateScript;
+
+        /// <summary>What the DECORATE conversion could not do, in DECORATE terms.</summary>
+        private readonly System.Collections.Generic.List<string> decorateProblems =
+            new System.Collections.Generic.List<string>();
+
         private GameContent()
         {
         }
@@ -97,9 +111,12 @@ namespace DPTDOOM
         private void InitializeScripts(CommandLineArgs args)
         {
             var paths = args.script.Present ? args.script.Value : new string[0];
+            var decoratePaths = args.decorate.Present ? args.decorate.Value : new string[0];
             var lump = wad.GetLumpNumber("SCRIPTS");
+            var decorateLump = wad.GetLumpNumber("DECORATE");
 
-            if (paths.Length == 0 && lump == -1)
+            if (paths.Length == 0 && lump == -1 &&
+                decoratePaths.Length == 0 && decorateLump == -1)
             {
                 return;
             }
@@ -129,22 +146,86 @@ namespace DPTDOOM
                     "SCRIPTS lump", DoomInfo.MobjInfos);
             }
 
+            // DECORATE is converted, not applied: the result is SharpScript source and goes
+            // through the same library, the same sandbox and the same single application
+            // pass as a hand-written script. A second way of changing actors would need its
+            // own copy of all three, and the two would drift.
+            var converted = new System.Text.StringBuilder();
+
+            foreach (var path in decoratePaths)
+            {
+                try
+                {
+                    converted.Append(DecorateConverter.Convert(
+                        System.IO.File.ReadAllText(path),
+                        DoomInfo.MobjInfos,
+                        decorateProblems));
+                }
+                catch (Exception e)
+                {
+                    decorateProblems.Add(path + ": " + e.Message);
+                }
+            }
+
+            if (decorateLump != -1)
+            {
+                converted.Append(DecorateConverter.Convert(
+                    System.Text.Encoding.UTF8.GetString(wad.ReadLump(decorateLump)),
+                    DoomInfo.MobjInfos,
+                    decorateProblems));
+            }
+
+            if (converted.Length > 0)
+            {
+                decorateScript = converted.ToString();
+
+                // Only when something actually came out of it. A DECORATE file whose every
+                // actor was refused has its problems reported below, and handing the library
+                // an empty script would add "no actor definitions found" on top of them.
+                if (decorateScript.Contains("fn Thing_"))
+                {
+                    library.Add(decorateScript, "DECORATE", DoomInfo.MobjInfos);
+                }
+            }
+
             library.ApplyTo(DoomInfo.MobjInfos);
 
             scripts = library;
+
+            foreach (var problem in decorateProblems)
+            {
+                // "Unchanged" is the true outcome for every case here - a States section the
+                // engine cannot accept, a property with no counterpart, an actor that was
+                // refused outright - and the line above says which of them it was and what to
+                // do about it. A consequence invented per problem kind would be a second
+                // place to keep in step with the messages.
+                LoadReport.Add("decorate problem", problem,
+                    "that part of the actor keeps the engine's values");
+            }
 
             foreach (var problem in library.Problems)
             {
                 LoadReport.Add("script problem", problem, "that script is skipped, the actor keeps its old behaviour");
             }
 
+            // Two different outcomes, told apart on purpose. A script that fails to parse is
+            // a failure: nothing it said took effect. A DECORATE file whose States section
+            // could not be converted is not - the numbers did take effect, and the file is
+            // usable; calling that "Failed" every time a mod ships States (which is every
+            // time) would teach the player to ignore the word.
             if (library.Problems.Count > 0)
             {
-                ConsoleUi.Failed(library.Problems.Count + " problem(s)");
+                ConsoleUi.Failed((library.Problems.Count + decorateProblems.Count) + " problem(s)");
             }
             else
             {
                 ConsoleUi.Ok(library.Patches.Count + " actor(s) described");
+
+                if (decorateProblems.Count > 0)
+                {
+                    ConsoleUi.Detail(decorateProblems.Count +
+                                     " thing(s) in DECORATE not converted, listed below");
+                }
             }
         }
 
@@ -174,5 +255,17 @@ namespace DPTDOOM
         /// would mean changing this class again for it.
         /// </summary>
         public ScriptLibrary Scripts => scripts;
+
+        /// <summary>
+        /// The SharpScript that DECORATE was converted into, or null when there was none.
+        ///
+        /// Exposed because "what did my DECORATE become" is the only question a modder can
+        /// usefully ask when an actor comes out wrong, and the answer has to be the text
+        /// that actually ran, not a description of it.
+        /// </summary>
+        public string DecorateScript => decorateScript;
+
+        /// <summary>What the DECORATE conversion could not do, in DECORATE terms.</summary>
+        public System.Collections.Generic.IList<string> DecorateProblems => decorateProblems;
     }
 }

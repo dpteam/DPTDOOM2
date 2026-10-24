@@ -1514,6 +1514,37 @@ namespace DPTDOOM
                 });
 
             commands.Register(
+                "decorate", "decorate",
+                "What the loaded DECORATE became: the generated script, and what it could not do.",
+                call =>
+                {
+                    if (content == null || string.IsNullOrEmpty(content.DecorateScript))
+                    {
+                        call.Write("No DECORATE loaded.");
+                        return;
+                    }
+
+                    call.Write("DECORATE converted to SharpScript:");
+
+                    // Written line by line rather than as one block: the console wraps and
+                    // the only thing a reader is looking for is one actor's body.
+                    foreach (var line in content.DecorateScript.Split('\n'))
+                    {
+                        call.Write("  " + line.TrimEnd('\r'));
+                    }
+
+                    if (content.DecorateProblems.Count > 0)
+                    {
+                        call.Write(content.DecorateProblems.Count + " thing(s) not converted:");
+
+                        foreach (var problem in content.DecorateProblems)
+                        {
+                            call.Write("  " + problem);
+                        }
+                    }
+                });
+
+            commands.Register(
                 "players", "players",
                 "Who is in the session.",
                 call =>

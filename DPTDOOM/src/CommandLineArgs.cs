@@ -38,6 +38,16 @@ namespace DPTDOOM
         /// </summary>
         public readonly Arg<string[]> script;
 
+        /// <summary>
+        /// DECORATE files, by path, or read from a <c>DECORATE</c> lump in the WAD.
+        ///
+        /// Converted into SharpScript rather than interpreted directly, so it takes the same
+        /// path as a hand-written script: one parser, one sandbox, one application pass, and
+        /// one behaviour to keep correct. The conversion is honest about its limits and says
+        /// so in the load report - the numbers come across, the States section does not.
+        /// </summary>
+        public readonly Arg<string[]> decorate;
+
         public readonly Arg<Tuple<int, int>> warp;
         public readonly Arg<int> episode;
         public readonly Arg<int> skill;
@@ -183,6 +193,7 @@ namespace DPTDOOM
             file = Check_file(args);
             deh = Check_deh(args);
             script = Check_script(args);
+            decorate = Check_decorate(args);
 
             warp = Check_warp(args);
             episode = GetInt(args, "-episode");
@@ -281,6 +292,7 @@ namespace DPTDOOM
                 var pwadPaths = new List<string>();
                 var dehPaths = new List<string>();
                 var scriptPaths = new List<string>();
+                var decoratePaths = new List<string>();
 
                 foreach (var path in args)
                 {
@@ -313,6 +325,13 @@ namespace DPTDOOM
                         // works the way a WAD or a .deh does: no flags to remember.
                         scriptPaths.Add(path);
                     }
+                    else if (extension == ".decorate" || extension == ".dec")
+                    {
+                        // DECORATE by extension, same reason. ".dec" is what files in the
+                        // wild are usually called even though the lump inside a PWAD is
+                        // always DECORATE.
+                        decoratePaths.Add(path);
+                    }
                 }
 
                 if (iwadPath != null)
@@ -333,6 +352,11 @@ namespace DPTDOOM
                 if (scriptPaths.Count > 0)
                 {
                     script = new Arg<string[]>(scriptPaths.ToArray());
+                }
+
+                if (decoratePaths.Count > 0)
+                {
+                    decorate = new Arg<string[]>(decoratePaths.ToArray());
                 }
             }
         }
@@ -362,6 +386,17 @@ namespace DPTDOOM
         private static Arg<string[]> Check_script(string[] args)
         {
             var values = GetValues(args, "-script");
+            if (values.Length >= 1)
+            {
+                return new Arg<string[]>(values);
+            }
+
+            return new Arg<string[]>();
+        }
+
+        private static Arg<string[]> Check_decorate(string[] args)
+        {
+            var values = GetValues(args, "-decorate");
             if (values.Length >= 1)
             {
                 return new Arg<string[]>(values);
