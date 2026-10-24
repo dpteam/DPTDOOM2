@@ -186,6 +186,23 @@ namespace DPTDOOM.Win32
                     window.ShowOverlay = !window.ShowOverlay;
                     break;
 
+                case MenuCommand.ViewCrosshair:
+                    // Cycled rather than toggled: four styles, and the player
+                    // finds the one they like by pressing the same item again.
+                    config.hud_crosshair = (config.hud_crosshair + 1) % 4;
+                    break;
+
+                case MenuCommand.ViewFreeLook:
+                    config.view_freelook = !config.view_freelook;
+
+                    if (!config.view_freelook)
+                    {
+                        // The game loop recentres on the next frame; saying so
+                        // here would need the world, which is not always there.
+                        Console.WriteLine("Free look off, view recentred.");
+                    }
+                    break;
+
                 case MenuCommand.AudioSfxUp:
                 case MenuCommand.AudioSfxDown:
                     if (sound != null)
@@ -689,6 +706,8 @@ namespace DPTDOOM.Win32
             menu.SetChecked(MenuCommand.ViewFullscreen, window.IsFullscreen);
             menu.SetChecked(MenuCommand.ViewMessages, video.DisplayMessage);
             menu.SetChecked(MenuCommand.ViewFps, window.ShowOverlay);
+            menu.SetChecked(MenuCommand.ViewCrosshair, config.hud_crosshair != 0);
+            menu.SetChecked(MenuCommand.ViewFreeLook, config.view_freelook);
             menu.SetChecked(MenuCommand.DebugFpsLog, clock != null && clock.IsLogging);
             menu.SetChecked(MenuCommand.DebugProfile, video.Profile != null && video.Profile.Enabled);
 

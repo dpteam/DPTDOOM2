@@ -72,6 +72,12 @@ namespace DPTDOOM.Win32
         // means a menu item never silently becomes a different item.
         DebugProfile,
 
+        // Same reason, for the view settings: they belong next to "Сообщения" in
+        // the View menu, but their IDs have to stay out of the way of the ones that
+        // are already posted by number from the test scripts.
+        ViewCrosshair = 1110,
+        ViewFreeLook,
+
         HelpControls = 1401,
         HelpAbout,
 
@@ -169,6 +175,9 @@ namespace DPTDOOM.Win32
             Separator(popup);
             Item(popup, MenuCommand.ViewMessages, "Сообщения\tF8");
             Item(popup, MenuCommand.ViewFps, "Счётчик кадров");
+            Separator(popup);
+            Item(popup, MenuCommand.ViewCrosshair, "Прицел: переключить");
+            Item(popup, MenuCommand.ViewFreeLook, "Обзор мышью (наклон)");
         }
 
         private void BuildAudio()

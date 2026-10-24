@@ -71,6 +71,27 @@ namespace DPTDOOM
         private INetDriver netDriver;
 
         /// <summary>
+        /// Vertical look, in virtual pixels of a 320x200 screen; positive is up.
+        ///
+        /// Client-side state, like the chat line: it is not in the world, not in a
+        /// TicCmd, not in a demo and not in a save. Two players in the same session
+        /// can look at different things without the simulation noticing, which is
+        /// exactly why it lives here and not on the player.
+        /// </summary>
+        private Fixed viewPitch;
+
+        /// <summary>
+        /// How far the view may tilt, in virtual pixels.
+        ///
+        /// A third of the screen. Beyond that the shear starts to show as stretched
+        /// flats near the edge, and the pitch stops reading as "looking up" and
+        /// starts reading as a broken projection.
+        /// </summary>
+        public static readonly int PitchLimit = 70;
+
+        public Fixed ViewPitch => viewPitch;
+
+        /// <summary>
         /// True while the status bar is showing the reconnect countdown, so it
         /// can be cleared once instead of being rewritten every frame.
         /// </summary>
@@ -126,6 +147,28 @@ namespace DPTDOOM
             this.netDriver = netDriver;
 
             botMode = args.bots.Present;
+
+            // Presentation switches from the command line. Applied here because this
+            // is the one place that has both the arguments and the config: a saved
+            // config keeps the player's own choice whenever the flag is absent.
+            if (args.crosshair.Present)
+            {
+                config.hud_crosshair = MathEx.Clamp(args.crosshair.Value, 0, 3);
+            }
+
+            if (args.freelook.Present)
+            {
+                config.view_freelook = true;
+            }
+
+            // A starting tilt, for screenshots and for reproducing a bug report.
+            // Setting it implies free look: a tilt with the setting off would be
+            // undone by the first frame.
+            if (args.pitch.Present)
+            {
+                config.view_freelook = true;
+                viewPitch = Fixed.FromInt(MathEx.Clamp(args.pitch.Value, -PitchLimit, PitchLimit));
+            }
 
             if (args.coopbots.Present)
             {
@@ -746,6 +789,52 @@ namespace DPTDOOM
             }
         }
 
+        /// <summary>
+        /// Applies vertical look for this frame.
+        ///
+        /// Drained once per frame, not once per tic, so the view moves at the frame
+        /// rate even though the input is polled per tic - a 35 Hz tilt looks stepped
+        /// next to a 70 Hz render.
+        ///
+        /// Turning free look off recentres immediately. Leaving the view tilted
+        /// after the switch would strand the player looking at the ceiling with no
+        /// key that brings it back.
+        /// </summary>
+        private void UpdateViewPitch()
+        {
+            if (userInput == null || !config.view_freelook)
+            {
+                viewPitch = Fixed.Zero;
+                return;
+            }
+
+            bool center;
+            var delta = userInput.TakeViewPitch(out center);
+
+            if (center)
+            {
+                viewPitch = Fixed.Zero;
+                return;
+            }
+
+            if (delta != 0)
+            {
+                var limit = Fixed.FromInt(PitchLimit);
+                var next = viewPitch + Fixed.FromInt(delta);
+
+                if (next > limit)
+                {
+                    next = limit;
+                }
+                else if (next < -limit)
+                {
+                    next = -limit;
+                }
+
+                viewPitch = next;
+            }
+        }
+
         private bool CheckFunctionKey(DoomKey key)
         {
             switch (key)
@@ -874,6 +963,8 @@ namespace DPTDOOM
             // Chat arrives on the network thread and is displayed here, on the
             // game thread, so the message line is only ever touched in one place.
             PumpChat();
+
+            UpdateViewPitch();
 
             if (!wiping)
             {

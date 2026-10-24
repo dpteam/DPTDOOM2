@@ -52,6 +52,12 @@ namespace DPTDOOM.UserInput
 
         public bool Suppressed { get; set; }
 
+        public int TakeViewPitch(out bool center)
+        {
+            center = false;
+            return 0;
+        }
+
         public int MaxMouseSensitivity
         {
             get

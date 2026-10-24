@@ -202,6 +202,25 @@ try {
     Send-Command $window 1321
     $process.Refresh()
     Assert-True (-not $process.HasExited) "the frame profile toggle did not crash"
+
+    Write-Host ""
+    Write-Host "Crosshair and free look"
+
+    # ViewCrosshair is 1110 and ViewFreeLook 1111. Both were given explicit numbers
+    # because the earlier View items are posted by number from other scripts, and
+    # inserting them in the middle would silently renumber those.
+    for ($i = 0; $i -lt 5; $i++) {
+        Send-Command $window 1110
+    }
+
+    $process.Refresh()
+    Assert-True (-not $process.HasExited) "cycling the crosshair through all four styles did not crash"
+
+    Send-Command $window 1111
+    Send-Command $window 1111
+
+    $process.Refresh()
+    Assert-True (-not $process.HasExited) "toggling free look off and on did not crash"
 }
 finally {
     if (-not $process.HasExited) {

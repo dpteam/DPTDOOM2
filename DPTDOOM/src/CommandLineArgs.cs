@@ -80,6 +80,9 @@ namespace DPTDOOM
         public readonly Arg freeze;
         public readonly Arg maponly;
         public readonly Arg profile;
+        public readonly Arg<int> crosshair;
+        public readonly Arg freelook;
+        public readonly Arg<int> pitch;
         public readonly Arg showtriggers;
         public readonly Arg showblockmap;
         public readonly Arg bots;
@@ -148,6 +151,12 @@ namespace DPTDOOM
             freeze = new Arg(args.Contains("-freeze"));
             maponly = new Arg(args.Contains("-maponly"));
             profile = new Arg(args.Contains("-profile"));
+
+            // Presentation only: a crosshair and a tilting view are per-machine, so
+            // they are neither sent over the network nor written into a demo.
+            crosshair = GetInt(args, "-crosshair");
+            freelook = new Arg(args.Contains("-freelook"));
+            pitch = GetInt(args, "-pitch");
             showtriggers = new Arg(args.Contains("-showtriggers"));
             showblockmap = new Arg(args.Contains("-showblockmap"));
             bots = new Arg(args.Contains("-bots"));
@@ -283,8 +292,37 @@ namespace DPTDOOM
             return args
                 .SkipWhile(arg => arg != name)
                 .Skip(1)
-                .TakeWhile(arg => arg[0] != '-')
+                .TakeWhile(arg => !IsOption(arg))
                 .ToArray();
+        }
+
+        /// <summary>
+        /// Whether an argument starts a new option rather than being a value.
+        ///
+        /// A leading '-' used to be enough, which quietly broke every numeric option
+        /// that can be negative: "-pitch -40" read as "no value", and the tilt
+        /// silently became zero. A lone "-" or a negative number is a value; anything
+        /// else starting with '-' is the next option.
+        /// </summary>
+        private static bool IsOption(string arg)
+        {
+            if (string.IsNullOrEmpty(arg) || arg[0] != '-')
+            {
+                return false;
+            }
+
+            if (arg.Length == 1)
+            {
+                return false;
+            }
+
+            // -40, -0.5, -1e3: a number, not a switch.
+            double parsed;
+            return !double.TryParse(
+                arg,
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out parsed);
         }
 
 

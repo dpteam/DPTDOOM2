@@ -47,6 +47,22 @@ namespace DPTDOOM.Video
 
         public RenderProfile Profile => profile;
 
+        /// <summary>
+        /// Crosshair style: 0 off, 1 cross, 2 dot, 3 both. Presentation only.
+        /// </summary>
+        public int Crosshair { get; set; }
+
+        /// <summary>
+        /// Palette indices used for the crosshair.
+        ///
+        /// Found from PLAYPAL rather than hard-coded: index 4 is "dark red" in Doom
+        /// II and something else in Freedoom, and a crosshair drawn in whatever
+        /// happens to be at a fixed index is a crosshair nobody can see. Looking up
+        /// the nearest white and the nearest black works for every IWAD.
+        /// </summary>
+        private readonly int crosshairLight;
+        private readonly int crosshairDark;
+
         public ThreeDRenderer(GameContent content, DrawScreen screen, int windowSize)
         {
             colorMap = content.ColorMap;
@@ -61,6 +77,10 @@ namespace DPTDOOM.Video
             drawScale = screenWidth / 320;
 
             this.windowSize = windowSize;
+
+            var playpal = content.Wad.ReadLump("PLAYPAL");
+            crosshairLight = NearestPaletteIndex(playpal, 255, 255, 255);
+            crosshairDark = NearestPaletteIndex(playpal, 0, 0, 0);
 
             InitWallRendering();
             InitPlaneRendering();
@@ -124,6 +144,11 @@ namespace DPTDOOM.Video
         private Fixed centerYFrac;
         private Fixed projection;
 
+        // Where the horizon would be without any vertical look. The pitch shift is
+        // applied on top of these every frame, so the base never has to be undone.
+        private int baseCenterY;
+        private Fixed baseCenterYFrac;
+
         private void ResetWindow(int x, int y, int width, int height)
         {
             windowX = x;
@@ -135,6 +160,9 @@ namespace DPTDOOM.Video
             centerXFrac = Fixed.FromInt(centerX);
             centerYFrac = Fixed.FromInt(centerY);
             projection = centerXFrac;
+
+            baseCenterY = centerY;
+            baseCenterYFrac = centerYFrac;
         }
 
 
@@ -719,7 +747,28 @@ namespace DPTDOOM.Video
 
         public void Render(Player player, Fixed frameFrac)
         {
+            Render(player, frameFrac, Fixed.Zero);
+        }
+
+        /// <summary>
+        /// Draws the world with an optional vertical tilt.
+        ///
+        /// The tilt is a shear of the projection: the horizon moves up or down the
+        /// screen and every wall, flat and sprite moves with it. That is what the
+        /// Build engine did for Duke Nukem 3D, and it is the only kind of pitch that
+        /// a renderer with no camera rotation can do - a real pitch would need
+        /// perspective correction the Doom renderer never had.
+        ///
+        /// Both <see cref="centerYFrac"/> and <see cref="centerY"/> have to move: the
+        /// first places the projection, the second is used to keep wall textures
+        /// aligned to the world. Shifting only one of them slides the geometry
+        /// against its own textures.
+        /// </summary>
+        public void Render(Player player, Fixed frameFrac, Fixed viewPitch)
+        {
             this.frameFrac = frameFrac;
+
+            ApplyViewPitch(viewPitch);
 
             var setupStart = profile.Stamp();
 
@@ -777,9 +826,144 @@ namespace DPTDOOM.Video
             }
 
             profile.Add(RenderProfile.Section.Sky, profile.Stamp() - phaseStart);
+
+            // Last, so it sits over the weapon: the mark is what the player aims
+            // with and must never be hidden behind their own gun.
+            DrawCrosshair();
         }
 
 
+
+        /// <summary>
+        /// Moves the horizon by the requested tilt, in virtual pixels.
+        ///
+        /// The clamp is repeated here rather than trusted from the caller: the
+        /// renderer is also used by tests and by the wipe, and a shift larger than
+        /// the window would put the horizon off-screen and make every column
+        /// degenerate.
+        /// </summary>
+        private void ApplyViewPitch(Fixed viewPitch)
+        {
+            var scale = screenWidth / 320;
+
+            var shift = viewPitch.ToIntFloor() * scale;
+
+            var limit = windowHeight / 3;
+            if (shift > limit)
+            {
+                shift = limit;
+            }
+            else if (shift < -limit)
+            {
+                shift = -limit;
+            }
+
+            // Looking up moves the horizon *down* the screen, so the sign is
+            // inverted here once instead of at every use.
+            centerYFrac = baseCenterYFrac - Fixed.FromInt(shift);
+            centerY = baseCenterY - shift;
+        }
+
+        /// <summary>
+        /// Nearest palette entry to a colour, searched over the first 256 entries
+        /// (the base palette, before any damage or item tinting).
+        ///
+        /// Squared distance, so no square root per candidate; 256 iterations once
+        /// at startup.
+        /// </summary>
+        private static int NearestPaletteIndex(byte[] playpal, int r, int g, int b)
+        {
+            var best = 0;
+            var bestDistance = int.MaxValue;
+
+            for (var i = 0; i < 256; i++)
+            {
+                var dr = playpal[i * 3 + 0] - r;
+                var dg = playpal[i * 3 + 1] - g;
+                var db = playpal[i * 3 + 2] - b;
+
+                var distance = dr * dr + dg * dg + db * db;
+
+                if (distance < bestDistance)
+                {
+                    bestDistance = distance;
+                    best = i;
+                }
+            }
+
+            return best;
+        }
+
+        /// <summary>
+        /// Draws the aiming mark at the centre of the 3D view.
+        ///
+        /// Fixed to the centre of the window rather than to the horizon: with the
+        /// view tilted, the horizon slides down the screen, and a crosshair that
+        /// slid with it would look like it was falling off. Duke Nukem 3D kept its
+        /// crosshair centred for the same reason.
+        ///
+        /// A dark copy is drawn first, one pixel larger on every side. A white cross
+        /// alone disappears on a bright wall and a black one disappears in a dark
+        /// corridor; the pair reads on both.
+        /// </summary>
+        public void DrawCrosshair()
+        {
+            var style = Crosshair;
+
+            if (style <= 0 || windowWidth < 16 || windowHeight < 16)
+            {
+                return;
+            }
+
+            var scale = Math.Max(1, screenWidth / 320);
+
+            var cx = windowX + windowWidth / 2;
+            var cy = windowY + windowHeight / 2;
+
+            var gap = 2 * scale;
+            var arm = 5 * scale;
+            var thickness = Math.Max(1, scale / 2 + scale % 2);
+
+            var outline = Math.Max(1, scale / 2);
+
+            // Cross.
+            if (style == 1 || style == 3)
+            {
+                // Dark backing first, inflated by the outline width.
+                CrosshairBars(cx, cy, gap, arm, thickness, outline, crosshairDark);
+                CrosshairBars(cx, cy, gap, arm, thickness, 0, crosshairLight);
+            }
+
+            // Dot.
+            if (style == 2 || style == 3)
+            {
+                var size = Math.Max(1, scale);
+                var half = size / 2;
+
+                screen.FillRect(
+                    cx - half - outline, cy - half - outline,
+                    size + outline * 2, size + outline * 2, crosshairDark);
+
+                screen.FillRect(cx - half, cy - half, size, size, crosshairLight);
+            }
+        }
+
+        /// <summary>Four arms of the cross, drawn around a centre gap.</summary>
+        private void CrosshairBars(int cx, int cy, int gap, int arm, int thickness, int inflate, int color)
+        {
+            var half = thickness / 2;
+            var t = thickness + inflate * 2;
+            var h = Math.Max(1, half + inflate);
+            var g = Math.Max(0, gap - inflate);
+            var a = arm + inflate;
+
+            // Left, right, up, down. Each bar grows outward from the gap, so the
+            // inflate has to extend it away from the centre as well as thicken it.
+            screen.FillRect(cx - g - a, cy - h, a, t, color);
+            screen.FillRect(cx + g, cy - h, a, t, color);
+            screen.FillRect(cx - h, cy - g - a, t, a, color);
+            screen.FillRect(cx - h, cy + g, t, a, color);
+        }
 
         private void RenderBspNode(int node)
         {
@@ -3024,7 +3208,7 @@ namespace DPTDOOM.Video
                     DrawMaskedFuzzColumn(
                         vis.Patch.Columns[texturecolumn],
                         x,
-                        centerYFrac - (vis.TextureAlt * vis.Scale),
+                        baseCenterYFrac - (vis.TextureAlt * vis.Scale),
                         vis.Scale,
                         -1,
                         windowHeight);
@@ -3041,7 +3225,7 @@ namespace DPTDOOM.Video
                         vis.Patch.Columns[texturecolumn],
                         vis.ColorMap,
                         x,
-                        centerYFrac - (vis.TextureAlt * vis.Scale),
+                        baseCenterYFrac - (vis.TextureAlt * vis.Scale),
                         vis.Scale,
                         Fixed.Abs(vis.InvScale),
                         vis.TextureAlt,
@@ -3055,6 +3239,27 @@ namespace DPTDOOM.Video
 
 
         private void DrawPlayerSprites(Player player)
+        {
+            // The weapon does not follow the tilt: it is held by the player, and a
+            // gun that slid up and down the screen while the view moved would look
+            // like it was floating. Positioning already uses the unshifted centre,
+            // but the column routine maps textures against `centerY`, so that has to
+            // be unshifted for this pass too - otherwise the sprite keeps its place
+            // and shows the wrong part of its own texture.
+            var horizon = centerY;
+            centerY = baseCenterY;
+
+            try
+            {
+                DrawPlayerSpritesCore(player);
+            }
+            finally
+            {
+                centerY = horizon;
+            }
+        }
+
+        private void DrawPlayerSpritesCore(Player player)
         {
             // Get light level.
             var spriteLightLevel = (player.Mobj.Subsector.Sector.LightLevel >> lightSegShift) + extraLight;

@@ -33,11 +33,28 @@ namespace DPTDOOM
         public KeyBinding key_use;
         public KeyBinding key_run;
         public KeyBinding key_strafe;
+        public KeyBinding key_lookup;
+        public KeyBinding key_lookdown;
+        public KeyBinding key_center;
 
         public int mouse_sensitivity;
         public bool mouse_disableyaxis;
 
         public bool game_alwaysrun;
+
+        /// <summary>
+        /// Vertical look, Duke Nukem 3D style: the mouse and the look keys tilt the
+        /// view instead of moving the player.
+        ///
+        /// Client-side only. Pitch never enters a TicCmd, so it cannot desynchronise
+        /// a lockstep session or a demo - and, for the same reason, it does not aim:
+        /// shots keep using Doom's own 2D autoaim. That is a real limitation and the
+        /// menu says "обзор", not "прицеливание".
+        /// </summary>
+        public bool view_freelook;
+
+        /// <summary>0 off, 1 cross, 2 dot, 3 cross with a dot.</summary>
+        public int hud_crosshair;
 
         public int video_screenwidth;
         public int video_screenheight;
@@ -122,11 +139,33 @@ namespace DPTDOOM
                     DoomKey.LAlt,
                     DoomKey.RAlt
                 });
+            key_lookup = new KeyBinding(
+                new DoomKey[]
+                {
+                    DoomKey.PageUp
+                });
+            key_lookdown = new KeyBinding(
+                new DoomKey[]
+                {
+                    DoomKey.PageDown
+                });
+            key_center = new KeyBinding(
+                new DoomKey[]
+                {
+                    DoomKey.End
+                });
 
             mouse_sensitivity = 8;
             mouse_disableyaxis = false;
 
             game_alwaysrun = true;
+
+            // Off by default: Doom's own aiming is 2D, so tilting the view changes
+            // what you see and not what you hit. A player who does not know that
+            // would think the shots were broken.
+            view_freelook = false;
+
+            hud_crosshair = 1;
 
             video_screenwidth = 640;
             video_screenheight = 400;
@@ -172,11 +211,17 @@ namespace DPTDOOM
                 key_use = GetKeyBinding(dic, nameof(key_use), key_use);
                 key_run = GetKeyBinding(dic, nameof(key_run), key_run);
                 key_strafe = GetKeyBinding(dic, nameof(key_strafe), key_strafe);
+                key_lookup = GetKeyBinding(dic, nameof(key_lookup), key_lookup);
+                key_lookdown = GetKeyBinding(dic, nameof(key_lookdown), key_lookdown);
+                key_center = GetKeyBinding(dic, nameof(key_center), key_center);
 
                 mouse_sensitivity = GetInt(dic, nameof(mouse_sensitivity), mouse_sensitivity);
                 mouse_disableyaxis = GetBool(dic, nameof(mouse_disableyaxis), mouse_disableyaxis);
 
                 game_alwaysrun = GetBool(dic, nameof(game_alwaysrun), game_alwaysrun);
+
+                view_freelook = GetBool(dic, nameof(view_freelook), view_freelook);
+                hud_crosshair = GetInt(dic, nameof(hud_crosshair), hud_crosshair);
 
                 video_screenwidth = GetInt(dic, nameof(video_screenwidth), video_screenwidth);
                 video_screenheight = GetInt(dic, nameof(video_screenheight), video_screenheight);
@@ -219,11 +264,17 @@ namespace DPTDOOM
                     writer.WriteLine(nameof(key_use) + " = " + key_use);
                     writer.WriteLine(nameof(key_run) + " = " + key_run);
                     writer.WriteLine(nameof(key_strafe) + " = " + key_strafe);
+                writer.WriteLine(nameof(key_lookup) + " = " + key_lookup);
+                writer.WriteLine(nameof(key_lookdown) + " = " + key_lookdown);
+                writer.WriteLine(nameof(key_center) + " = " + key_center);
 
                     writer.WriteLine(nameof(mouse_sensitivity) + " = " + mouse_sensitivity);
                     writer.WriteLine(nameof(mouse_disableyaxis) + " = " + BoolToString(mouse_disableyaxis));
 
                     writer.WriteLine(nameof(game_alwaysrun) + " = " + BoolToString(game_alwaysrun));
+
+                    writer.WriteLine(nameof(view_freelook) + " = " + BoolToString(view_freelook));
+                    writer.WriteLine(nameof(hud_crosshair) + " = " + hud_crosshair);
 
                     writer.WriteLine(nameof(video_screenwidth) + " = " + video_screenwidth);
                     writer.WriteLine(nameof(video_screenheight) + " = " + video_screenheight);

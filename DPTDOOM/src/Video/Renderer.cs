@@ -104,11 +104,11 @@ namespace DPTDOOM.Video
             }
             else if (doom.State == DoomState.DemoPlayback)
             {
-                RenderGame(doom.DemoPlayback.Game, frameFrac);
+                RenderGame(doom.DemoPlayback.Game, frameFrac, doom.ViewPitch);
             }
             else if (doom.State == DoomState.Game)
             {
-                RenderGame(doom.Game, frameFrac);
+                RenderGame(doom.Game, frameFrac, doom.ViewPitch);
             }
 
             if (!doom.Menu.Active)
@@ -134,6 +134,23 @@ namespace DPTDOOM.Video
         /// </summary>
         public RenderProfile Profile => threeD.Profile;
 
+        /// <summary>
+        /// Renders one game frame with an explicit tilt and crosshair, for tests.
+        ///
+        /// Goes through the same code the game loop uses, so a test cannot pass on a
+        /// path that production never takes - the failure mode that makes renderer
+        /// tests worthless.
+        /// </summary>
+        internal void RenderGameForTest(DoomGame game, Fixed viewPitch, int crosshair, byte[] destination)
+        {
+            config.hud_crosshair = crosshair;
+
+            RenderGame(game, Fixed.One, viewPitch);
+
+            var colors = palette[0];
+            WriteData(colors, destination);
+        }
+
         public void RenderMenu(Doom doom)
         {
             if (doom.Menu.Active)
@@ -142,7 +159,7 @@ namespace DPTDOOM.Video
             }
         }
 
-        public void RenderGame(DoomGame game, Fixed frameFrac)
+        public void RenderGame(DoomGame game, Fixed frameFrac, Fixed viewPitch)
         {
             if (game.Paused)
             {
@@ -169,7 +186,8 @@ namespace DPTDOOM.Video
                 }
                 else
                 {
-                    threeD.Render(displayPlayer, frameFrac);
+                    threeD.Crosshair = config.hud_crosshair;
+                    threeD.Render(displayPlayer, frameFrac, viewPitch);
 
                     var hudStart = Profile.Stamp();
                     if (threeD.WindowSize < 8)

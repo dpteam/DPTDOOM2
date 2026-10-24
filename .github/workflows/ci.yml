@@ -137,6 +137,13 @@ jobs:
         shell: pwsh
         run: ./tools/test-profile.ps1
 
+      - name: Crosshair and vertical look
+        # Both are presentation, and the assertion that matters is that they stay
+        # presentation: a tilt that reached the world would break demo playback
+        # while looking perfectly fine on screen.
+        shell: pwsh
+        run: ./tools/test-view.ps1
+
       - name: Automap debug overlays actually draw
         # "-maponly" was in the command line and did nothing: it was applied only by
         # the window's own toggle, so a headless run ignored it and every screenshot

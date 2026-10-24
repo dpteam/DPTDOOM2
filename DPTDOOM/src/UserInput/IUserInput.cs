@@ -37,6 +37,26 @@ namespace DPTDOOM.UserInput
         /// </summary>
         bool Suppressed { get; set; }
 
+        /// <summary>
+        /// Vertical look accumulated since the previous call, in virtual pixels of
+        /// a 320x200 screen.
+        ///
+        /// A separate channel from <see cref="BuildTicCmd"/> on purpose. Pitch is
+        /// presentation: it must not enter a TicCmd, or a lockstep session would
+        /// have to agree on it and a demo would have to store it. It is also read
+        /// once per *frame* rather than once per tic, because the view has to move
+        /// smoothly even when the tic rate is lower than the frame rate.
+        ///
+        /// Returns 0 when free look is off, which is what keeps the mouse wheel and
+        /// the mouse Y axis behaving exactly as they did before it existed.
+        /// </summary>
+        /// <param name="center">
+        /// Set when the player asked to recentre the view. A separate flag rather
+        /// than a huge delta, because "go back to level" is not a movement and must
+        /// not be scaled by sensitivity.
+        /// </param>
+        int TakeViewPitch(out bool center);
+
         public int MaxMouseSensitivity { get; }
         public int MouseSensitivity { get; set; }
     }

@@ -46,6 +46,7 @@ powershell -NoProfile -File tools\test-bots.ps1
 powershell -NoProfile -File tools\test-net-bots.ps1
 powershell -NoProfile -File tools\test-reconnect.ps1
 powershell -NoProfile -File tools\test-profile.ps1
+powershell -NoProfile -File tools\test-view.ps1
 powershell -NoProfile -File tools\test-debug-overlays.ps1
 powershell -NoProfile -File tools\test-launcher.ps1
 ```
@@ -75,6 +76,11 @@ powershell -NoProfile -File tools\test-launcher.ps1
   должен менять ни кадр, ни `validCount` мира: рендерер помечает линии
   увиденными и берёт валидные счётчики, поэтому «рисовать каждый тик» способно
   сдвинуть хеш. Проверка — `tools/test-profile.ps1` (BMP байт-в-байт, хеш мира).
+- Наклон вида (`viewPitch`, `-freelook`/`-pitch`) — **не** состояние игры: не в
+  `TicCmd`, не в демо, не в хеше. Это скос проекции (`centerY` **и** `centerYFrac`
+  вместе), а не поворот камеры; при отрисовке оружия `centerY` возвращается к
+  базовому, иначе спрайт стоит на месте, но показывает не ту часть текстуры.
+  Стрельба остаётся ванильным 2D-автоприцелом. Проверка — `tools/test-view.ps1`.
 - P/Invoke: при `CharSet.Unicode` + `ExactSpelling = true` указывать `EntryPoint`
   с суффиксом `W` обязательно (`SendMessageW`, `DefWindowProcW`, `LoadIconW`).
   Без него рантайм ищет функцию без суффикса и падает в рантайме, а не при

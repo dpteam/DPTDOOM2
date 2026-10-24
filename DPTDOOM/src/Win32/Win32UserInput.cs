@@ -30,6 +30,17 @@ namespace DPTDOOM.Win32
         private int turnHeld;
         private bool suppressed;
 
+        /// <summary>
+        /// Vertical look accumulated since the last frame, in virtual pixels.
+        ///
+        /// Collected here because this is where the mouse delta and the key state
+        /// are read, but handed out on a different schedule: the game loop drains it
+        /// once per frame, so the view moves at the frame rate rather than at the
+        /// 35 Hz tic rate.
+        /// </summary>
+        private int pendingViewPitch;
+        private bool pendingViewCenter;
+
         public Win32UserInput(Config config, Win32Window window)
         {
             this.config = config;
@@ -179,7 +190,19 @@ namespace DPTDOOM.Win32
             var ms = 0.5F * config.mouse_sensitivity;
             var mx = (int)Math.Round(ms * mouseDeltaX);
             var my = (int)Math.Round(ms * -mouseDeltaY);
-            forward += my;
+
+            if (config.view_freelook)
+            {
+                // Duke Nukem 3D's arrangement: the mouse Y axis tilts the view
+                // instead of walking the player forward and back. That is the whole
+                // point of the setting, so it has to take the axis over rather than
+                // share it - otherwise every look would also be a step.
+                pendingViewPitch += (int)Math.Round(my * PitchPerMouseUnit);
+            }
+            else
+            {
+                forward += my;
+            }
 
             if (strafe)
             {
@@ -210,6 +233,50 @@ namespace DPTDOOM.Win32
 
             cmd.ForwardMove += (sbyte)forward;
             cmd.SideMove += (sbyte)side;
+
+            // Look keys, polled per tic and accumulated the same way as the mouse.
+            // A tic is the finest granularity the key state is read at, and adding a
+            // fixed step per tic makes the speed independent of the frame rate.
+            if (config.view_freelook)
+            {
+                if (IsPressed(config.key_lookup))
+                {
+                    pendingViewPitch += KeyPitchPerTic;
+                }
+
+                if (IsPressed(config.key_lookdown))
+                {
+                    pendingViewPitch -= KeyPitchPerTic;
+                }
+
+                if (IsPressed(config.key_center))
+                {
+                    pendingViewCenter = true;
+                }
+            }
+        }
+
+        /// <summary>How far one tic of a held look key moves the view.</summary>
+        private const int KeyPitchPerTic = 3;
+
+        /// <summary>
+        /// Mouse pixels per unit of vertical look.
+        ///
+        /// The delta is already scaled by the mouse sensitivity, so this only has to
+        /// turn "movement units" into "virtual screen pixels". At the default
+        /// sensitivity a full-height sweep of the mouse tilts the view by about the
+        /// height of the screen.
+        /// </summary>
+        private const float PitchPerMouseUnit = 0.22F;
+
+        public int TakeViewPitch(out bool center)
+        {
+            center = pendingViewCenter;
+            pendingViewCenter = false;
+
+            var delta = pendingViewPitch;
+            pendingViewPitch = 0;
+            return delta;
         }
 
         private bool IsPressed(KeyBinding keyBinding)
