@@ -20,7 +20,11 @@ param(
     [string]$Exe = ".\DPTDOOM\bin\Release\net40\dptdoom.exe",
     [int]$HostPort = 5211,
     [int]$Tics = 300,
-    [int]$TimeoutSeconds = 150
+    [int]$TimeoutSeconds = 150,
+
+    # The tic both sides print a world hash at. Below -tics, with enough slack that
+    # neither end can miss it while the other quits first.
+    [int]$CompareTic = 250
 )
 
 $ErrorActionPreference = "Stop"
@@ -74,7 +78,8 @@ foreach ($case in @(
                 '-headless', '-iwad', $Iwad,
                 '-net', 'host', '-players', "$($case.Players)",
                 '-coopbots', "$($case.Bots)",
-                '-port', "$HostPort", '-warp', '1', '-skill', '3', '-tics', "$Tics")
+                '-port', "$HostPort", '-warp', '1', '-skill', '3', '-tics', "$Tics",
+                '-stateat', "$CompareTic")
 
         Start-Sleep -Seconds 7
 
@@ -82,22 +87,27 @@ foreach ($case in @(
             -RedirectStandardOutput $guestOut `
             -ArgumentList @(
                 '-headless', '-iwad', $Iwad,
-                '-net', 'join', '-address', "127.0.0.1:$HostPort", '-tics', "$Tics")
+                '-net', 'join', '-address', "127.0.0.1:$HostPort", '-tics', "$Tics",
+                '-stateat', "$CompareTic")
 
         $guestProcess.WaitForExit($TimeoutSeconds * 1000) | Out-Null
         $hostProcess.WaitForExit(30000) | Out-Null
 
         $label = "$($case.Players) slots, $($case.Bots) bots"
 
+        # Compared at a named tic, not at the end. The host reaches its -tics limit
+        # and quits while the guest can still be a tic or two behind, so the two
+        # final State lines may describe different tics and report a divergence that
+        # is not one. The deeper the input buffer, the wider that gap.
         $hostState = Get-Content $hostOut -ErrorAction SilentlyContinue |
-            Select-String 'State: mobj=' | Select-Object -First 1
+            Select-String 'State@' | Select-Object -First 1
         $guestState = Get-Content $guestOut -ErrorAction SilentlyContinue |
-            Select-String 'State: mobj=' | Select-Object -First 1
+            Select-String 'State@' | Select-Object -First 1
 
-        Assert-True ($null -ne $hostState) "$label : the host simulated the session ($hostState)"
-        Assert-True ($null -ne $guestState) "$label : the guest simulated the session ($guestState)"
+        Assert-True ($null -ne $hostState) "$label : the host simulated to tic $CompareTic ($hostState)"
+        Assert-True ($null -ne $guestState) "$label : the guest simulated to tic $CompareTic ($guestState)"
         Assert-True ($hostState.ToString() -eq $guestState.ToString()) `
-            "$label : host and guest agree on the world hash"
+            "$label : host and guest agree on the world hash at tic $CompareTic"
 
         $botsLine = Get-Content $hostOut -ErrorAction SilentlyContinue |
             Select-String 'Co-op bots:' | Select-Object -First 1

@@ -38,7 +38,16 @@ param(
     # The game asks for 35 tics/s. The bar is a little below that, because a
     # headless run is unthrottled and the point is only to prove the session is
     # no longer capped by the round trip: the old ceiling at 50 ms was 17.5.
-    [double]$MinTicsPerSecond = 30
+    [double]$MinTicsPerSecond = 30,
+
+    # The tic both sides print a world hash at.
+    #
+    # Comparing the final State lines compares different tics: the host reaches its
+    # -tics limit and quits while the guest is still a tic or two behind, so the
+    # guest stops early on "the other player left the game". The deeper the input
+    # buffer the wider the gap - which made this the one check that started failing
+    # once the buffer learned to grow, on a session that was perfectly in step.
+    [int]$CompareTic = 300
 )
 
 $ErrorActionPreference = "Stop"
@@ -72,8 +81,23 @@ if (-not (Test-Path $Exe)) {
 
 $failures = 0
 
-for ($case = 0; $case -lt $DelayMs.Length; $case++) {
-    $oneWay = $DelayMs[$case]
+# Every case is a link, not just a delay. A clean delay and the same delay with
+# jitter are different problems for the input buffer, and the buffer is sized from
+# both numbers - so the jittery link gets its own case even when the caller asked
+# for none.
+$cases = @()
+
+foreach ($oneWay in $DelayMs) {
+    $cases += [pscustomobject]@{ OneWayMs = $oneWay; JitterMs = $JitterMs }
+}
+
+if ($JitterMs -eq 0) {
+    $cases += [pscustomobject]@{ OneWayMs = 50; JitterMs = 30 }
+}
+
+for ($case = 0; $case -lt $cases.Count; $case++) {
+    $oneWay = $cases[$case].OneWayMs
+    $caseJitter = $cases[$case].JitterMs
 
     # A port per delay, not one port for all of them.
     #
@@ -97,7 +121,8 @@ for ($case = 0; $case -lt $DelayMs.Length; $case++) {
         $hostProcess = Start-Process -FilePath $Exe -PassThru -WindowStyle Hidden `
             -RedirectStandardOutput $hostOut `
             -ArgumentList @('-headless', '-iwad', $Iwad, '-net', 'host', '-players', '2',
-                            '-port', "$hostPort", '-warp', '1', '-skill', '3', '-tics', "$Tics")
+                            '-port', "$hostPort", '-warp', '1', '-skill', '3', '-tics', "$Tics",
+                            '-stateat', "$CompareTic")
 
         Start-Sleep -Seconds 5
 
@@ -105,7 +130,7 @@ for ($case = 0; $case -lt $DelayMs.Length; $case++) {
             $proxyArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass',
                            '-File', 'tools\latency-proxy.ps1',
                            '-Listen', "$proxyPort", '-Target', "127.0.0.1:$hostPort",
-                           '-DelayMs', "$oneWay", '-JitterMs', "$JitterMs",
+                           '-DelayMs', "$oneWay", '-JitterMs', "$caseJitter",
                            '-LossPercent', "$LossPercent")
 
             $proxy = Start-Process -FilePath "powershell.exe" -PassThru -WindowStyle Hidden `
@@ -120,7 +145,8 @@ for ($case = 0; $case -lt $DelayMs.Length; $case++) {
         $guestProcess = Start-Process -FilePath $Exe -PassThru -WindowStyle Hidden `
             -RedirectStandardOutput $guestOut `
             -ArgumentList @('-headless', '-iwad', $Iwad, '-net', 'join',
-                            '-address', $address, '-tics', "$Tics")
+                            '-address', $address, '-tics', "$Tics",
+                            '-stateat', "$CompareTic")
 
         $guestProcess.WaitForExit(300000) | Out-Null
         $watch.Stop()
@@ -128,14 +154,14 @@ for ($case = 0; $case -lt $DelayMs.Length; $case++) {
         $seconds = $watch.Elapsed.TotalSeconds
         $rate = if ($seconds -gt 0) { $Tics / $seconds } else { 0 }
 
-        Write-Host ("one way {0,3} ms : {1} tics in {2} s = {3} tics/s" -f
-            $oneWay, $Tics, [math]::Round($seconds, 1), [math]::Round($rate, 1))
+        Write-Host ("one way {0,3} ms, jitter {1,3} ms : {2} tics in {3} s = {4} tics/s" -f
+            $oneWay, $caseJitter, $Tics, [math]::Round($seconds, 1), [math]::Round($rate, 1))
 
         Assert-True ($rate -ge $MinTicsPerSecond) `
-            ("$oneWay ms one way is not capped by the round trip ({0} tics/s, need {1})" -f
+            ("$oneWay ms one way with $caseJitter ms of jitter is not capped by the round trip ({0} tics/s, need {1})" -f
                 [math]::Round($rate, 1), $MinTicsPerSecond)
 
-        $guestState = (Get-Content $guestOut | Select-String 'State: mobj=' | Select-Object -First 1)
+        $guestState = (Get-Content $guestOut | Select-String 'State@' | Select-Object -First 1)
         $hostState = $null
 
         # The host needs its own budget: at 100 ms of latency it finishes the
@@ -143,17 +169,17 @@ for ($case = 0; $case -lt $DelayMs.Length; $case++) {
         # ran out the host state was silently absent, so the comparison below was
         # skipped and the run looked like a mismatch instead of a timeout.
         if ($hostProcess.WaitForExit(60000)) {
-            $hostState = (Get-Content $hostOut | Select-String 'State: mobj=' | Select-Object -First 1)
+            $hostState = (Get-Content $hostOut | Select-String 'State@' | Select-Object -First 1)
         }
         else {
             Write-Host "  --   the host did not finish in 60 s; its state is not comparable"
         }
 
-        Assert-True ($null -ne $guestState) "the guest finished the session"
+        Assert-True ($null -ne $guestState) "the guest reached tic $CompareTic"
 
         if ($hostState -and $guestState) {
             Assert-True ($hostState.ToString() -eq $guestState.ToString()) `
-                "host and guest agree on the world hash at $oneWay ms one way"
+                "host and guest agree on the world hash at tic $CompareTic"
         }
     }
     catch {

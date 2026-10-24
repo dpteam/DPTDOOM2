@@ -1468,6 +1468,20 @@ namespace DPTDOOM
                 });
 
             commands.Register(
+                "netstats", "netstats",
+                "Ping, jitter, input delay, rate, stalls and reconnects.",
+                call =>
+                {
+                    if (netDriver == null)
+                    {
+                        call.Write("Single player: no session to report.");
+                        return;
+                    }
+
+                    call.Write(netDriver.Stats);
+                });
+
+            commands.Register(
                 "quit", "quit",
                 "Leave the game.",
                 call =>

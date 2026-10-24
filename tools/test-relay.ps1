@@ -16,7 +16,12 @@ param(
     [int]$RelayPort = 25151,
     [int]$GamePort = 5031,
     [int]$Tics = 300,
-    [int]$TimeoutSeconds = 120
+    [int]$TimeoutSeconds = 120,
+
+    # The tic both sides print a world hash at. Below -tics, so neither end can miss
+    # it while the other quits first - the final State lines may otherwise describe
+    # different tics and report a divergence that is not one.
+    [int]$CompareTic = 250
 )
 
 $ErrorActionPreference = "Stop"
@@ -55,7 +60,7 @@ function Get-StateLine([string]$path) {
     if (-not (Test-Path $path)) { return $null }
 
     $line = Get-Content $path -ErrorAction SilentlyContinue |
-        Select-String -Pattern 'State: mobj=' |
+        Select-String -Pattern 'State@' |
         Select-Object -First 1
 
     if ($line) { return $line.ToString().Trim() }
@@ -104,7 +109,7 @@ try {
             '-headless', '-iwad', $Iwad,
             '-net', 'host', '-players', '2', '-port', $GamePort,
             '-master', "127.0.0.1:$ControlPort", '-relay',
-            '-warp', '1', '-skill', '3', '-tics', $Tics)
+            '-warp', '1', '-skill', '3', '-tics', $Tics, '-stateat', $CompareTic)
 
     $sessionLine = Wait-ForPattern $hostOut 'SESSION ([0-9a-f]{32})' 30
     Assert-True ($null -ne $sessionLine) "the host published a session id: $sessionLine"
@@ -124,7 +129,7 @@ try {
             '-net', 'join',
             '-relay-master', "127.0.0.1:$ControlPort",
             '-relay-session', $sessionId,
-            '-tics', $Tics)
+            '-tics', $Tics, '-stateat', $CompareTic)
 
     $guestProcess.WaitForExit($TimeoutSeconds * 1000) | Out-Null
     $hostProcess.WaitForExit($TimeoutSeconds * 1000) | Out-Null
@@ -132,9 +137,9 @@ try {
     $hostState = Get-StateLine $hostOut
     $guestState = Get-StateLine $guestOut
 
-    Assert-True ($null -ne $hostState) "the host simulated the session: $hostState"
-    Assert-True ($null -ne $guestState) "the guest simulated the session: $guestState"
-    Assert-True ($hostState -eq $guestState) "host and guest agree on the world hash"
+    Assert-True ($null -ne $hostState) "the host simulated to tic $CompareTic : $hostState"
+    Assert-True ($null -ne $guestState) "the guest simulated to tic $CompareTic : $guestState"
+    Assert-True ($hostState -eq $guestState) "host and guest agree on the world hash at tic $CompareTic"
 
     $paired = Select-String -Path $masterLog -Pattern 'paired'
     Assert-True ($null -ne $paired) "the master paired the two channels"

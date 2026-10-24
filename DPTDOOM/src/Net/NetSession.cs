@@ -254,7 +254,11 @@ namespace DPTDOOM.Net
 
         private int botCount;
 
-        private int delay;
+        // Written by the handshake and, during play, by the ping thread when the
+        // buffer is resized; read every tic by the driver. Volatile because a stale
+        // read here means the tic is paced from a value the host has already moved on
+        // from, and the whole point of the adaptation is that it takes effect.
+        private volatile int delay;
         private readonly int delayOverride;
 
         // Reconnection. See docs/NETWORK.md - the important property is that
@@ -296,6 +300,41 @@ namespace DPTDOOM.Net
         private bool pingOutstanding;
         private int pingMs;
         private int pingSequence;
+
+        /// <summary>
+        /// Recent round trips, newest last.
+        ///
+        /// A rolling window rather than a running average, because the two things
+        /// the buffer is sized from - the middle value and the jitter - are not
+        /// averages and cannot be recovered from one. Sixteen probes is about half
+        /// a minute of the two-second monitor: long enough to see a link change, short
+        /// enough that it does not remember a stall from five minutes ago.
+        /// </summary>
+        private readonly List<int> pingSamples = new List<int>();
+        private const int PingWindow = 16;
+
+        /// <summary>
+        /// Tics that had to wait for a peer, and how long they waited in total.
+        ///
+        /// The honest measure of whether the input buffer is big enough: not the
+        /// round trip, which says what the path costs, but the stalls, which say what
+        /// the player actually felt.
+        /// </summary>
+        private int stallCount;
+        private long stallTotalMs;
+        private int stallsThisWindow;
+        private int ticsThisWindow;
+        private int delayChanges;
+
+        /// <summary>Consecutive clean measurement windows, reset whenever the buffer grows.</summary>
+        private int quietWindows;
+
+        private int firstTic = -1;
+        private int lastTic = -1;
+        private int ticTimerStart;
+        private readonly object statsLock = new object();
+        private readonly Stopwatch sessionWatch = Stopwatch.StartNew();
+        private bool reportPrinted;
 
         private NetSession(bool isHost, int expectedPlayers, string localName)
             : this(isHost, expectedPlayers, localName, -1)
@@ -512,25 +551,45 @@ namespace DPTDOOM.Net
                 slotTokens[playerIndex] = peer.Token;
 
                 // Measure the round trip before the welcome goes out, and put
-                // the result in it. Both ends then start with the same input
-                // delay, which they must: a delay that differs between host and
-                // guest shifts tic numbering on one side and desyncs the game.
+                // the result in it, so both ends start with the same input delay.
+                //
+                // They must agree, but not for the reason the tic numbers suggest:
+                // the delay does not shift any numbering. It is how far ahead each
+                // side generates its own commands, and the session runs at the pace
+                // of the *smallest* delay in it - a guest that keeps one command in
+                // hand throttles the host to one tic per round trip no matter how
+                // deep the host's own buffer is. One authority, one number, or the
+                // slowest participant silently sets the speed for everybody.
                 //
                 // A fixed override skips the probe entirely, so a test can pin
                 // the delay and stay reproducible.
                 var rtt = -1;
-                var spread = 0;
+                var joinSamples = new List<int>();
 
                 if (delayOverride < 0)
                 {
-                    rtt = MeasureRoundTrip(stream, reader, out spread);
+                    rtt = MeasureRoundTrip(stream, reader, out joinSamples);
                 }
 
                 var measured = delayOverride >= 0
                     ? delayOverride
-                    : DelayFromRoundTrip(rtt, spread, delayOverride);
+                    : DelayFromRoundTrip(rtt, DelayPolicy.JitterMs(joinSamples), delayOverride);
 
                 delay = Math.Max(delay, measured);
+
+                // Seed the rolling window with the join measurement: the first live
+                // decision is then made on a real distribution rather than after four
+                // more probes, and a short session gets to adapt at all.
+                if (joinSamples.Count > 0)
+                {
+                    lock (pingLock)
+                    {
+                        pingSamples.Clear();
+                        pingSamples.AddRange(joinSamples);
+                    }
+
+                    pingMs = rtt;
+                }
 
                 SendWelcome(stream, playerIndex, guestName, peer.Token);
 
@@ -549,8 +608,11 @@ namespace DPTDOOM.Net
                 // this is the one number that explains the whole feel of a
                 // lockstep session: the tics of input delay it cost to keep the
                 // world running at full speed.
+                var joinJitter = DelayPolicy.JitterMs(joinSamples);
+
                 Console.WriteLine("Net: '" + guestName + "' joined as player " + (playerIndex + 1) + " (" +
                                   (rtt >= 0 ? "ping " + rtt + " ms" : "ping not measured") +
+                                  (joinJitter > 0 ? ", jitter " + joinJitter + " ms" : "") +
                                   ", input delay " + Delay + " tics = " + (Delay * 1000 / NetProtocol.TicsPerSecond) + " ms).");
             }
         }
@@ -574,8 +636,10 @@ namespace DPTDOOM.Net
         /// session rather than just fail it:
         ///  - the slot must not be re-issued, or the player's old commands and
         ///    their new ones would belong to different people;
-        ///  - the input delay must not be re-measured, because the delay shifts
-        ///    tic numbering and both sides already agreed on one;
+        ///  - the input delay must not be re-measured from scratch, because the
+        ///    connection is a new socket on a link the session was already sized
+        ///    for, and a fresh measurement of a link that is momentarily bad would
+        ///    put the whole session out of step with the host's own number;
         ///  - the old peer must stop being able to fault the session when its
         ///    dead read loop unwinds. It is removed from `peers` instead, and
         ///    ReadLoop treats "no longer in the list" as "superseded, stay quiet".
@@ -690,15 +754,28 @@ namespace DPTDOOM.Net
         /// the conservative default. <paramref name="spreadMs"/> reports how far
         /// the probes disagreed, which sizes the jitter margin.
         /// </summary>
-        private static int MeasureRoundTrip(Stream stream, BinaryReader reader, out int spreadMs)
+        /// <summary>
+        /// Measures the round trip a few times and reports the middle value, handing
+        /// back the samples themselves.
+        ///
+        /// The samples, not just the answer: they seed the rolling window, so the
+        /// first live decision is made on a real distribution instead of waiting four
+        /// probes - eight seconds - to collect one. A short session would otherwise
+        /// never adapt at all, which is exactly the session where a bad guess is most
+        /// visible.
+        ///
+        /// The middle and the movement, not the average and the spread: see
+        /// <see cref="DelayPolicy.JitterMs"/> for why the spread of a handful of
+        /// probes is the wrong number to size a buffer with.
+        /// </summary>
+        private static int MeasureRoundTrip(Stream stream, BinaryReader reader, out List<int> samples)
         {
             const int probes = 7;
 
-            spreadMs = 0;
+            samples = new List<int>();
 
             var previousTimeout = stream.CanTimeout ? stream.ReadTimeout : 0;
             var watch = new Stopwatch();
-            var samples = new List<long>();
 
             try
             {
@@ -722,7 +799,7 @@ namespace DPTDOOM.Net
                     }
 
                     watch.Stop();
-                    samples.Add(watch.ElapsedMilliseconds);
+                    samples.Add((int)watch.ElapsedMilliseconds);
                 }
             }
             catch (Exception)
@@ -748,80 +825,24 @@ namespace DPTDOOM.Net
                 return -1;
             }
 
-            if (samples.Count > 2)
-            {
-                samples.Sort();
-                samples.RemoveAt(samples.Count - 1);
-                samples.RemoveAt(0);
-            }
-
-            long total = 0;
-            var min = long.MaxValue;
-            var max = long.MinValue;
-
-            foreach (var sample in samples)
-            {
-                total += sample;
-                if (sample < min) { min = sample; }
-                if (sample > max) { max = sample; }
-            }
-
-            spreadMs = (int)(max - min);
-            return (int)(total / samples.Count);
+            return DelayPolicy.MedianMs(samples);
         }
 
         /// <summary>
-        /// How many tics of input to keep in hand.
+        /// The buffer a link needs, sized from its own measurement.
         ///
-        /// Lockstep advances one tic per network round trip: the tic cannot be
-        /// simulated until the peer's command for it has arrived, and the peer
-        /// only generates that command when it gets to the same tic. At 100 ms of
-        /// ping that caps the session at roughly 17 tics per second while the
-        /// game asks for 35, so the world runs at half speed and every action
-        /// feels late.
-        ///
-        /// Sending commands a few tics ahead breaks that coupling: by the time
-        /// tic N is simulated, the peer's command for N was sent N-delay tics ago
-        /// and has long arrived. The price is delay tics of input latency, which
-        /// is the trade every lockstep game makes.
-        ///
-        /// One tic of margin is added only when the path actually jitters. A
-        /// margin on a clean link is pure latency with nothing to show for it,
-        /// and at 100 ms of ping a tic is 29 ms the player feels.
+        /// The reasoning lives in <see cref="DelayPolicy"/>, where it can be tested
+        /// without a network; this method only applies the override a test or a
+        /// deliberate <c>-netdelay</c> asks for.
         /// </summary>
-        private static int DelayFromRoundTrip(int roundTripMs, int spreadMs, int overrideTics)
+        private static int DelayFromRoundTrip(int roundTripMs, int jitterMs, int overrideTics)
         {
             if (overrideTics >= 0)
             {
-                return MathEx.Clamp(overrideTics, 0, 10);
+                return MathEx.Clamp(overrideTics, 0, DelayPolicy.MaxTics);
             }
 
-            if (roundTripMs < 0)
-            {
-                // No measurement. Four tics covers about 115 ms, which is a
-                // better guess for the internet than assuming a LAN.
-                return 4;
-            }
-
-            var ticMs = 1000 / NetProtocol.TicsPerSecond;
-
-            if (roundTripMs < ticMs / 2)
-            {
-                // Same machine or a fast LAN: no buffer, no added latency.
-                return 0;
-            }
-
-            var tics = (roundTripMs + ticMs - 1) / ticMs;
-
-            // Jitter breaks an exactly-sized buffer: the first chunk that takes
-            // longer than the measurement stalls the tic. Only spend the extra
-            // tic when the probes actually disagree.
-            if (spreadMs > ticMs / 2)
-            {
-                tics++;
-            }
-
-            return MathEx.Clamp(tics, 1, 10);
+            return DelayPolicy.Initial(roundTripMs, jitterMs);
         }
 
         private static void CloseGuest(TcpClient client, Stream stream)
@@ -1232,17 +1253,226 @@ namespace DPTDOOM.Net
                 }
 
                 SendFrame(peer.Stream, NetProtocol.TypePing, payload, peer);
+
+                // Only the host decides. The buffer has to be the same number on
+                // both ends - the session runs at the pace of the smallest one - and
+                // two machines measuring the same link would still disagree at the
+                // edges, which is the flapping this is trying to avoid.
+                AdaptDelay();
+            }
+        }
+
+        /// <summary>
+        /// Looks at the last window of measurements and stalls and moves the input
+        /// buffer by at most one tic.
+        ///
+        /// Called from the ping thread on the measured cadence rather than per tic:
+        /// the decision is about the last two seconds of the link, and making it more
+        /// often than the window fills would only act on the same numbers twice.
+        /// </summary>
+        private void AdaptDelay()
+        {
+            if (!isHost || delayOverride >= 0)
+            {
+                // A pinned delay is pinned: a test that asks for 3 tics gets 3 tics,
+                // and -netdelay is documented as the way to stop guessing.
+                return;
+            }
+
+            int roundTrip;
+            int jitter;
+
+            lock (pingLock)
+            {
+                // Too few samples to say anything about the distribution. The join
+                // measurement is a single number and the jitter of one sample is
+                // always zero, which would read as a perfectly clean link.
+                //
+                // Returning before the stalls are consumed is deliberate: they
+                // happened, and they are still the only evidence that the buffer is
+                // too small. Throwing them away here made a short bad stretch at the
+                // start of a session invisible, and with it the reason the buffer
+                // needed to grow.
+                if (pingSamples.Count < 4)
+                {
+                    return;
+                }
+
+                roundTrip = DelayPolicy.MedianMs(pingSamples);
+                jitter = DelayPolicy.JitterMs(pingSamples);
+            }
+
+            int stalls;
+            int ticsThisTime;
+
+            lock (statsLock)
+            {
+                stalls = stallsThisWindow;
+                stallsThisWindow = 0;
+
+                ticsThisTime = ticsThisWindow;
+                ticsThisWindow = 0;
+            }
+
+            if (DelayPolicy.StallsMatter(stalls, ticsThisTime))
+            {
+                quietWindows = 0;
+            }
+            else
+            {
+                quietWindows++;
+            }
+
+            var next = DelayPolicy.Adjust(
+                delay, roundTrip, jitter, stalls, ticsThisTime, quietWindows);
+
+            if (next == delay)
+            {
+                return;
+            }
+
+            var previous = delay;
+
+            delay = next;
+            delayChanges++;
+
+            // A shrink has to earn the next one: without this the buffer would
+            // walk down a tic per window and straight back up on the stall it
+            // caused.
+            quietWindows = 0;
+
+            Console.WriteLine("Net: input delay " + (next > previous ? "raised" : "lowered") +
+                              " from " + previous + " to " + next + " tics (" +
+                              (next * 1000 / NetProtocol.TicsPerSecond) +
+                              " ms) - ping " + roundTrip + " ms, jitter " + jitter + " ms" +
+                              (stalls > 0 ? ", " + stalls + " of " + ticsThisTime + " tics late" : "") + ".");
+
+            BroadcastDelay();
+        }
+
+        private void BroadcastDelay()
+        {
+            if (!isHost)
+            {
+                // Only the host decides. A guest sending this frame would be asking
+                // the host to obey it, which is the authority running backwards.
+                return;
+            }
+
+            var payload = new byte[] { (byte)delay };
+
+            List<Peer> targets;
+
+            lock (sync)
+            {
+                targets = new List<Peer>(peers);
+            }
+
+            foreach (var peer in targets)
+            {
+                if (peer.Stream != null)
+                {
+                    SendFrame(peer.Stream, NetProtocol.TypeDelay, payload, peer);
+                }
             }
         }
 
         private void CompletePing(int roundTripMs)
         {
-            // A gentle average: the raw figure jumps with every hiccup, and a
-            // number that flickers between 60 and 400 reads as noise rather than
-            // information.
             lock (pingLock)
             {
+                // A gentle average for the number a player reads: the raw figure
+                // jumps with every hiccup, and one that flickers between 60 and 400
+                // reads as noise rather than information.
                 pingMs = pingMs <= 0 ? roundTripMs : (pingMs * 3 + roundTripMs) / 4;
+
+                // The buffer, though, is sized from the window and not from the
+                // average: the middle value and the jitter are what say whether a
+                // command has time to arrive, and neither can be recovered from an
+                // average that has already been smoothed.
+                pingSamples.Add(roundTripMs);
+
+                if (pingSamples.Count > PingWindow)
+                {
+                    pingSamples.RemoveAt(0);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Called by the driver when a tic could not be simulated because a peer's
+        /// command had not arrived, and again with the length of the wait once it
+        /// does.
+        ///
+        /// This is the only measurement that says the buffer was too small rather
+        /// than that the link is slow. A peer on a 300 ms link with a deep enough
+        /// buffer stalls never; a peer on a clean 20 ms link with a too-small one
+        /// stalls constantly.
+        /// </summary>
+        public void NoteStall(int waitedMs)
+        {
+            if (!DelayPolicy.IsFelt(waitedMs))
+            {
+                // Absorbed by the tic's own budget. Counting it would make a
+                // perfectly smooth session read as half stalled and would drag the
+                // buffer up for no reason.
+                return;
+            }
+
+            lock (statsLock)
+            {
+                stallCount++;
+                stallsThisWindow++;
+                stallTotalMs += waitedMs;
+            }
+        }
+
+        /// <summary>
+        /// Called once per simulated tic, so the session can report the rate it
+        /// actually ran at rather than the 35 it was aiming for.
+        /// </summary>
+        public void NoteTic(int number)
+        {
+            lock (statsLock)
+            {
+                if (firstTic < 0)
+                {
+                    firstTic = number;
+                    ticTimerStart = Environment.TickCount;
+                }
+
+                lastTic = number;
+                ticsThisWindow++;
+            }
+        }
+
+        /// <summary>
+        /// Average tics per second over the whole session so far.
+        ///
+        /// The honest number, not the target: a session that spent a third of its
+        /// life waiting for a peer really did run at two thirds speed, and hiding
+        /// that is how "it feels laggy" stays unanswerable.
+        /// </summary>
+        public double TicsPerSecond
+        {
+            get
+            {
+                lock (statsLock)
+                {
+                    if (firstTic < 0 || lastTic <= firstTic)
+                    {
+                        return 0;
+                    }
+
+                    var elapsed = unchecked(Environment.TickCount - ticTimerStart);
+
+                    if (elapsed <= 0)
+                    {
+                        return 0;
+                    }
+
+                    return (lastTic - firstTic) * 1000.0 / elapsed;
+                }
             }
         }
 
@@ -1716,6 +1946,22 @@ namespace DPTDOOM.Net
         public bool Reconnecting => reconnecting;
 
         /// <summary>
+        /// Moves the input buffer as if the link had changed, and tells the guests.
+        ///
+        /// The same path a real adjustment takes, exposed because the decision itself
+        /// cannot be provoked from a test: it needs a link that degrades after the
+        /// join measurement, and loopback does not degrade on request. What this
+        /// leaves untested is only <see cref="DelayPolicy.Adjust"/>, which is pure and
+        /// tested on its own; what it does test is that the guest actually applies the
+        /// host's number, which is the part that would silently rot.
+        /// </summary>
+        internal void SetDelayForTest(int tics)
+        {
+            delay = MathEx.Clamp(tics, 0, DelayPolicy.MaxTics);
+            BroadcastDelay();
+        }
+
+        /// <summary>
         /// How many dropped links this session has handled by reconnecting.
         ///
         /// The flag above is the live state; this is the durable fact. On loopback a
@@ -1826,6 +2072,22 @@ namespace DPTDOOM.Net
 
                 case NetProtocol.TypePong:
                     HandlePong(payload);
+                    break;
+
+                case NetProtocol.TypeDelay:
+                    // The host moved the input buffer. Applying it as it arrives is
+                    // safe because the delay is not part of the simulation: it only
+                    // gates how far ahead this side generates its own commands, so a
+                    // tic simulated either side of the change has the same contents
+                    // and the world hash does not move.
+                    //
+                    // A host ignores it. Only the host decides, and a guest that sent
+                    // one - a modified build, a stray test hook - must not be able to
+                    // resize the buffer for everybody.
+                    if (!isHost && payload.Length >= 1)
+                    {
+                        delay = MathEx.Clamp(payload[0], 0, DelayPolicy.MaxTics);
+                    }
                     break;
             }
         }
@@ -2235,6 +2497,8 @@ namespace DPTDOOM.Net
         {
             finished = true;
 
+            PrintFinalReport();
+
             foreach (var peer in peers)
             {
                 try
@@ -2245,6 +2509,27 @@ namespace DPTDOOM.Net
                 {
                 }
             }
+        }
+
+        /// <summary>
+        /// Prints the session summary once, on the way out.
+        ///
+        /// A session that stuttered leaves no trace otherwise: the log has the join
+        /// line and nothing about what the next ten minutes cost. The numbers are the
+        /// same ones "netstats" shows in game, so a player reporting a problem and a
+        /// log from a test run can be compared directly.
+        /// </summary>
+        private void PrintFinalReport()
+        {
+            if (TicsSimulated <= 0 || reportPrinted)
+            {
+                return;
+            }
+
+            reportPrinted = true;
+
+            Console.WriteLine("Net: session summary");
+            Console.WriteLine(Report());
         }
 
         public void Dispose()
@@ -2412,6 +2697,124 @@ namespace DPTDOOM.Net
         public string FaultReason => faultReason;
         public bool Finished => finished;
         public bool Relayed { get; private set; }
+
+        /// <summary>
+        /// Live jitter: how much the round trip moves around, in milliseconds.
+        ///
+        /// The number behind the buffer size. Reporting it next to the ping is what
+        /// makes "it stutters but the ping is fine" a diagnosable complaint: a clean
+        /// 40 ms link and a 40 ms link that swings by 120 ms feel completely
+        /// different and read the same on a ping readout.
+        /// </summary>
+        public int JitterMs
+        {
+            get
+            {
+                lock (pingLock)
+                {
+                    return DelayPolicy.JitterMs(pingSamples);
+                }
+            }
+        }
+
+        /// <summary>Tics that had to wait for a peer's command.</summary>
+        public int StallCount
+        {
+            get
+            {
+                lock (statsLock)
+                {
+                    return stallCount;
+                }
+            }
+        }
+
+        /// <summary>Wall time spent waiting for peers, in milliseconds.</summary>
+        public long StallTotalMs
+        {
+            get
+            {
+                lock (statsLock)
+                {
+                    return stallTotalMs;
+                }
+            }
+        }
+
+        /// <summary>How many times the input buffer was resized during the session.</summary>
+        public int DelayChanges => delayChanges;
+
+        /// <summary>Tics simulated so far on this machine.</summary>
+        public int TicsSimulated
+        {
+            get
+            {
+                lock (statsLock)
+                {
+                    return lastTic < 0 ? 0 : lastTic + 1;
+                }
+            }
+        }
+
+        /// <summary>
+        /// One block of plain text for "netstats": what the session is doing and
+        /// what it cost.
+        ///
+        /// Written for the player who says "it feels wrong" - their own numbers, not
+        /// a health figure. Every line is something they can compare against the
+        /// other player's screen, because in lockstep a difference between the two
+        /// readouts is the explanation.
+        /// </summary>
+        public string Report()
+        {
+            var text = new System.Text.StringBuilder();
+
+            text.Append("role ").Append(isHost ? "host" : "guest")
+                .Append(Relayed ? " via relay" : " direct")
+                .Append(", player ").Append(localPlayer + 1)
+                .Append(" of ").Append(expectedPlayers)
+                .Append(", players connected ").Append(PlayerCount)
+                .Append(botCount > 0 ? " (" + botCount + " bot" + (botCount == 1 ? "" : "s") + ")" : "")
+                .Append('\n');
+
+            var ping = PingMs;
+            var jitter = JitterMs;
+
+            text.Append("ping ").Append(ping > 0 ? ping + " ms" : "--")
+                .Append(", jitter ").Append(jitter + " ms")
+                .Append(", input delay ").Append(delay).Append(" tics = ")
+                .Append(delay * 1000 / NetProtocol.TicsPerSecond).Append(" ms")
+                .Append(delayChanges > 0 ? " (changed " + delayChanges + " times)" : "")
+                .Append('\n');
+
+            var rate = TicsPerSecond;
+
+            text.Append("tics ").Append(TicsSimulated)
+                .Append(", rate ").Append(rate.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture))
+                .Append(" of ").Append(NetProtocol.TicsPerSecond)
+                .Append(", wall ").Append((int)sessionWatch.Elapsed.TotalSeconds).Append(" s")
+                .Append('\n');
+
+            text.Append("stalls ").Append(StallCount);
+
+            if (StallCount > 0)
+            {
+                text.Append(" totalling ").Append(StallTotalMs).Append(" ms");
+
+                var perTic = TicsSimulated > 0 ? (double)stallCount * 100 / TicsSimulated : 0;
+                text.Append(", ").Append(perTic.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture))
+                    .Append("% of tics");
+            }
+
+            text.Append(", reconnects ").Append(reconnectCount).Append('\n');
+
+            if (faulted)
+            {
+                text.Append("faulted: ").Append(faultReason).Append('\n');
+            }
+
+            return text.ToString().TrimEnd('\n');
+        }
 
         public string[] Names
         {

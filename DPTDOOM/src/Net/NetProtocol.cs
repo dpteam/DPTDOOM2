@@ -60,6 +60,17 @@ namespace DPTDOOM.Net
         public const ushort TypePong = 7;
         public const ushort TypeChat = 8;
 
+        /// <summary>
+        /// Host to guest: the input buffer has changed size.
+        ///
+        /// The buffer only decides how far ahead each side generates its own
+        /// commands, so it can change mid-session without touching the simulation.
+        /// It still has to change on both sides at once, because the session runs at
+        /// the pace of the smallest buffer in it - hence a frame rather than each end
+        /// deciding for itself.
+        /// </summary>
+        public const ushort TypeDelay = 9;
+
         public static byte[] BuildFrame(ushort type, byte[] payload)
         {
             var frame = new byte[HeaderSize + payload.Length];

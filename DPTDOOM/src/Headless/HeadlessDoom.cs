@@ -108,6 +108,8 @@ namespace DPTDOOM.Headless
 
                     var tics = 0;
                     var limit = args.tics.Present ? args.tics.Value : 0;
+                    var stateAt = args.stateat.Present ? args.stateat.Value : 0;
+                    var stateAtPrinted = false;
                     var faulted = false;
                     var lastMap = 0;
                     var levelTics = 0;
@@ -161,6 +163,29 @@ namespace DPTDOOM.Headless
                         }
 
                         lastSimulated = simulated;
+
+                        // A hash at a named tic, so two processes that stop at
+                        // different moments can still be compared.
+                        //
+                        // This exists because of a real failure: the host reaches its
+                        // -tics limit and quits while the guest is still a tic or two
+                        // behind, so the guest stops early with "the other player left
+                        // the game" and the final State lines describe different tics.
+                        // The comparison then reports a divergence that is not one. The
+                        // deeper the input buffer, the wider that gap - which is to say
+                        // the failure got more likely exactly when the buffer learned to
+                        // grow.
+                        if (stateAt > 0 && simulated >= stateAt && !stateAtPrinted &&
+                            doom.Game != null && doom.Game.World != null)
+                        {
+                            stateAtPrinted = true;
+
+                            Console.WriteLine(
+                                "State@" + stateAt + ": mobj=" +
+                                DoomDebug.GetMobjHash(doom.Game.World).ToString("x8") +
+                                " sector=" +
+                                DoomDebug.GetSectorHash(doom.Game.World).ToString("x8"));
+                        }
 
                         if (limit > 0 && simulated >= limit)
                         {

@@ -85,8 +85,8 @@ MAP01 проходят все четыре характера бота — от 
 ## Лаунчер
 
 <p align="center">
-  <img src="docs/images/launcher-dark.png" alt="Лаунчер, тёмная тема" width="420">
-  <img src="docs/images/launcher-light.png" alt="Лаунчер, светлая тема" width="420">
+  <img src="docs/images/launcher-dark.png" alt="Лаунчер, тёмная тема" width="49%">
+  <img src="docs/images/launcher-light.png" alt="Лаунчер, светлая тема" width="49%">
 </p>
 
 Настоящий HTML/CSS/JS, встроенный в EXE, но рендерит его **MSHTML** — движок
@@ -170,7 +170,7 @@ powershell -NoProfile -File tools\test-launcher.ps1
 powershell -NoProfile -File tools\check-standalone.ps1
 ```
 
-400 тестов. Геймплейные сверяют хеши мира с эталонами Managed Doom — то есть
+435 тестов. Геймплейные сверяют хеши мира с эталонами Managed Doom — то есть
 проверяют, что порт остался демо-совместимым, а не только что он компилируется.
 Тесты, которым нужен IWAD, без него помечаются пропущенными, а не падают.
 

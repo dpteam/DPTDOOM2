@@ -57,6 +57,16 @@ namespace DPTDOOM
 
         public readonly Arg headless;
         public readonly Arg<int> tics;
+
+        /// <summary>
+        /// Print the world hash when the run reaches this tic, not only at the end.
+        ///
+        /// Two networked processes stop at different moments - the host reaches its
+        /// -tics limit and quits while the guest is still a tic or two behind - so
+        /// comparing their final State lines compares different tics and reports a
+        /// divergence that is not one.
+        /// </summary>
+        public readonly Arg<int> stateat;
         public readonly Arg<string> shot;
         public readonly Arg version;
 
@@ -134,6 +144,7 @@ namespace DPTDOOM
 
             headless = new Arg(args.Contains("-headless"));
             tics = GetInt(args, "-tics");
+            stateat = GetInt(args, "-stateat");
             shot = GetString(args, "-shot");
             version = new Arg(args.Contains("-version") || args.Contains("--version"));
 

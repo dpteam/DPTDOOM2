@@ -54,6 +54,16 @@ namespace DPTDOOM.Net
         /// </summary>
         string ReconnectStatus { get; }
 
+        /// <summary>
+        /// Several lines of session statistics, for the "netstats" command.
+        ///
+        /// On the interface rather than reached through the concrete session, because
+        /// the console lives in the game and the game knows only the driver. A player
+        /// who says "it feels laggy" has to be able to get these numbers in game, not
+        /// only in a log file.
+        /// </summary>
+        string Stats { get; }
+
         /// <summary>Total slots in the session, bots included.</summary>
         int ExpectedPlayers { get; }
 
@@ -86,6 +96,12 @@ namespace DPTDOOM.Net
 
         private int tic;
         private int sendTic;
+
+        // Wall-clock bookkeeping for the stall report. Set when a tic first fails
+        // for want of a peer's command, cleared when it goes through: the length of
+        // the wait is the only number that says the input buffer was too small.
+        private bool waitingForPeer;
+        private int waitingSince;
 
         public NetDriver(NetSession session)
         {
@@ -233,6 +249,7 @@ namespace DPTDOOM.Net
 
                 if (!session.HasTic(player, tic))
                 {
+                    BeginWaiting();
                     return false;
                 }
             }
@@ -268,7 +285,36 @@ namespace DPTDOOM.Net
                 cmds[player].Clear();
             }
 
+            EndWaiting();
+
             return true;
+        }
+
+        /// <summary>
+        /// Starts the clock on a wait for a peer, once per wait rather than once per
+        /// attempt: the caller retries every frame while the command is missing, and
+        /// summing attempts would count the same wait thirty times.
+        /// </summary>
+        private void BeginWaiting()
+        {
+            if (waitingForPeer)
+            {
+                return;
+            }
+
+            waitingForPeer = true;
+            waitingSince = Environment.TickCount;
+        }
+
+        private void EndWaiting()
+        {
+            if (!waitingForPeer)
+            {
+                return;
+            }
+
+            waitingForPeer = false;
+            session.NoteStall(unchecked(Environment.TickCount - waitingSince));
         }
 
         /// <summary>
@@ -317,6 +363,8 @@ namespace DPTDOOM.Net
                 localCommands.Remove(tic);
             }
 
+            session.NoteTic(tic);
+
             botsSentForTic = false;
             tic++;
         }
@@ -349,6 +397,7 @@ namespace DPTDOOM.Net
         public int LocalPlayer => session.LocalPlayer;
         public bool Reconnecting => session.Reconnecting;
         public string ReconnectStatus => session.ReconnectStatus;
+        public string Stats => session.Report();
 
         /// <summary>
         /// Replaces the local input with a deterministic sequence derived from

@@ -153,14 +153,14 @@ Remove-Item $hostLog, $guestLog -ErrorAction SilentlyContinue
 $hostProcess = Start-Process -FilePath $Exe -PassThru -WindowStyle Hidden `
     -RedirectStandardOutput $hostLog `
     -ArgumentList @('-headless', '-iwad', $Iwad, '-net', 'host', '-players', '2',
-                    '-port', "$HostPort", '-warp', '1', '-skill', '3', '-tics', '200')
+                    '-port', "$HostPort", '-warp', '1', '-skill', '3', '-tics', '200', '-stateat', '150')
 
 Start-Sleep -Seconds 5
 
 $guestProcess = Start-Process -FilePath $Exe -PassThru -WindowStyle Hidden `
     -RedirectStandardOutput $guestLog `
     -ArgumentList @('-headless', '-iwad', $Iwad, '-net', 'join',
-                    '-address', "127.0.0.1:$HostPort", '-tics', '200',
+                    '-address', "127.0.0.1:$HostPort", '-tics', '200', '-stateat', '150',
                     '-consolecmd', 'god')
 
 $guestProcess.WaitForExit(120000) | Out-Null
@@ -172,9 +172,10 @@ try {
     Assert-True ($guest.Contains("Cheats are disabled in a network game")) `
         "the guest's cheat is refused, with the reason"
 
-    # And the refusal did nothing: the two ends still agree on the world.
-    $hostState = (Get-Content $hostLog | Select-String 'State: mobj=' | Select-Object -First 1).Line
-    $guestState = (Get-Content $guestLog | Select-String 'State: mobj=' | Select-Object -First 1).Line
+    # And the refusal did nothing: the two ends still agree on the world. Compared at
+    # a named tic, because the final State lines may describe different tics.
+    $hostState = (Get-Content $hostLog | Select-String 'State@' | Select-Object -First 1).Line
+    $guestState = (Get-Content $guestLog | Select-String 'State@' | Select-Object -First 1).Line
 
     Assert-True ($hostState -eq $guestState) `
         "the worlds still match, so the refused cheat changed nothing ($guestState)"

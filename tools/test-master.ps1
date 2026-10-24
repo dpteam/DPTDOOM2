@@ -105,6 +105,28 @@ function New-Info([string]$Name, [string]$Map, [int]$GamePort, [int]$Skill) {
 
 Write-Host "Master: $MasterHost`:$Port"
 
+# Reaching the master is the caller's job, and saying so beats a socket exception
+# stack: the script used to fail here with nothing that named the real problem, and
+# "the master is not running" reads like a broken test rather than a missing
+# process. The check is deliberately a plain connect, not a protocol exchange, so
+# this also works against the original C master.
+$reachable = $false
+
+try {
+    $probe = New-Object Net.Sockets.TcpClient
+    $probe.Connect($MasterHost, $Port)
+    $probe.Close()
+    $reachable = $true
+}
+catch {
+}
+
+if (-not $reachable) {
+    Write-Host "  FAIL nothing is listening at $MasterHost`:$Port"
+    Write-Host "       start the directory first: .\DPTDOOM.Master\bin\Release\net40\dptdoom-master.exe"
+    exit 1
+}
+
 $register = Invoke-Master 2 (New-Info $SessionName "MAP07" 5029 3)
 if ($register.Status -ne 0) { throw "register failed with status $($register.Status)" }
 $auth = $register.Body[0..39]

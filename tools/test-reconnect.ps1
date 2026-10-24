@@ -23,7 +23,12 @@ param(
     [int]$ProxyPort = 5242,
     [int]$Tics = 4000,
     [double]$PlaySecondsBeforeCut = 1.5,
-    [int]$TimeoutSeconds = 240
+    [int]$TimeoutSeconds = 240,
+
+    # The tic both sides print a world hash at. The host reaches its -tics limit and
+    # quits while the guest can still be a tic or two behind, so the final State
+    # lines may describe different tics and report a divergence that is not one.
+    [int]$CompareTic = 3800
 )
 
 $ErrorActionPreference = "Stop"
@@ -91,7 +96,8 @@ try {
     $hostProcess = Start-Process -FilePath $Exe -PassThru -WindowStyle Hidden `
         -RedirectStandardOutput $hostOut `
         -ArgumentList @('-headless', '-iwad', $Iwad, '-net', 'host', '-players', '2',
-                        '-port', "$HostPort", '-warp', '1', '-skill', '3', '-tics', "$Tics")
+                        '-port', "$HostPort", '-warp', '1', '-skill', '3', '-tics', "$Tics",
+                        '-stateat', "$CompareTic")
 
     Start-Sleep -Seconds 5
 
@@ -101,7 +107,8 @@ try {
     $guestProcess = Start-Process -FilePath $Exe -PassThru -WindowStyle Hidden `
         -RedirectStandardOutput $guestOut `
         -ArgumentList @('-headless', '-iwad', $Iwad, '-net', 'join',
-                        '-address', "127.0.0.1:$ProxyPort", '-tics', "$Tics")
+                        '-address', "127.0.0.1:$ProxyPort", '-tics', "$Tics",
+                        '-stateat', "$CompareTic")
 
     Assert-True (Wait-ForLine $hostOut "joined as player 2" 30) "the guest joined through the proxy"
 
@@ -133,11 +140,11 @@ try {
     $gaveUp = $guestLog | Select-String -SimpleMatch "connection to the host was lost" | Select-Object -First 1
     Assert-True ($null -eq $gaveUp) "the guest did not give up"
 
-    $guestState = $guestLog | Select-String 'State: mobj=' | Select-Object -First 1
-    $hostState = $hostLog | Select-String 'State: mobj=' | Select-Object -First 1
+    $guestState = $guestLog | Select-String 'State@' | Select-Object -First 1
+    $hostState = $hostLog | Select-String 'State@' | Select-Object -First 1
 
-    Assert-True ($null -ne $guestState) "the guest simulated to the end ($guestState)"
-    Assert-True ($null -ne $hostState) "the host simulated to the end ($hostState)"
+    Assert-True ($null -ne $guestState) "the guest simulated to the compare tic ($guestState)"
+    Assert-True ($null -ne $hostState) "the host simulated to the compare tic ($hostState)"
     Assert-True ($hostState.ToString() -eq $guestState.ToString()) `
         "host and guest agree on the world hash across the cut"
 }
