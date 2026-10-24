@@ -524,6 +524,20 @@ namespace DPTDOOM.Scripting
             return Enum.TryParse(name, true, out sound) && Enum.IsDefined(typeof(Sfx), sound);
         }
 
+        /// <summary>
+        /// A flag name, as a public lookup.
+        ///
+        /// Exposed so the DECORATE converter can check the name before emitting it. Without
+        /// that check one unknown flag throws while the script runs, and the throw costs the
+        /// whole actor block - including states that had nothing to do with it. A modder who
+        /// wrote +PAINLESS would lose the animation and be told about a script problem, which
+        /// is true and useless.
+        /// </summary>
+        public static bool TryParseFlagName(string name, out MobjFlags flag)
+        {
+            return TryParseFlag(name, out flag);
+        }
+
         private static bool TryParseFlag(string name, out MobjFlags flag)
         {
             if (!Enum.TryParse(name, true, out flag))

@@ -231,6 +231,54 @@ namespace DPTDOOMTest.UnitTests
         }
 
         [TestMethod]
+        public void AnUnknownFlagCostsOnlyThatFlag()
+        {
+            // A throw while the definition runs costs the whole actor block - states
+            // included - and reports itself as a script problem when the modder wrote
+            // DECORATE. So the converter checks the name and skips just it. +PAINLESS is the
+            // realistic case: it exists in ZDoom and ACE and not in this engine.
+            using (var content = GameContent.CreateDummy(WadPath.Doom2))
+            {
+                var table = DoomInfo.MobjInfos;
+                var imp = Find(table, 3001);
+                var originalSee = imp.SeeState;
+                var originalHealth = imp.SpawnHealth;
+
+                var problems = new List<string>();
+
+                var script = DecorateConverter.Convert(
+                    "ACTOR TestImp 3001\n" +
+                    "{\n" +
+                    "  Health 250\n" +
+                    "  +PAINLESS\n" +
+                    "  States { See: TROO A 3 A_Look Loop }\n" +
+                    "}", table, problems);
+
+                var text = string.Join("; ", problems.ToArray());
+
+                StringAssert.Contains(text, "Painless");
+                StringAssert.Contains(text, "no flag");
+
+                Assert.IsFalse(script.Contains("PAINLESS"), "the unknown flag is not emitted");
+                StringAssert.Contains(script, "Health(250)", "the rest of the block survives");
+                StringAssert.Contains(script, "SeeState(", "and so do the states");
+
+                var library = new ScriptLibrary();
+                library.Add(script, "generated", table);
+                library.ApplyTo(table);
+
+                Assert.AreEqual(0, library.Problems.Count,
+                    "nothing is left for the script to refuse");
+
+                Assert.AreEqual(250, imp.SpawnHealth);
+                Assert.IsTrue((int)imp.SeeState >= DoomInfo.CustomStateFirst);
+
+                imp.SeeState = originalSee;
+                imp.SpawnHealth = originalHealth;
+            }
+        }
+
+        [TestMethod]
         public void TheStatesOfTwoActorsDoNotShareNames()
         {
             // Both are called "See", and they must not collide: a name is scoped to the actor

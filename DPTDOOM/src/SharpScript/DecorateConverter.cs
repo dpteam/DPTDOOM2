@@ -234,6 +234,19 @@ namespace DPTDOOM.Scripting
 
                 foreach (var pair in actor.Flags)
                 {
+                    MobjFlags flag;
+
+                    if (!ScriptActorApi.TryParseFlagName(pair.Key, out flag))
+                    {
+                        // Skipped here rather than left for the script to refuse: a throw
+                        // while the definition runs costs the whole actor block, states
+                        // included, and reports itself as a script problem when the modder
+                        // wrote DECORATE. One unknown flag must cost one flag.
+                        problems.Add(actor.Name + " line " + actor.Line + ": there is no flag '" +
+                                     pair.Key + "' in this engine, so it is left as it was");
+                        continue;
+                    }
+
                     script.Append("    Flag(\"").Append(pair.Key).Append("\", ")
                           .Append(pair.Value ? "true" : "false").Append(");\n");
                 }
