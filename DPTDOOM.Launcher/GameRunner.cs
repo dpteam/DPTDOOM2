@@ -143,6 +143,7 @@ namespace DPTDOOM.Launcher
                 // remembers one password per profile, and typing it twice for one
                 // session is exactly the step people skip.
                 AppendPassword(builder, state.Password, maskPassword);
+                AppendHostPolicy(builder, state);
 
                 // Bots take the last slots, so the host must leave at least one
                 // for a guest: a session of bots and nobody else is what local
@@ -380,6 +381,30 @@ namespace DPTDOOM.Launcher
             }
 
             return "\"" + value.Replace("\"", "\\\"") + "\"";
+        }
+
+        /// <summary>
+        /// Adds the host-only policy: the ban list and the connection log.
+        ///
+        /// Paths go through unquoted only if they have no spaces; Quote handles the
+        /// rest. Missing files are not checked here - the game refuses a named ban file
+        /// that does not exist, which is where the message belongs.
+        /// </summary>
+        private static void AppendHostPolicy(System.Text.StringBuilder builder, LauncherState state)
+        {
+            var bans = (state.BanList ?? "").Trim();
+
+            if (bans.Length > 0)
+            {
+                Append(builder, "-bans", bans);
+            }
+
+            var log = (state.NetLog ?? "").Trim();
+
+            if (log.Length > 0)
+            {
+                Append(builder, "-netlog", log);
+            }
         }
 
         /// <summary>

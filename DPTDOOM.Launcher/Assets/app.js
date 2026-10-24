@@ -100,6 +100,8 @@ var DPT = (function () {
         parts.push(String(parseInt($('players').value, 10) || 2));
         parts.push(String(parseInt($('hostbots').value, 10) || 0));
         parts.push($('password').value);
+        parts.push($('banlist').value);
+        parts.push($('netlog').value);
 
         return parts.join('\n');
     }
@@ -159,6 +161,8 @@ var DPT = (function () {
         }
 
         $('password').value = parts[FIELDS.length + 10] || '';
+        $('banlist').value = parts[FIELDS.length + 11] || '';
+        $('netlog').value = parts[FIELDS.length + 12] || '';
 
         syncMode();
         renderMods();
@@ -187,6 +191,8 @@ var DPT = (function () {
         $('players').disabled = mode !== 1;
         $('hostbots').disabled = mode !== 1;
         $('password').disabled = mode !== 1 && mode !== 2;
+        $('banlist').disabled = mode !== 1;
+        $('netlog').disabled = mode !== 1;
     }
 
     function renderMods() {
@@ -476,7 +482,7 @@ var DPT = (function () {
         // These are not in FIELDS (they are launcher-only, not session fields),
         // so they need wiring by hand: without it editing them changes nothing,
         // because no preview is requested.
-        var extras = ['players', 'hostbots', 'password'];
+        var extras = ['players', 'hostbots', 'password', 'banlist', 'netlog'];
 
         for (i = 0; i < extras.length; i++) {
             $(extras[i]).onchange = changed;

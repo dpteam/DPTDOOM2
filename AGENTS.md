@@ -45,6 +45,7 @@ powershell -NoProfile -File tools\test-net-latency.ps1
 powershell -NoProfile -File tools\test-bots.ps1
 powershell -NoProfile -File tools\test-net-bots.ps1
 powershell -NoProfile -File tools\test-net-leave.ps1
+powershell -NoProfile -File tools\test-host-bans.ps1
 powershell -NoProfile -File tools\test-reconnect.ps1
 powershell -NoProfile -File tools\test-profile.ps1
 powershell -NoProfile -File tools\test-view.ps1
@@ -188,6 +189,17 @@ powershell -NoProfile -File tools\test-launcher.ps1
   пустой пароль. Это **не** шифрование: пароль идёт открытым текстом, relay —
   прозрачная труба, и в командной строке процесса его видно другим пользователям
   машины (через WMI). Проверка — `ServerPasswordTest`, `HelloTailTest`.
+- Банлист хоста (`-bans`) — тот же формат, что у мастера, плюс правила по нику;
+  проверяется **до выдачи слота**, ник — сразу после `HELLO`. Адрес тоже после
+  `HELLO`, намеренно: закрыть сокет с непрочитанным кадром значит отправить сброс, и
+  гость увидит «connection reset» вместо «banned», а «сказать, что забанен» — весь
+  смысл. Забаненный не возвращается и по токену. В relay адрес неизвестен
+  (`address=-`), бан по адресу там неприменим — не притворяться, что работает.
+  Проверка — `BanListTest`, `HostBansTest`, `tools/test-host-bans.ps1`.
+- Лог подключений (`-netlog`) пишется по строке на событие; **причина в строке
+  ухода обязательна** (quit / потерян / махнули рукой) — иначе три разные ситуации
+  выглядят одинаково. Ник экранируется: он приходит от игрока и попадает в файл.
+  Пароля в логе нет никогда.
 - Reconnect (`NetSession.BeginReconnect`, `ReplayHistory`) держится на трёх
   запретах, и каждый нарушается молча: слот при возврате **не** перевыдаётся,
   задержка ввода возвращается **тем же числом**, каким была, а не измеряется

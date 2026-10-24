@@ -280,15 +280,14 @@ namespace DPTDOOM.Net
         private readonly int delayOverride;
 
         /// <summary>
-        /// The session password. On the host: what a guest must offer. On a guest:
-        /// what to offer.
+        /// Everything that decides who gets into this session, or null for an open one.
         ///
-        /// Kept out of <see cref="SessionSettings"/> deliberately. Settings travel in
-        /// the welcome, are published to the master for the server list, and appear in
-        /// logs and diagnostics; the password must be in none of those, or it stops
-        /// keeping anybody out.
+        /// Holds the password, the ban list and the connection log. Kept out of
+        /// <see cref="SessionSettings"/> deliberately: settings travel in the welcome,
+        /// are published to the master for the server list, and appear in logs and
+        /// diagnostics. A password or a ban list in any of those stops doing its job.
         /// </summary>
-        private readonly string password;
+        private readonly HostGuard guard;
 
         // Reconnection. See docs/NETWORK.md - the important property is that
         // lockstep makes this possible at all: neither side needs a world
@@ -348,6 +347,16 @@ namespace DPTDOOM.Net
         private int resumeTokenSequence;
         private ulong resumeToken;
 
+        /// <summary>
+        /// Where each slot's player came from, kept after the peer is gone.
+        ///
+        /// Same reason as the token: by the time the host gives up on a slot the peer
+        /// object has been removed from the list, and the log line about giving up has
+        /// to be able to say which address stopped answering.
+        /// </summary>
+        private readonly Dictionary<int, System.Net.IPAddress> slotAddresses =
+            new Dictionary<int, System.Net.IPAddress>();
+
         private Thread pingThread;
         private readonly object pingLock = new object();
         private readonly Stopwatch pingWatch = new Stopwatch();
@@ -401,18 +410,13 @@ namespace DPTDOOM.Net
         }
 
         private NetSession(bool isHost, int expectedPlayers, string localName, int delayOverride,
-                           string password)
+                           HostGuard guard)
         {
             this.isHost = isHost;
             this.expectedPlayers = MathEx.Clamp(expectedPlayers, 2, NetProtocol.MaxPlayers);
             this.localName = localName;
             this.delayOverride = delayOverride;
-
-            // On the host this is the requirement; on a guest it is what to offer.
-            // Never copied into the settings that travel in the welcome: the guest
-            // already knows the password it sent, and everybody else must not learn it
-            // from a frame, a listing or a log.
-            this.password = password ?? "";
+            this.guard = guard;
 
             for (var i = 0; i < NetProtocol.MaxPlayers; i++)
             {
@@ -424,13 +428,13 @@ namespace DPTDOOM.Net
 
         public static NetSession StartHost(int port, int players, string name, SessionSettings settings)
         {
-            return StartHost(port, players, name, settings, -1, null);
+            return StartHost(port, players, name, settings, -1, (HostGuard)null);
         }
 
         public static NetSession StartHost(int port, int players, string name, SessionSettings settings,
                                            string password)
         {
-            return StartHost(port, players, name, settings, -1, password);
+            return StartHost(port, players, name, settings, -1, PasswordGuard(password));
         }
 
         /// <summary>
@@ -440,18 +444,37 @@ namespace DPTDOOM.Net
         /// </summary>
         public static NetSession StartHost(int port, int players, string name, SessionSettings settings, int delayOverride)
         {
-            return StartHost(port, players, name, settings, delayOverride, null);
+            return StartHost(port, players, name, settings, delayOverride, (HostGuard)null);
         }
 
         public static NetSession StartHost(int port, int players, string name, SessionSettings settings,
                                            int delayOverride, string password)
         {
-            var session = new NetSession(true, players, name, delayOverride, password);
+            return StartHost(port, players, name, settings, delayOverride, PasswordGuard(password));
+        }
+
+        public static NetSession StartHost(int port, int players, string name, SessionSettings settings,
+                                           int delayOverride, HostGuard guard)
+        {
+            var session = new NetSession(true, players, name, delayOverride, guard);
             session.settings = settings;
             session.localPlayer = 0;
             session.connectedPlayers = 1;
             session.OpenListener(port);
             return session;
+        }
+
+        /// <summary>
+        /// A guard that only carries a password, for the callers that want nothing else.
+        /// </summary>
+        private static HostGuard PasswordGuard(string password)
+        {
+            if (string.IsNullOrEmpty(password))
+            {
+                return null;
+            }
+
+            return new HostGuard { Password = password };
         }
 
         public static NetSession Join(string address, int port, string name, int timeoutMs)
@@ -462,7 +485,7 @@ namespace DPTDOOM.Net
         public static NetSession Join(string address, int port, string name, int timeoutMs,
                                       string password)
         {
-            var session = new NetSession(false, 2, name, -1, password);
+            var session = new NetSession(false, 2, name, -1, PasswordGuard(password));
 
             try
             {
@@ -570,6 +593,7 @@ namespace DPTDOOM.Net
         private void AcceptGuestStream(Stream stream, TcpClient client)
         {
             var reader = new BinaryReader(stream);
+            var address = AddressOf(client);
 
             var hello = ReadFrame(reader);
             if (hello == null || hello.Value.Type != NetProtocol.TypeHello)
@@ -612,6 +636,28 @@ namespace DPTDOOM.Net
                 }
             }
 
+            // Refused before anything is issued: no slot, no token, no welcome.
+            //
+            // Checked after hello rather than straight after accept, and that is a
+            // deliberate trade. Closing a socket with unread bytes still in flight makes
+            // the kernel send a reset, so the guest would see "connection reset by peer"
+            // instead of being told it is banned - and being told is the entire point of
+            // a ban list. One small frame read from a banned peer is cheap.
+            //
+            // A banned player cannot resume either: the check is before the resume
+            // branch, so a ban takes effect even for somebody already in the game.
+            if (guard != null && (guard.BansAddress(address) || guard.BansName(guestName)))
+            {
+                var rule = guard.Explain(address, guestName);
+
+                Console.WriteLine("Net: refused '" + guestName + "' (" + Describe(address) +
+                                  "), banned by rule: " + rule);
+
+                Refuse(stream, client, guestName, address, "banned", "banned: " + rule);
+
+                return;
+            }
+
             if (resume)
             {
                 // The token is proof of admission, and the slot has been held since
@@ -621,16 +667,30 @@ namespace DPTDOOM.Net
                 return;
             }
 
-            if (!ServerPassword.Matches(password, offeredPassword))
+            // The nickname is checked after hello, because that is the first moment it
+            // exists. The peer is still connected and one frame has been read; the slot
+            // has not been issued, which is what actually matters.
+            if (guard != null && guard.BansName(guestName))
+            {
+                Console.WriteLine("Net: refused '" + guestName + "' (" + Describe(address) +
+                                  "), that nickname is on the ban list.");
+
+                Refuse(stream, client, guestName, address,
+                    "banned", "banned: " + guard.Explain(address, guestName));
+
+                return;
+            }
+
+            if (!ServerPassword.Matches(ExpectedPassword, offeredPassword))
             {
                 // Said plainly, because there is nothing to protect here: the host is
                 // known, and a guest who mistyped a passphrase should learn that rather
                 // than stare at "connection refused". It is also the one refusal a
                 // player can act on.
-                SendFrame(stream, NetProtocol.TypeReject,
-                    EncodeReason(offeredPassword.Length == 0 ? "this session needs a password" : "wrong password"),
-                    null);
-                CloseGuest(client, stream);
+                Refuse(stream, client, guestName, address,
+                    offeredPassword.Length == 0 ? "this session needs a password" : "wrong password",
+                    offeredPassword.Length == 0 ? "no password offered" : "wrong password");
+
                 return;
             }
 
@@ -638,8 +698,7 @@ namespace DPTDOOM.Net
             {
                 if (connectedPlayers >= expectedPlayers)
                 {
-                    SendFrame(stream, NetProtocol.TypeReject, EncodeReason("session is full"), null);
-                    CloseGuest(client, stream);
+                    Refuse(stream, client, guestName, address, "session is full", "session is full");
                     return;
                 }
 
@@ -652,9 +711,11 @@ namespace DPTDOOM.Net
                 peer.Stream = stream;
                 peer.PlayerIndex = playerIndex;
                 peer.Name = guestName;
+                peer.Address = address;
                 peer.Token = NewResumeToken();
 
                 slotTokens[playerIndex] = peer.Token;
+                slotAddresses[playerIndex] = address;
 
                 // Measure the round trip before the welcome goes out, and put
                 // the result in it, so both ends start with the same input delay.
@@ -700,6 +761,8 @@ namespace DPTDOOM.Net
                 SendWelcome(stream, playerIndex, guestName, peer.Token);
 
                 peers.Add(peer);
+
+                LogJoin(guestName, address, playerIndex);
 
                 var thread = new Thread(() => ReadLoop(peer));
                 thread.IsBackground = true;
@@ -812,6 +875,22 @@ namespace DPTDOOM.Net
             peer.Name = slotName;
             peer.Token = token;
 
+            // A resumed socket can come from a different address than the original -
+            // a player on a laptop that moved from Wi-Fi to a phone hotspot. The log
+            // records where it is now, and slotAddresses follows, so a later "gave up"
+            // line names the address that actually stopped answering.
+            var resumeAddress = AddressOf(client);
+
+            if (resumeAddress != null)
+            {
+                peer.Address = resumeAddress;
+
+                lock (sync)
+                {
+                    slotAddresses[playerIndex] = resumeAddress;
+                }
+            }
+
             lock (sync)
             {
                 // The replacement goes in before the dead one comes out, so the
@@ -843,6 +922,11 @@ namespace DPTDOOM.Net
             BroadcastHold(false);
 
             Console.WriteLine("Net: '" + slotName + "' reconnected as player " + (playerIndex + 1) + ".");
+
+            if (guard != null && guard.Log != null)
+            {
+                guard.Log.Resume(slotName, peer.Address, playerIndex);
+            }
 
             if (old != null)
             {
@@ -1084,7 +1168,7 @@ namespace DPTDOOM.Net
 
         public static NetSession JoinRelay(RelayLink link, string name, string password)
         {
-            var session = new NetSession(false, 2, name, -1, password);
+            var session = new NetSession(false, 2, name, -1, PasswordGuard(password));
             session.relayLink = link;
             session.Relayed = true;
             session.Handshake(link.Stream);
@@ -1200,7 +1284,7 @@ namespace DPTDOOM.Net
                     flags |= NetProtocol.HelloResume;
                 }
 
-                if (!string.IsNullOrEmpty(password))
+                if (!string.IsNullOrEmpty(ExpectedPassword))
                 {
                     flags |= NetProtocol.HelloPassword;
                 }
@@ -1215,9 +1299,9 @@ namespace DPTDOOM.Net
                         writer.Write((byte)localPlayer);
                     }
 
-                    if (!string.IsNullOrEmpty(password))
+                    if (!string.IsNullOrEmpty(ExpectedPassword))
                     {
-                        NetProtocol.WritePassword(writer, password);
+                        NetProtocol.WritePassword(writer, ExpectedPassword);
                     }
                 }
 
@@ -1710,6 +1794,104 @@ namespace DPTDOOM.Net
         // Common
         ////////////////////////////////////////////////////////////
 
+        /// <summary>
+        /// The password this session requires (host) or offers (guest).
+        /// </summary>
+        private string ExpectedPassword
+        {
+            get { return guard == null ? "" : guard.Password; }
+        }
+
+        /// <summary>
+        /// The source address of an accepted socket, or null when it is not known.
+        ///
+        /// Null for a relayed guest: the master paired a stream and this process never
+        /// saw the player's socket. That is not a detail - it means an address ban
+        /// cannot apply to a relayed session, and pretending otherwise would either
+        /// ban the master or silently do nothing.
+        /// </summary>
+        private static IPAddress AddressOf(TcpClient client)
+        {
+            if (client == null)
+            {
+                return null;
+            }
+
+            try
+            {
+                var endPoint = client.Client.RemoteEndPoint as IPEndPoint;
+                return endPoint == null ? null : endPoint.Address;
+            }
+            catch (Exception)
+            {
+                // A socket that died between accept and this call has no endpoint.
+                return null;
+            }
+        }
+
+        private static string Describe(IPAddress address)
+        {
+            return address == null ? "unknown address" : address.ToString();
+        }
+
+        private void Refuse(Stream stream, TcpClient client, string name, IPAddress address,
+                            string wireReason, string logReason)
+        {
+            if (guard != null && guard.Log != null)
+            {
+                guard.Log.Refuse(name, address, logReason);
+            }
+
+            SendFrame(stream, NetProtocol.TypeReject, EncodeReason(wireReason), null);
+            CloseGuest(client, stream);
+        }
+
+        private void LogJoin(string name, IPAddress address, int player)
+        {
+            if (guard != null && guard.Log != null)
+            {
+                guard.Log.Join(name, address, player);
+            }
+        }
+
+        private void LogLeave(string name, IPAddress address, int player, string reason)
+        {
+            if (guard != null && guard.Log != null)
+            {
+                guard.Log.Leave(name, address, player, reason);
+            }
+        }
+
+        /// <summary>
+        /// A guest left on purpose: free its slot the same way a lost one is freed.
+        ///
+        /// The world cannot lose the slot - a session of three and a session of two are
+        /// different worlds - so it becomes inert and the host keeps sending empty
+        /// commands for it. The only difference from a crashed player is the line in
+        /// the log, and to the other players that is the difference between "they went
+        /// to get tea" and "their internet died".
+        /// </summary>
+        private void QuitPeer(Peer peer)
+        {
+            lock (sync)
+            {
+                if (!peers.Remove(peer))
+                {
+                    return;
+                }
+            }
+
+            CloseGuest(peer.Client, peer.Stream);
+
+            Console.WriteLine("Net: '" + peer.Name + "' left on purpose; player " +
+                              (peer.PlayerIndex + 1) + " is now inert.");
+
+            // Reuses the same path as an expired grace period: one place decides what
+            // an abandoned slot looks like, so the two ways of getting there cannot
+            // drift apart - including the single log line, with a different reason.
+            AbandonSlot(peer.PlayerIndex, "quit");
+        }
+
         private void ReadLoop(Peer peer)
         {
             try
@@ -1809,6 +1991,11 @@ namespace DPTDOOM.Net
 
             Console.WriteLine("Net: lost '" + peer.Name + "', holding the game for up to " +
                               reconnectGraceSeconds + " s.");
+
+            // The link died, which is not the same as the player quitting - and it is
+            // not the same as the host giving up either. Three different lines in the
+            // log, because those are three different things to investigate.
+            LogLeave(peer.Name, peer.Address, peer.PlayerIndex, "link lost, holding the slot");
 
             BroadcastHold(true);
 
@@ -2087,7 +2274,12 @@ namespace DPTDOOM.Net
 
                 if (expired >= 0)
                 {
-                    AbandonSlot(expired);
+                    var name = SlotName(expired);
+
+                    Console.WriteLine("Net: '" + name + "' did not come back; player " + (expired + 1) +
+                                      " is now inert and the session continues without them.");
+
+                    AbandonSlot(expired, "did not come back");
                 }
 
                 return;
@@ -2116,21 +2308,21 @@ namespace DPTDOOM.Net
         /// What the player loses is their character, not the game: their body stays
         /// where it stood. Anything else would need a state transfer, which lockstep
         /// does not have and does not want.
+        ///
+        /// <paramref name="reason"/> goes into the log verbatim: "did not come back"
+        /// and "quit" are the same mechanics and different stories.
         /// </summary>
-        private void AbandonSlot(int playerIndex)
+        private void AbandonSlot(int playerIndex, string reason)
         {
-            var name = "player " + (playerIndex + 1);
+            var name = SlotName(playerIndex);
+            System.Net.IPAddress address = null;
 
             lock (sync)
             {
                 awaitingResume.Remove(playerIndex);
                 abandoned.Add(playerIndex);
 
-                // names is filled in slot order, so the slot number is the index.
-                if (playerIndex < names.Count && !string.IsNullOrEmpty(names[playerIndex]))
-                {
-                    name = names[playerIndex];
-                }
+                slotAddresses.TryGetValue(playerIndex, out address);
 
                 if (awaitingResume.Count == 0)
                 {
@@ -2140,10 +2332,26 @@ namespace DPTDOOM.Net
 
             BroadcastHold(false);
 
-            Console.WriteLine("Net: '" + name + "' did not come back; player " + (playerIndex + 1) +
-                              " is now inert and the session continues without them.");
+            LogLeave(name, address, playerIndex, reason);
 
             BroadcastLeave(playerIndex);
+        }
+
+        /// <summary>
+        /// The nickname in a slot, or a stand-in if the slot has none.
+        /// </summary>
+        private string SlotName(int playerIndex)
+        {
+            lock (sync)
+            {
+                // names is filled in slot order, so the slot number is the index.
+                if (playerIndex < names.Count && !string.IsNullOrEmpty(names[playerIndex]))
+                {
+                    return names[playerIndex];
+                }
+            }
+
+            return "player " + (playerIndex + 1);
         }
 
         private void BroadcastLeave(int playerIndex)
@@ -2332,7 +2540,18 @@ namespace DPTDOOM.Net
                     break;
 
                 case NetProtocol.TypeBye:
-                    finished = true;
+                    // A guest that says goodbye on purpose. On the host this is not the
+                    // end of the session: a player who quits and a player whose router
+                    // dies are the same problem from here, and the answer to both is an
+                    // inert slot rather than closing the game for everybody.
+                    if (isHost)
+                    {
+                        QuitPeer(peer);
+                    }
+                    else
+                    {
+                        finished = true;
+                    }
                     break;
 
                 case NetProtocol.TypePing:
@@ -2444,7 +2663,17 @@ namespace DPTDOOM.Net
             {
                 relayedHistory.Add(player, tic);
 
-                foreach (var other in peers)
+                // A copy: relaying happens on every guest's read thread, and a peer can
+                // leave while this one is being written to. The live list is the same
+                // one that removal takes a lock on.
+                List<Peer> others;
+
+                lock (sync)
+                {
+                    others = new List<Peer>(peers);
+                }
+
+                foreach (var other in others)
                 {
                     if (!ReferenceEquals(other, peer) && other.Stream != null)
                     {
@@ -2808,7 +3037,17 @@ namespace DPTDOOM.Net
 
             PrintFinalReport();
 
-            foreach (var peer in peers)
+            // Copied for the same reason as in Dispose: a peer's read loop removes it
+            // from this list, and saying goodbye is exactly what makes those loops
+            // unwind.
+            List<Peer> targets;
+
+            lock (sync)
+            {
+                targets = new List<Peer>(peers);
+            }
+
+            foreach (var peer in targets)
             {
                 try
                 {
@@ -2850,6 +3089,14 @@ namespace DPTDOOM.Net
 
             disposed = true;
 
+            // The session was given the log, so it closes it: leaving it to the caller
+            // would mean the last event of a session - its own teardown - never reaches
+            // the file if the caller forgets.
+            if (guard != null && guard.Log != null)
+            {
+                guard.Log.Dispose();
+            }
+
             if (presence != null)
             {
                 try
@@ -2874,7 +3121,20 @@ namespace DPTDOOM.Net
             {
             }
 
-            foreach (var peer in peers)
+            // The list is copied before iterating: shutting a peer down makes its read
+            // loop unwind, and that loop removes the peer from the list. Iterating the
+            // live list threw "collection was modified" out of Dispose, which is the
+            // worst place for it - the session was already going away and the exception
+            // landed on whoever called Dispose.
+            List<Peer> closing;
+
+            lock (sync)
+            {
+                closing = new List<Peer>(peers);
+                peers.Clear();
+            }
+
+            foreach (var peer in closing)
             {
                 try
                 {
@@ -2940,6 +3200,12 @@ namespace DPTDOOM.Net
             public Thread Thread;
             public ulong Token;
             public readonly object WriteLock = new object();
+
+            /// <summary>
+            /// Where this peer came from, or null when it arrived through the relay and
+            /// the address was never visible. Kept so the log can say who was where.
+            /// </summary>
+            public System.Net.IPAddress Address;
 
             /// <summary>
             /// When a frame last arrived. A TCP read blocks forever on a link

@@ -86,6 +86,18 @@ namespace DPTDOOM
         public readonly Arg<string> password;
 
         /// <summary>
+        /// Where the ban list is. Absent means the default file in the data directory,
+        /// if it exists.
+        /// </summary>
+        public readonly Arg<string> bans;
+
+        /// <summary>
+        /// Where joins, leaves and refusals are appended. Absent means the default file
+        /// in the data directory, written only while hosting.
+        /// </summary>
+        public readonly Arg<string> netlog;
+
+        /// <summary>
         /// True when "-password" was given but its value parsed as another option.
         ///
         /// A password is the one string a player types freely, so "-password -secret"
@@ -175,6 +187,8 @@ namespace DPTDOOM
             name = GetString(args, "-name");
             password = GetString(args, "-password");
             passwordValueLookedLikeAnOption = args.Contains("-password") && !password.Present;
+            bans = GetString(args, "-bans");
+            netlog = GetString(args, "-netlog");
             master = GetString(args, "-master");
             relay = new Arg(args.Contains("-relay"));
             relayMaster = GetString(args, "-relay-master");

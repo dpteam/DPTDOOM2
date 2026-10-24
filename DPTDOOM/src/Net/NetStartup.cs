@@ -13,6 +13,8 @@
 //
 
 using System;
+using System.Collections.Generic;
+using System.IO;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
@@ -77,10 +79,10 @@ namespace DPTDOOM.Net
             var relay = args.relay.Present;
             var delayOverride = args.netdelay.Present ? args.netdelay.Value : -1;
 
-            // Validated here rather than at the first join: a password that was
-            // mistyped into something unusable should stop the host now, while they
-            // are looking at the screen, not produce a session nobody can enter.
-            var password = ParsePassword(args);
+            // Built here rather than at the first join: a password mistyped into
+            // something unusable, or a ban file that is not where it was said to be,
+            // should stop the host now, while they are looking at the screen.
+            var guard = BuildGuard(args);
 
             string masterHost = null;
             var masterPort = MasterProtocol.DefaultPort;
@@ -161,9 +163,14 @@ namespace DPTDOOM.Net
             // Announced as a fact, never as a value: the status screen is photographed
             // for bug reports, and the console is redirected into log files by most of
             // the test scripts.
-            if (!string.IsNullOrEmpty(password))
+            if (guard != null && !string.IsNullOrEmpty(guard.Password))
             {
                 lines.Add("PASSWORD ON");
+            }
+
+            if (guard != null && guard.Bans != null)
+            {
+                lines.Add(guard.Bans.Count + " BANS");
             }
 
             // Zero guests so far, and the slot count is what the loop below prints.
@@ -171,7 +178,7 @@ namespace DPTDOOM.Net
 
             status("HOSTING", lines.ToArray());
 
-            var session = NetSession.StartHost(port, players, name, settings, delayOverride, password);
+            var session = NetSession.StartHost(port, players, name, settings, delayOverride, guard);
 
             if (presence != null)
             {
@@ -254,8 +261,66 @@ namespace DPTDOOM.Net
             return password;
         }
 
+        /// <summary>
+        /// What this host uses to decide who gets in, or null for an open session.
+        ///
+        /// Every way of getting the password, the ban file or the log path wrong is
+        /// turned into a message here, at startup, while the host is looking at the
+        /// screen - not into a session that is quietly open or quietly missing its log.
+        /// </summary>
+        private static HostGuard BuildGuard(CommandLineArgs args)
+        {
+            var password = ParsePassword(args);
+
+            // The ban list defaults to a file in the data directory, and only if it is
+            // there: a host who never wrote one should not see a warning about a file
+            // they never asked for. An explicitly named file that does not exist is a
+            // different matter - that is a typo, and starting without bans while
+            // thinking they are on is the failure worth preventing.
+            var bansPath = args.bans.Present
+                ? args.bans.Value
+                : Path.Combine(ConfigUtilities.GetDataDirectory(), "dptdoom-bans.txt");
+
+            if (args.bans.Present && !File.Exists(bansPath))
+            {
+                throw new Exception("-bans: no such file: " + bansPath);
+            }
+
+            var warnings = new List<string>();
+            var bans = BanList.Load(bansPath, warnings);
+
+            foreach (var warning in warnings)
+            {
+                Console.WriteLine("Net: " + warning);
+            }
+
+            if (bans.Count > 0)
+            {
+                Console.WriteLine("Net: " + bans.Count + " ban rule(s) from " + bansPath + ".");
+            }
+
+            // The connection log is written only when asked for. A host who plays once
+            // should not leave a file behind, and a log nobody knows about is a log
+            // nobody reads.
+            var logPath = args.netlog.Present ? args.netlog.Value : null;
+
+            var guard = new HostGuard();
+            guard.Password = password ?? "";
+            guard.Bans = bans.Count > 0 ? bans : null;
+            guard.Log = logPath == null ? null : new ConnectionLog(logPath);
+
+            if (guard.Password.Length == 0 && guard.Bans == null && guard.Log == null)
+            {
+                return null;
+            }
+
+            return guard;
+        }
+
         private static NetSession Join(CommandLineArgs args, GameContent content, StatusHandler status, int port, string name)
         {
+            // Only the password matters on this side: the ban list is the host's, and a
+            // log of a guest's own arrivals would have nothing to record.
             var password = ParsePassword(args);
 
             var directHost = (string)null;

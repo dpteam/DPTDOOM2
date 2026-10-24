@@ -92,6 +92,20 @@ namespace DPTDOOM.Launcher
         /// </summary>
         public string Password = "";
 
+        /// <summary>
+        /// Where the host's ban list is, or empty for none.
+        ///
+        /// A path rather than a list in the settings: the file format is shared with the
+        /// master, so an operator keeps one file beside the game instead of retyping
+        /// rules into a dialog that cannot show comments or expiry.
+        /// </summary>
+        public string BanList = "";
+
+        /// <summary>
+        /// Where the host appends who joined, who left and who was refused, or empty.
+        /// </summary>
+        public string NetLog = "";
+
         public string Encode()
         {
             var flags = 0;
@@ -122,7 +136,9 @@ namespace DPTDOOM.Launcher
                 Relay ? "1" : "0",
                 Players.ToString(CultureInfo.InvariantCulture),
                 HostBots.ToString(CultureInfo.InvariantCulture),
-                Password ?? ""
+                Password ?? "",
+                BanList ?? "",
+                NetLog ?? ""
             });
         }
 
@@ -176,6 +192,8 @@ namespace DPTDOOM.Launcher
             state.Players = ParseInt(Field(fields, 15), 2, 4, 2);
             state.HostBots = ParseInt(Field(fields, 16), 0, 3, 0);
             state.Password = Field(fields, 17);
+            state.BanList = Field(fields, 18);
+            state.NetLog = Field(fields, 19);
 
             return state;
         }

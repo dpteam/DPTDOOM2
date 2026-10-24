@@ -252,7 +252,33 @@ Pump 500
 $openPreview = Invoke-Page "document.getElementById('preview').innerHTML"
 Assert-True ($openPreview -notlike "*-password*") "an empty password stays an open session"
 
-# 15. The server browser shows a round trip and sorts by it.
+# 15. The host's ban list and connection log reach the command line.
+#
+# Both are host-only: a guest that passed -bans would be configuring a policy it has
+# no authority over, and the game would ignore it - a field that looks like it does
+# something and does nothing is the failure this script exists to catch.
+Invoke-Page "document.getElementById('banlist').value='C:\\games\\bans.txt';document.getElementById('banlist').onchange();document.getElementById('netlog').value='C:\\games\\net.log';document.getElementById('netlog').onchange();" | Out-Null
+Pump 500
+
+$policyPreview = Invoke-Page "document.getElementById('preview').innerHTML"
+Assert-True ($policyPreview -like "*-bans*games*bans.txt*") "the ban list reaches the host command line"
+Assert-True ($policyPreview -like "*-netlog*games*net.log*") "the connection log reaches it too"
+
+Invoke-Page "var b=document.querySelectorAll('[data-mode]');b[2].onclick();" | Out-Null
+Pump 500
+
+$guestPolicyPreview = Invoke-Page "document.getElementById('preview').innerHTML"
+Assert-True ($guestPolicyPreview -notlike "*-bans*") "a guest does not get the host's ban list"
+Assert-True ($guestPolicyPreview -notlike "*-netlog*") "and does not open the host's log"
+
+Invoke-Page "var b=document.querySelectorAll('[data-mode]');b[1].onclick();document.getElementById('banlist').value='';document.getElementById('banlist').onchange();document.getElementById('netlog').value='';document.getElementById('netlog').onchange();" | Out-Null
+Pump 500
+
+$noPolicyPreview = Invoke-Page "document.getElementById('preview').innerHTML"
+Assert-True ($noPolicyPreview -notlike "*-bans*") "an empty ban list means no ban list"
+Assert-True ($noPolicyPreview -notlike "*-netlog*") "an empty log path writes no file"
+
+# 16. The server browser shows a round trip and sorts by it.
 #
 # The ping is measured by the host as a TCP handshake to the game port, so what is
 # checked here is only that it reaches the page and orders the list: a row with no

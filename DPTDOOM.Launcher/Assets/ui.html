@@ -113,12 +113,18 @@
           <label>Ботов на хосте<input id="hostbots" type="number" min="0" max="3" value="0"></label>
           <label class="check"><input id="relay" type="checkbox">Хостить через relay</label>
           <label>Пароль сессии<input id="password" type="password" maxlength="64" spellcheck="false" placeholder="пусто — пускать всех"></label>
+          <label>Банлист<input id="banlist" type="text" spellcheck="false" placeholder="пусто — никого не банить"></label>
+          <label>Лог подключений<input id="netlog" type="text" spellcheck="false" placeholder="пусто — не писать файл"></label>
           <label>Relay-сессия · гостю<input id="relaySession" type="text" maxlength="32" spellcheck="false" placeholder="32 hex-символа от хоста"></label>
           <p class="hint">Одинаковые ресурсы, карта и правила на обеих сторонах.
              Хост ждёт игрока до 5 минут.</p>
           <p class="hint">Пароль нужен только чтобы не зашли случайные люди: он
              передаётся открытым текстом, как и весь трафик сессии, и не скрывает
              игру. Пустое поле — пускать всех.</p>
+          <p class="hint">Банлист — путь к текстовому файлу: по строке на адрес,
+             подсеть (<code>10.0.0.0/8</code>) или ник (<code>name troll</code>),
+             можно с <code>until 2026-01-01T00:00:00Z</code>. Лог подключений —
+             путь к файлу, куда пишется, кто зашёл, кто вышел и почему.</p>
           <p class="hint">Relay идёт через master, адрес — в разделе «Серверы».
              Хост не открывает порт и не пробрасывает его на роутере: обе стороны
              подключаются наружу, master их соединяет. Прямое подключение
