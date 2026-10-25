@@ -641,7 +641,7 @@ namespace DPTDOOM
                 // Only when something actually came out of it. A DECORATE file whose every
                 // actor was refused has its problems reported below, and handing the library
                 // an empty script would add "no actor definitions found" on top of them.
-                if (decorateScript.Contains("fn Thing_"))
+                if (decorateScript.Contains(ScriptSyntax.ActorPrefix))
                 {
                     library.Add(decorateScript, "DECORATE", DoomInfo.MobjInfos);
                 }

@@ -202,10 +202,13 @@ namespace DPTDOOM.Scripting
                 case "break": return TokenKind.Break;
                 case "continue": return TokenKind.Continue;
                 case "var": return TokenKind.Var;
-                case "fn": return TokenKind.Function;
                 case "true": return TokenKind.True;
                 case "false": return TokenKind.False;
-                default: return TokenKind.Identifier;
+                default:
+                    // The function keyword is read from ScriptSyntax so that renaming it is one
+                    // edit rather than a search: `fn` today, `actor` tomorrow. Everything else
+                    // above is structure and stays here.
+                    return name == ScriptSyntax.FunctionKeyword ? TokenKind.Function : TokenKind.Identifier;
             }
         }
 

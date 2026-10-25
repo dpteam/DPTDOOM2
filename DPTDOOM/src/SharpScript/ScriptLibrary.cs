@@ -128,7 +128,8 @@ namespace DPTDOOM.Scripting
                 // Only when no actor-looking function was written at all. A script whose
                 // only actor name is wrong already has a message naming the mistake, and
                 // adding "no actors found" on top of it would report one cause twice.
-                problems.Add(source + ": no actor definitions found; name them Thing_<DoomEdNum>");
+                problems.Add(source + ": no actor definitions found; name them " +
+                             ScriptSyntax.ActorPrefix + "<DoomEdNum>");
             }
 
             var entry = new Compiled();
@@ -202,27 +203,11 @@ namespace DPTDOOM.Scripting
         /// <summary>
         /// Whether <paramref name="name"/> describes an actor, and which one.
         ///
-        /// <c>Thing_3004</c> is the form. DoomEdNum is used rather than a friendly name
-        /// because it is the one identifier that already exists everywhere: in the map
-        /// format, in every editor, and in the actor table. ZDoom's names ("Zombieman",
-        /// "Imp") are an invention of that port, and inventing a second naming scheme
-        /// here would mean every modder has to learn which of two names applies.
+        /// The spelling lives in <see cref="ScriptSyntax"/>, so renaming the prefix is one edit.
         /// </summary>
         public static bool TryParseActorName(string name, out int doomEdNum)
         {
-            doomEdNum = 0;
-
-            const string prefix = "Thing_";
-
-            if (name == null || !name.StartsWith(prefix, StringComparison.Ordinal))
-            {
-                return false;
-            }
-
-            var number = name.Substring(prefix.Length);
-
-            return number.Length > 0 &&
-                   int.TryParse(number, NumberStyles.None, CultureInfo.InvariantCulture, out doomEdNum);
+            return ScriptSyntax.TryParseActorName(name, out doomEdNum);
         }
 
         /// <summary>

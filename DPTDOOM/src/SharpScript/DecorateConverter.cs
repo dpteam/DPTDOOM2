@@ -266,7 +266,8 @@ namespace DPTDOOM.Scripting
                     continue;
                 }
 
-                script.Append("\nfn Thing_").Append(target.DoomEdNum).Append("() {\n");
+                script.Append("\n").Append(ScriptSyntax.ActorDefinitionHeader(target.DoomEdNum))
+                      .Append('\n');
 
                 foreach (var pair in actor.Numbers)
                 {

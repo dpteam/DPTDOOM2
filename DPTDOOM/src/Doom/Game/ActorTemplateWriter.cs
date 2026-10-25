@@ -16,6 +16,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
+using DPTDOOM.Scripting;
 
 namespace DPTDOOM
 {
@@ -363,7 +364,7 @@ namespace DPTDOOM
         private static void WriteActor(StringBuilder target, MobjInfo info)
         {
             target.Append("\n// ").Append(info.DoomEdNum).Append("\n");
-            target.Append("fn Thing_").Append(info.DoomEdNum).Append("() {\n");
+            target.Append(ScriptSyntax.ActorDefinitionHeader(info.DoomEdNum)).Append('\n');
 
             Number(target, "Health", info.SpawnHealth);
             Number(target, "Speed", info.Speed);
@@ -522,7 +523,7 @@ namespace DPTDOOM
 
             text.Append("What an entry looks like\n");
             text.Append("-----------------------\n\n");
-            text.Append("    fn Thing_3004() {\n");
+            text.Append(ScriptSyntax.ActorDefinitionHeader(3004)).Append("\n");
             text.Append("        Health(20);\n");
             text.Append("        Speed(8);\n");
             text.Append("        SpawnState(\"PossStnd\");\n");
