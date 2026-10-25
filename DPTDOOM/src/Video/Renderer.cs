@@ -234,8 +234,13 @@ namespace DPTDOOM.Video
                         // Wrapped, because a chat message may be ninety-six characters and the
                         // screen holds about forty per line. Drawing it as one line silently cut
                         // the rest off at the right edge.
+                        //
+                        // The bottom is the top of the status bar, not the bottom of the screen.
+                        // The bar is drawn before this, so a message long enough to reach it would
+                        // be painted on top of the health and ammo - which reads as a rendering
+                        // fault rather than as a long message.
                         screen.DrawTextWrapped(consolePlayer.Message, 0, 7 * scale, scale,
-                                               screen.Height);
+                                               screen.Height - StatusBarRenderer.Height * scale);
 
                         Profile.Add(RenderProfile.Section.Hud, Profile.Stamp() - hudStart);
                     }

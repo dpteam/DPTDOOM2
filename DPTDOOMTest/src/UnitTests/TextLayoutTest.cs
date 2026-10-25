@@ -182,6 +182,56 @@ namespace DPTDOOMTest.UnitTests
             Dump(screen, palette, "message-wrap.bmp");
         }
 
+        /// <summary>
+        /// A message long enough to reach the bottom stops above the status bar.
+        ///
+        /// The bar is drawn before the message, so text that reached it would be painted over the
+        /// health and ammo - which reads as a rendering fault rather than as a long message. The
+        /// limit is passed in by the renderer as the top of the bar, and this checks that nothing
+        /// is drawn below it.
+        /// </summary>
+        [TestMethod]
+        public void AMessageTooLongForTheRoomStopsAboveTheStatusBar()
+        {
+            if (!File.Exists(WadPath.Doom2))
+            {
+                Assert.Inconclusive("No IWAD to take the font from");
+                return;
+            }
+
+            DrawScreen screen;
+
+            using (var content = GameContent.CreateDummy(WadPath.Doom2))
+            {
+                screen = new DrawScreen(content.Wad, 320, 200);
+            }
+
+            var barTop = 200 - StatusBarRenderer.Height;
+
+            var message = string.Empty;
+
+            for (var i = 0; i < 40; i++)
+            {
+                message += "word ";
+            }
+
+            screen.DrawTextWrapped(message, 0, 7, 1, barTop);
+
+            // The buffer starts at zero and glyph pixels are not zero, so anything below the bar top
+            // means the message was drawn over the status bar.
+            //
+            // The frame is stored by columns - `height * x + y` - not by rows. Reading it as rows
+            // gives a picture of stripes, which is a trap this project has fallen into before.
+            for (var y = barTop; y < 200; y++)
+            {
+                for (var x = 0; x < 320; x++)
+                {
+                    Assert.AreEqual(0, screen.Data[200 * x + y],
+                        "a pixel below the status bar top at " + x + "," + y);
+                }
+            }
+        }
+
         private static int Measure(string line)
         {
             var width = 0;
