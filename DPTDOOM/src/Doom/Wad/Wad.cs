@@ -336,6 +336,29 @@ namespace DPTDOOM
             return -1;
         }
 
+        /// <summary>
+        /// Every lump with this name, in WAD order.
+        ///
+        /// <see cref="GetLumpNumber"/> deliberately returns only the last one, which is right for
+        /// replacing a resource but wrong for languages whose lumps are concatenated. DECORATE is
+        /// the important case: DOOM ACE's ademo1.wad carries dozens of DECORATE lumps, and reading
+        /// only the last silently discarded most of its actors.
+        /// </summary>
+        public int[] GetLumpNumbers(string name)
+        {
+            var numbers = new List<int>();
+
+            for (var i = 0; i < lumpInfos.Count; i++)
+            {
+                if (lumpInfos[i].Name == name)
+                {
+                    numbers.Add(i);
+                }
+            }
+
+            return numbers.ToArray();
+        }
+
         public int GetLumpSize(int number)
         {
             return lumpInfos[number].Size;

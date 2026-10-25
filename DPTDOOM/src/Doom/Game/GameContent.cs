@@ -646,10 +646,10 @@ namespace DPTDOOM
             var paths = args.script.Present ? args.script.Value : new string[0];
             var decoratePaths = args.decorate.Present ? args.decorate.Value : new string[0];
             var lump = wad.GetLumpNumber("SCRIPTS");
-            var decorateLump = wad.GetLumpNumber("DECORATE");
+            var decorateLumps = wad.GetLumpNumbers("DECORATE");
 
             if (paths.Length == 0 && lump == -1 &&
-                decoratePaths.Length == 0 && decorateLump == -1)
+                decoratePaths.Length == 0 && decorateLumps.Length == 0)
             {
                 return;
             }
@@ -685,14 +685,25 @@ namespace DPTDOOM
             // own copy of all three, and the two would drift.
             var converted = new System.Text.StringBuilder();
 
+            // One compilation unit per source. Two sources may legitimately refine the same
+            // actor; concatenating them as text made the script parser reject the second
+            // Thing_3001 as a duplicate and lose both changes. Separate units apply in order,
+            // so the later one wins, while the whole library is still applied only once.
             foreach (var path in decoratePaths)
             {
                 try
                 {
-                    converted.Append(DecorateConverter.Convert(
+                    var text = DecorateConverter.Convert(
                         System.IO.File.ReadAllText(path),
                         DoomInfo.MobjInfos,
-                        decorateProblems));
+                        decorateProblems);
+
+                    converted.Append(text);
+
+                    if (text.Contains(ScriptSyntax.ActorPrefix))
+                    {
+                        library.Add(text, path, DoomInfo.MobjInfos);
+                    }
                 }
                 catch (Exception e)
                 {
@@ -700,25 +711,43 @@ namespace DPTDOOM
                 }
             }
 
-            if (decorateLump != -1)
+            // Every DECORATE lump, in WAD order. GetLumpNumber returns only the last, which is
+            // correct for replacing one resource but loses whole actors here: DOOM ACE's
+            // ademo1.wad carries dozens of them. Problems are collected per lump so the report can
+            // say which one a line belongs to instead of printing dozens of indistinguishable
+            // "DECORATE line 1" messages.
+            for (var i = 0; i < decorateLumps.Length; i++)
             {
-                converted.Append(DecorateConverter.Convert(
-                    System.Text.Encoding.UTF8.GetString(wad.ReadLump(decorateLump)),
-                    DoomInfo.MobjInfos,
-                    decorateProblems));
+                var lumpProblems = new System.Collections.Generic.List<string>();
+
+                try
+                {
+                    var text = DecorateConverter.Convert(
+                        System.Text.Encoding.UTF8.GetString(wad.ReadLump(decorateLumps[i])),
+                        DoomInfo.MobjInfos,
+                        lumpProblems);
+
+                    converted.Append(text);
+
+                    if (text.Contains(ScriptSyntax.ActorPrefix))
+                    {
+                        library.Add(text, "DECORATE lump " + (i + 1), DoomInfo.MobjInfos);
+                    }
+                }
+                catch (Exception e)
+                {
+                    lumpProblems.Add(e.Message);
+                }
+
+                foreach (var problem in lumpProblems)
+                {
+                    decorateProblems.Add("DECORATE lump " + (i + 1) + ": " + problem);
+                }
             }
 
             if (converted.Length > 0)
             {
                 decorateScript = converted.ToString();
-
-                // Only when something actually came out of it. A DECORATE file whose every
-                // actor was refused has its problems reported below, and handing the library
-                // an empty script would add "no actor definitions found" on top of them.
-                if (decorateScript.Contains(ScriptSyntax.ActorPrefix))
-                {
-                    library.Add(decorateScript, "DECORATE", DoomInfo.MobjInfos);
-                }
             }
 
             library.ApplyTo(DoomInfo.MobjInfos);
