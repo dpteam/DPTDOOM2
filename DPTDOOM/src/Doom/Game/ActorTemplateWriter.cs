@@ -142,8 +142,8 @@ namespace DPTDOOM
             var readme = new ActorTemplateFile();
             readme.Name = "README.txt";
 
-            // The count of types, not the length of the table: the table now includes the mod
-            // reserve, and reporting that as "types in the engine" overstated it by 32.
+            // The count of types, not the length of the table: the table includes the mod
+            // reserve, and reporting its slots as engine types would overstate the total.
             var total = monsterCount + itemCount + decorationCount + skipped;
 
             var fingerprint = FingerprintOf(files);

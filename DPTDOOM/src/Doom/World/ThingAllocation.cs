@@ -365,6 +365,181 @@ namespace DPTDOOM
         }
 
         /// <summary>
+        /// Spawns one object with A_SpawnItemEx's position, velocity, angle and pointer flags.
+        ///
+        /// The relative-coordinate formulas follow ZDoom, including its deliberately inverted
+        /// left/right convention: positive y is right in relative mode, which is the opposite of
+        /// absolute mode. That sign is easy to reverse while "tidying up" the arithmetic.
+        ///
+        /// All expressions and the fail-chance draw have already happened before this call. The
+        /// fail chance is evaluated first by the caller, so an unsuccessful spawn consumes no
+        /// other random values and evaluates no other expression.
+        ///
+        /// Returns the spawned object, or null when a monster was blocked. There is no master
+        /// pointer in this engine, so flags that need one are reported by the converter rather than
+        /// being approximated here.
+        /// </summary>
+        public Mobj SpawnItemEx(Mobj source, SpawnItemExParams parameters)
+        {
+            var flags = parameters.Flags;
+            var angle = parameters.Angle;
+
+            if ((flags & SpawnItemExFlags.AbsoluteAngle) == 0)
+            {
+                angle += source.Angle;
+            }
+
+            var sin = Trig.Sin(angle);
+            var cos = Trig.Cos(angle);
+
+            Fixed x;
+            Fixed y;
+
+            if ((flags & SpawnItemExFlags.AbsolutePosition) != 0)
+            {
+                x = source.X + parameters.XOffset;
+                y = source.Y + parameters.YOffset;
+            }
+            else
+            {
+                x = source.X + parameters.XOffset * cos + parameters.YOffset * sin;
+                y = source.Y + parameters.XOffset * sin - parameters.YOffset * cos;
+            }
+
+            var velocityX = parameters.XVelocity;
+            var velocityY = parameters.YVelocity;
+            var velocityZ = parameters.ZVelocity;
+
+            if ((flags & SpawnItemExFlags.AbsoluteVelocity) == 0)
+            {
+                var rotatedX = velocityX * cos + velocityY * sin;
+                var rotatedY = velocityX * sin - velocityY * cos;
+
+                velocityX = rotatedX;
+                velocityY = rotatedY;
+            }
+
+            var spawned = SpawnMobj(x, y, source.Z + parameters.ZOffset, parameters.Type);
+
+            var originator = source;
+
+            if ((flags & SpawnItemExFlags.Originator) == 0)
+            {
+                // A projectile's owner is the first non-projectile above it, not necessarily its
+                // immediate target. The guard makes a malformed pointer chain harmless instead of
+                // turning a spawn into an infinite walk.
+                var hops = 0;
+
+                while (originator != null &&
+                       (originator.Flags & MobjFlags.Missile) != 0 &&
+                       originator.Target != null &&
+                       originator.Target != originator &&
+                       hops++ < 32)
+                {
+                    originator = originator.Target;
+                }
+            }
+
+            var isMonster = IsMonsterForSpawn(spawned);
+
+            if (isMonster && (flags & SpawnItemExFlags.NoCheckPosition) == 0 &&
+                !world.ThingMovement.CheckPosition(spawned, x, y))
+            {
+                // The monster is blocked, so it does not exist at all. Removing it through the
+                // normal path keeps the sector links and the item-respawn bookkeeping intact.
+                RemoveMobj(spawned);
+                return null;
+            }
+
+            if ((flags & SpawnItemExFlags.TransferPointers) != 0)
+            {
+                spawned.Target = source.Target;
+                spawned.Tracer = source.Tracer;
+            }
+            else if (!isMonster)
+            {
+                spawned.Target = originator;
+            }
+
+            if ((flags & SpawnItemExFlags.NoPointers) != 0)
+            {
+                spawned.Target = null;
+                spawned.Tracer = null;
+            }
+
+            if ((flags & SpawnItemExFlags.SetTarget) != 0)
+            {
+                spawned.Target = originator;
+            }
+
+            if ((flags & SpawnItemExFlags.SetTracer) != 0)
+            {
+                spawned.Tracer = originator;
+            }
+
+            if ((flags & SpawnItemExFlags.TransferTranslation) != 0)
+            {
+                spawned.Flags = (spawned.Flags & ~MobjFlags.Translation) |
+                                (source.Flags & MobjFlags.Translation);
+            }
+
+            if ((flags & SpawnItemExFlags.TransferAmbushFlag) != 0)
+            {
+                if ((source.Flags & MobjFlags.Ambush) != 0)
+                {
+                    spawned.Flags |= MobjFlags.Ambush;
+                }
+                else
+                {
+                    spawned.Flags &= ~MobjFlags.Ambush;
+                }
+            }
+
+            if ((flags & SpawnItemExFlags.TransferSpriteFrame) != 0)
+            {
+                spawned.Sprite = source.Sprite;
+                spawned.Frame = source.Frame;
+            }
+
+            if ((flags & SpawnItemExFlags.MultiplySpeed) != 0)
+            {
+                velocityX *= spawned.Info.Speed;
+                velocityY *= spawned.Info.Speed;
+                velocityZ *= spawned.Info.Speed;
+            }
+
+            spawned.MomX = velocityX;
+            spawned.MomY = velocityY;
+            spawned.MomZ = velocityZ;
+            spawned.Angle = angle;
+
+            if ((flags & SpawnItemExFlags.IsTarget) != 0)
+            {
+                source.Target = spawned;
+            }
+
+            if ((flags & SpawnItemExFlags.IsTracer) != 0)
+            {
+                source.Tracer = spawned;
+            }
+
+            return spawned;
+        }
+
+        /// <summary>
+        /// The spawn-time monster test. Items with a see state are not monsters merely because
+        /// they have one: a monster has health, is shootable, and is not a missile. This is the
+        /// only place that needs the distinction, so it does not add a field to MobjInfo.
+        /// </summary>
+        private static bool IsMonsterForSpawn(Mobj mobj)
+        {
+            return (mobj.Flags & MobjFlags.Missile) == 0 &&
+                   (mobj.Flags & MobjFlags.Shootable) != 0 &&
+                   mobj.Info.SpawnHealth > 0 &&
+                   mobj.Info.SeeState != MobjState.Null;
+        }
+
+        /// <summary>
         /// Get the speed of the given missile type.
         /// Some missiles have different speeds according to the game setting.
         /// </summary>

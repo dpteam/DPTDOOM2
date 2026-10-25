@@ -161,6 +161,11 @@ namespace DPTDOOM
 
         // Reserve for actors a mod brings. Appended, never inserted: the value is written
         // into save files and read back as an index, so vanilla numbers must not move.
+        //
+        // Custom0..Custom31 are the named part of the reserve. The engine also permits numeric
+        // types after Custom31, up to DoomInfo.CustomActorReserve; those slots deliberately have
+        // no enum members, because mods name actors through ActorNames rather than through a
+        // growing list of meaningless CustomN identifiers.
         Custom0,
         Custom1,
         Custom2,

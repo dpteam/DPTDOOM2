@@ -25,7 +25,14 @@ namespace DPTDOOM
         /// the actor table is indexed by type from the world, the save format and the
         /// renderer, so it cannot grow while a game is running.
         /// </summary>
-        public const int CustomActorReserve = 32;
+        /// <summary>
+        /// Extra actor slots for mods.
+        ///
+        /// 32 was enough for a demonstration but not for a real DECORATE collection: ademo1.wad
+        /// defines dozens of small effects, and they are actors too. The slots live at the tail of
+        /// the table, so vanilla type numbers, saves and hashes do not move.
+        /// </summary>
+        public const int CustomActorReserve = 256;
 
         private static MobjInfo[] mobjInfos;
         private static int customActorsUsed;

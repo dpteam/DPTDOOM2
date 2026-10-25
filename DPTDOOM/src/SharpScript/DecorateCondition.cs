@@ -62,6 +62,26 @@ namespace DPTDOOM.Scripting
         public static string Translate(string text, string actorName, int line,
                                        IList<string> problems)
         {
+            return TranslateCore(text, actorName, line, problems, "the jump is dropped");
+        }
+
+        /// <summary>
+        /// Translates a numeric expression used by an action such as A_SpawnItemEx.
+        ///
+        /// The grammar is the same as a condition: arithmetic, fixed literals and random(). The
+        /// difference is the consequence reported when a word is unknown: this is not a jump, so
+        /// saying "the jump is dropped" would send the modder looking at the wrong feature.
+        /// </summary>
+        public static string TranslateExpression(string text, string actorName, int line,
+                                                 IList<string> problems)
+        {
+            return TranslateCore(text, actorName, line, problems,
+                                 "that argument is replaced by zero");
+        }
+
+        private static string TranslateCore(string text, string actorName, int line,
+                                            IList<string> problems, string consequence)
+        {
             var reader = new Reader(text);
 
             try
@@ -71,8 +91,7 @@ namespace DPTDOOM.Scripting
                 if (!reader.AtEnd)
                 {
                     problems.Add(actorName + " line " + line + ": the condition '" + text.Trim() +
-                                 "' is not understood after '" + reader.Peek + "'; " +
-                                 "the jump is dropped");
+                                 "' is not understood after '" + reader.Peek + "'; " + consequence);
                     return null;
                 }
 
@@ -80,8 +99,7 @@ namespace DPTDOOM.Scripting
             }
             catch (Untranslatable e)
             {
-                problems.Add(actorName + " line " + line + ": " + e.Message +
-                             "; the jump is dropped");
+                problems.Add(actorName + " line " + line + ": " + e.Message + "; " + consequence);
                 return null;
             }
         }

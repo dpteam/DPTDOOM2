@@ -70,24 +70,35 @@ namespace DPTDOOM.Scripting
         /// </summary>
         public bool Evaluate(World world, Mobj mobj)
         {
+            return EvaluateValue(world, mobj).AsBool();
+        }
+
+        /// <summary>
+        /// Evaluates the function as a value, not just as a yes/no answer.
+        ///
+        /// A_SpawnItemEx needs the same machinery as a conditional jump: an expression may contain
+        /// random(), and it must be evaluated when the frame runs rather than when the mod is
+        /// loaded. Returning zero on a reported failure gives the caller a safe inert value, just
+        /// as a failed condition answers false.
+        /// </summary>
+        public ScriptValue EvaluateValue(World world, Mobj mobj)
+        {
             this.world = world;
             this.mobj = mobj;
 
             try
             {
-                var value = new ScriptInterpreter(unit, host).Call(function);
-
-                return value.AsBool();
+                return new ScriptInterpreter(unit, host).Call(function);
             }
             catch (ScriptException e)
             {
                 Report(e.Message);
-                return false;
+                return ScriptValue.FromInt(0);
             }
             catch (Exception e)
             {
                 Report(e.Message);
-                return false;
+                return ScriptValue.FromInt(0);
             }
         }
 

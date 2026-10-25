@@ -138,6 +138,25 @@ namespace DPTDOOM.Scripting
         /// <summary>How far in front of the actor the spawned thing appears.</summary>
         public int SpawnDistance;
 
+        /// <summary>True when the frame's action was A_SpawnItemEx.</summary>
+        public bool HasSpawnItemEx;
+
+        /// <summary>Actor type to spawn, by DECORATE name.</summary>
+        public string SpawnExName;
+
+        /// <summary>
+        /// The seven numeric arguments, already translated to SharpScript expressions:
+        /// x/y/z offsets, x/y/z velocities and angle. Kept as text because random() must run
+        /// when the frame runs, not while the mod is being loaded.
+        /// </summary>
+        public string[] SpawnExValues;
+
+        /// <summary>The expression for failchance, or null when there is no chance.</summary>
+        public string SpawnExFailChance;
+
+        /// <summary>A_SpawnItemEx's supported flags, summed from SXF_ names.</summary>
+        public int SpawnExFlags;
+
         /// <summary>
         /// True when the frame's action was A_LookEx.
         ///
@@ -239,6 +258,15 @@ namespace DPTDOOM.Scripting
     public static class DecorateConverter
     {
         /// <summary>
+        /// DoomEdNums assigned to actors that DECORATE names but does not number.
+        ///
+        /// These are internal identities only: a map thing is 16-bit and can never ask for them,
+        /// so they cannot collide with real map placement. They let the existing actor table,
+        /// script names and A_SpawnItemEx work without inventing a second type system.
+        /// </summary>
+        private const int FirstInternalDoomEdNum = 100000;
+
+        /// <summary>
         /// The properties this converter knows how to map, by DECORATE spelling.
         ///
         /// The values are the function names in the actor API, which are not always the
@@ -304,11 +332,35 @@ namespace DPTDOOM.Scripting
 
             script.Append("// Generated from DECORATE. Edits are lost: change the DECORATE file.\n");
 
+            // Resolve every target before emitting any state. A_SpawnItemEx can name the actor it
+            // belongs to, or one defined later in the file, so registering names as a side effect of
+            // emission would make valid references depend on their position in the text.
+            var targets = new Dictionary<DecorateActor, MobjInfo>();
+
             foreach (var actor in actors)
             {
                 var target = ResolveTarget(actor, table, problems);
 
                 if (target == null)
+                {
+                    continue;
+                }
+
+                targets[actor] = target;
+
+                // The friendly name is needed by A_SpawnItemEx and by a later block that refines
+                // the same actor. Register it for every real target, not only for an unnumbered
+                // actor: a mod may give a custom actor an explicit spawnid and then spawn it by
+                // name. The name is registered only after a real target exists, so a refused block
+                // cannot leave a name pointing at nothing.
+                ActorNames.Register(actor.Name, DoomInfo.TypeOf(target.DoomEdNum));
+            }
+
+            foreach (var actor in actors)
+            {
+                MobjInfo target;
+
+                if (!targets.TryGetValue(actor, out target))
                 {
                     continue;
                 }
@@ -387,10 +439,11 @@ namespace DPTDOOM.Scripting
 
                 script.Append("}\n");
 
-                // Conditions come after the definition they belong to, as top-level functions:
-                // the state layer looks them up by name when the frame ends, which is long after
-                // this script has run.
+                // Conditions and spawn expressions come after the definition they belong to, as
+                // top-level functions: the state layer looks them up by name when the frame runs,
+                // which is long after this script has run.
                 EmitConditions(script, actor);
+                EmitSpawnItemExpressions(script, actor);
             }
 
             return script.ToString();
@@ -411,6 +464,20 @@ namespace DPTDOOM.Scripting
         {
             var number = actor.DoomEdNum;
             var parentType = -1;
+
+            // A named actor without a number may already have been defined in an earlier lump.
+            // Resolve that name before allocating anything: refining an actor must not consume a
+            // second slot. Built-in names resolve through the same path, so "ACTOR DoomImp" works
+            // just as a custom "ACTOR kgGibs" does.
+            if (number < 0)
+            {
+                var namedType = ActorNames.TypeOf(actor.Name);
+
+                if (namedType >= 0 && namedType < table.Length)
+                {
+                    number = table[namedType].DoomEdNum;
+                }
+            }
 
             if (actor.ParentName != null)
             {
@@ -450,9 +517,18 @@ namespace DPTDOOM.Scripting
 
             if (number < 0)
             {
-                problems.Add(actor.Name + " line " + actor.Line + ": the block names no DoomEdNum " +
-                             "this converter can resolve, so nothing is changed");
-                return null;
+                // A DECORATE actor does not need a DoomEdNum. Give it an internal one so the
+                // existing actor table and script names can represent it. Only a block with no
+                // definition at all is left alone; an unsupported property still gets its report
+                // below rather than being silently swallowed.
+                if (actor.Numbers.Count == 0 && actor.Flags.Count == 0 &&
+                    actor.Sounds.Count == 0 && actor.Chains.Count == 0 &&
+                    actor.Unsupported.Count == 0)
+                {
+                    return null;
+                }
+
+                number = NextInternalDoomEdNum(table);
             }
 
             var existing = DoomInfo.TypeOf(number);
@@ -477,6 +553,32 @@ namespace DPTDOOM.Scripting
             }
 
             return DoomInfo.MobjInfos[type];
+        }
+
+        private static int NextInternalDoomEdNum(MobjInfo[] table)
+        {
+            for (var candidate = FirstInternalDoomEdNum; candidate < int.MaxValue; candidate++)
+            {
+                var used = false;
+
+                for (var i = 0; i < table.Length; i++)
+                {
+                    if (table[i].DoomEdNum == candidate)
+                    {
+                        used = true;
+                        break;
+                    }
+                }
+
+                if (!used)
+                {
+                    return candidate;
+                }
+            }
+
+            // There is no realistic way to reach this, but returning an existing number would be
+            // worse than exhausting the reserve: it would silently rewrite somebody else's actor.
+            return FirstInternalDoomEdNum;
         }
 
         private static bool TryResolveName(string name, out int number)
@@ -718,6 +820,39 @@ namespace DPTDOOM.Scripting
                               .Append(");\n");
                     }
 
+                    if (frame.HasSpawnItemEx)
+                    {
+                        // Name resolution happens here, after every actor in the file has been
+                        // given a type. The frame is read before that table exists, so checking
+                        // the name at read time rejected a valid custom actor - including the
+                        // actor that owns this very frame.
+                        if (ActorNames.TypeOf(frame.SpawnExName) < 0)
+                        {
+                            problems.Add(actor.Name + " line " + frame.Line + ": no such actor '" +
+                                         frame.SpawnExName + "' for 'A_SpawnItemEx', so the frame " +
+                                         "spawns nothing. This engine knows the built-in actors " +
+                                         "by their ZDoom names");
+                            continue;
+                        }
+
+                        script.Append("    SpawnItemEx(\"").Append(name).Append("\", \"")
+                              .Append(frame.SpawnExName).Append("\", ");
+
+                        for (var value = 0; value < frame.SpawnExValues.Length; value++)
+                        {
+                            script.Append('"')
+                                  .Append(SpawnExFunctionName(actor, chain.Label, i + 1, value))
+                                  .Append("\", ");
+                        }
+
+                        var failName = frame.SpawnExFailChance == null
+                            ? ""
+                            : SpawnExFunctionName(actor, chain.Label, i + 1, 7);
+
+                        script.Append(frame.SpawnExFlags.ToString(CultureInfo.InvariantCulture))
+                              .Append(", \"").Append(failName).Append("\");\n");
+                    }
+
                     if (frame.HasLookEx)
                     {
                         // The see state is written as a frame of this actor when the mod named one
@@ -807,6 +942,65 @@ namespace DPTDOOM.Scripting
 
             name.Append('_').Append(index.ToString(CultureInfo.InvariantCulture));
             return name.ToString();
+        }
+
+        /// <summary>
+        /// The function that evaluates one A_SpawnItemEx numeric argument at play time.
+        ///
+        /// The name is derived from the actor, label, frame and argument, so it remains stable when
+        /// the emission order changes and cannot collide with a conditional jump's Cond_ prefix.
+        /// </summary>
+        private static string SpawnExFunctionName(DecorateActor actor, string label, int index,
+                                                  int argument)
+        {
+            return "SpawnEx_" + ConditionName(actor, label, index).Substring(5) + "_" +
+                   argument.ToString(CultureInfo.InvariantCulture);
+        }
+
+        /// <summary>
+        /// Writes the expressions as functions rather than folding them into the action call.
+        /// A function is needed because random() must draw when the frame runs; evaluating while
+        /// the mod loads would make every run identical and would draw from no world at all.
+        /// </summary>
+        private static void EmitSpawnItemExpressions(StringBuilder script, DecorateActor actor)
+        {
+            for (var chainIndex = 0; chainIndex < actor.Chains.Count; chainIndex++)
+            {
+                var chain = actor.Chains[chainIndex];
+
+                for (var i = 0; i < chain.Frames.Count; i++)
+                {
+                    var frame = chain.Frames[i];
+
+                    if (!frame.HasSpawnItemEx)
+                    {
+                        continue;
+                    }
+
+                    for (var value = 0; value < frame.SpawnExValues.Length; value++)
+                    {
+                        EmitSpawnExpression(script, actor, chain.Label, i + 1, value,
+                            frame.SpawnExValues[value]);
+                    }
+
+                    if (frame.SpawnExFailChance != null)
+                    {
+                        EmitSpawnExpression(script, actor, chain.Label, i + 1, 7,
+                            frame.SpawnExFailChance);
+                    }
+                }
+            }
+        }
+
+        private static void EmitSpawnExpression(StringBuilder script, DecorateActor actor,
+                                                string label, int index, int argument,
+                                                string expression)
+        {
+            script.Append("\n").Append(ScriptSyntax.FunctionKeyword).Append(' ')
+                  .Append(SpawnExFunctionName(actor, label, index, argument))
+                  .Append("() {\n")
+                  .Append("    return ").Append(expression).Append(";\n")
+                  .Append("}\n");
         }
 
         /// <summary>
@@ -1508,6 +1702,12 @@ namespace DPTDOOM.Scripting
                 return;
             }
 
+            if (string.Equals(frame.Action, "A_SpawnItemEx", StringComparison.OrdinalIgnoreCase))
+            {
+                ReadSpawnItemEx(arguments, actor, frame, problems);
+                return;
+            }
+
             if (string.Equals(frame.Action, "A_LookEx", StringComparison.OrdinalIgnoreCase))
             {
                 ReadLookEx(arguments, actor, frame, problems);
@@ -1790,6 +1990,233 @@ namespace DPTDOOM.Scripting
             ReportIgnoredArguments(arguments, 2, actor, frame, problems, "A_SpawnItem", "zheight");
 
             frame.Action = "";
+        }
+
+        /// <summary>
+        /// A_SpawnItemEx: an object with offsets, velocity, angle, flags and a fail chance.
+        ///
+        /// The signature is taken from ZDoom's attacks.zs, not from memory:
+        /// (missile, xofs, yofs, zofs, xvel, yvel, zvel, angle, flags, failchance, tid).
+        /// The numeric arguments are translated rather than evaluated now: ademo1.wad uses
+        /// expressions such as "15 - random(0,255) * 0.1171875", and random() belongs to the
+        /// moment the frame runs, on the world generator.
+        /// </summary>
+        private static void ReadSpawnItemEx(List<List<Token>> arguments, DecorateActor actor,
+                                            StateFrame frame, IList<string> problems)
+        {
+            if (arguments.Count < 1 || arguments[0].Count != 1)
+            {
+                problems.Add(actor.Name + " line " + frame.Line +
+                             ": 'A_SpawnItemEx' needs an actor name, so the frame spawns nothing");
+                frame.Action = "";
+                return;
+            }
+
+            var name = arguments[0][0].Text;
+
+            frame.SpawnExName = name;
+            frame.SpawnExValues = new string[7];
+            frame.SpawnExFlags = 0;
+            frame.HasSpawnItemEx = true;
+            frame.Action = "";
+
+            for (var i = 0; i < frame.SpawnExValues.Length; i++)
+            {
+                frame.SpawnExValues[i] = ReadSpawnExpression(
+                    arguments, i + 1, actor, frame, problems, "0");
+            }
+
+            if (arguments.Count > 8 && arguments[8].Count > 0)
+            {
+                int flags;
+                string unknown;
+                string unsupported;
+
+                if (TryReadSpawnFlags(arguments[8], out flags, out unknown, out unsupported))
+                {
+                    frame.SpawnExFlags = flags;
+                }
+                else
+                {
+                    problems.Add(actor.Name + " line " + frame.Line + ": 'A_SpawnItemEx' flag '" +
+                                 unknown + "' is not one this engine knows, so the spawn keeps " +
+                                 "the flags it did understand");
+                    frame.SpawnExFlags = flags;
+                }
+
+                if (unsupported.Length > 0)
+                {
+                    problems.Add(actor.Name + " line " + frame.Line + ": 'A_SpawnItemEx' flags " +
+                                 unsupported + " are not supported here (master, pitch, render, " +
+                                 "specials or TIDs have no counterpart); the supported flags " +
+                                 "still run");
+                }
+
+                if ((flags & SpawnItemExFlags.TransferPointers) != 0)
+                {
+                    problems.Add(actor.Name + " line " + frame.Line + ": 'A_SpawnItemEx' " +
+                                 "SXF_TRANSFERPOINTERS copies target and tracer here; the master " +
+                                 "pointer has no counterpart in this engine");
+                }
+            }
+
+            if (arguments.Count > 9 && arguments[9].Count > 0)
+            {
+                frame.SpawnExFailChance = ReadSpawnExpression(
+                    arguments, 9, actor, frame, problems, "0");
+            }
+
+            if (arguments.Count > 10 && arguments[10].Count > 0)
+            {
+                int tid;
+
+                if (!TryReadWholeNumber(arguments[10], out tid))
+                {
+                    problems.Add(actor.Name + " line " + frame.Line + ": 'A_SpawnItemEx' tid must " +
+                                 "be a whole number, so it is ignored");
+                }
+                else if (tid != 0)
+                {
+                    problems.Add(actor.Name + " line " + frame.Line + ": 'A_SpawnItemEx' tid " +
+                                 tid.ToString(CultureInfo.InvariantCulture) +
+                                 " is ignored - this engine has no actor thing IDs");
+                }
+            }
+        }
+
+        /// <summary>Joins the tokens of one numeric argument and translates it for later evaluation.</summary>
+        private static string ReadSpawnExpression(List<List<Token>> arguments, int index,
+                                                  DecorateActor actor, StateFrame frame,
+                                                  IList<string> problems, string fallback)
+        {
+            if (index >= arguments.Count || arguments[index].Count == 0)
+            {
+                return fallback;
+            }
+
+            var text = JoinTokens(arguments[index]);
+            var translated = DecorateCondition.TranslateExpression(
+                text, actor.Name, frame.Line, problems);
+
+            return translated ?? fallback;
+        }
+
+        /// <summary>
+        /// Reads SXF_ names, returning the flags this engine can honour and naming the others.
+        /// A wrong name must not erase the useful part of the call.
+        /// </summary>
+        private static bool TryReadSpawnFlags(List<Token> argument, out int flags,
+                                              out string unknown, out string unsupported)
+        {
+            flags = 0;
+            unknown = null;
+            unsupported = "";
+            var unsupportedNames = new List<string>();
+
+            var token = argument[0];
+
+            if (argument.Count == 1 && token.IsNumber)
+            {
+                flags = token.Number;
+
+                var unsupportedBits = flags & ~SpawnItemExFlags.Supported;
+                if (unsupportedBits != 0)
+                {
+                    unsupported = "0x" + unsupportedBits.ToString("x", CultureInfo.InvariantCulture);
+                }
+
+                flags &= SpawnItemExFlags.Supported;
+                return true;
+            }
+
+            // The DECORATE reader separates whitespace, so "A | B" arrives as three tokens while
+            // "A|B" arrives as one. Join them before splitting on the bar, or the common spaced
+            // spelling would be rejected as an unreadable argument.
+            var text = JoinTokens(argument).Replace(" ", "");
+
+            foreach (var part in text.Split('|'))
+            {
+                var name = part.Trim();
+
+                if (name.Length == 0)
+                {
+                    continue;
+                }
+
+                int bit;
+
+                if (TrySpawnFlag(name, out bit))
+                {
+                    flags |= bit;
+                }
+                else if (IsUnsupportedSpawnFlag(name))
+                {
+                    if (!unsupportedNames.Contains(name))
+                    {
+                        unsupportedNames.Add(name);
+                    }
+                }
+                else
+                {
+                    unknown = name;
+                    return false;
+                }
+            }
+
+            unsupported = string.Join("|", unsupportedNames.ToArray());
+            return true;
+        }
+
+        private static bool TrySpawnFlag(string name, out int bit)
+        {
+            bit = 0;
+
+            switch (name.ToUpperInvariant())
+            {
+                case "SXF_TRANSFERTRANSLATION": bit = SpawnItemExFlags.TransferTranslation; break;
+                case "SXF_ABSOLUTEPOSITION": bit = SpawnItemExFlags.AbsolutePosition; break;
+                case "SXF_ABSOLUTEANGLE": bit = SpawnItemExFlags.AbsoluteAngle; break;
+                case "SXF_ABSOLUTEVELOCITY":
+                case "SXF_ABSOLUTEMOMENTUM": bit = SpawnItemExFlags.AbsoluteVelocity; break;
+                case "SXF_NOCHECKPOSITION": bit = SpawnItemExFlags.NoCheckPosition; break;
+                case "SXF_TRANSFERAMBUSHFLAG": bit = SpawnItemExFlags.TransferAmbushFlag; break;
+                case "SXF_TRANSFERPOINTERS": bit = SpawnItemExFlags.TransferPointers; break;
+                case "SXF_MULTIPLYSPEED": bit = SpawnItemExFlags.MultiplySpeed; break;
+                case "SXF_SETTARGET": bit = SpawnItemExFlags.SetTarget; break;
+                case "SXF_SETTRACER": bit = SpawnItemExFlags.SetTracer; break;
+                case "SXF_NOPOINTERS": bit = SpawnItemExFlags.NoPointers; break;
+                case "SXF_ORIGINATOR": bit = SpawnItemExFlags.Originator; break;
+                case "SXF_TRANSFERSPRITEFRAME": bit = SpawnItemExFlags.TransferSpriteFrame; break;
+                case "SXF_ISTARGET": bit = SpawnItemExFlags.IsTarget; break;
+                case "SXF_ISTRACER": bit = SpawnItemExFlags.IsTracer; break;
+                default: return false;
+            }
+
+            return true;
+        }
+
+        private static bool IsUnsupportedSpawnFlag(string name)
+        {
+            switch (name.ToUpperInvariant())
+            {
+                case "SXF_SETMASTER":
+                case "SXF_TELEFRAG":
+                case "SXF_CLIENTSIDE":
+                case "SXF_TRANSFERPITCH":
+                case "SXF_USEBLOODCOLOR":
+                case "SXF_CLEARCALLERTID":
+                case "SXF_TRANSFERSCALE":
+                case "SXF_TRANSFERSPECIAL":
+                case "SXF_CLEARCALLERSPECIAL":
+                case "SXF_TRANSFERSTENCILCOL":
+                case "SXF_TRANSFERALPHA":
+                case "SXF_TRANSFERRENDERSTYLE":
+                case "SXF_TRANSFERROLL":
+                case "SXF_ISMASTER":
+                    return true;
+                default:
+                    return false;
+            }
         }
 
         /// <summary>

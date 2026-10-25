@@ -29,7 +29,8 @@ namespace DPTDOOM.Scripting
     /// list is taken from `refs/doom_ace-master/engine/decodoom.h`, whose `doom_actor_name[]` is
     /// indexed by actor type in vanilla Doom's own order - the same order this engine's
     /// <see cref="MobjType"/> uses. Every entry was checked index by index against that enum, and
-    /// the first 137 line up exactly; the reserve after them belongs to mods and has no name yet.
+    /// the first 137 line up exactly. The reserve after them belongs to mods; their friendly names
+    /// are registered when DECORATE is read, so a spawned custom actor can be named too.
     ///
     /// The names are ZDoom's, which is what a DECORATE file is written against. A mod may also use
     /// the engine's shorter spellings ("Imp", "Pinky"), so <see cref="aliases"/> carries the ones
@@ -103,6 +104,44 @@ namespace DPTDOOM.Scripting
         };
 
         /// <summary>
+        /// Names introduced by DECORATE in this load, including actors with no DoomEdNum.
+        ///
+        /// A custom actor cannot be looked up by its friendly name in the vanilla table, because
+        /// that table has no such name. Keeping the name beside the newly allocated type is what
+        /// lets A_SpawnItemEx refer to an effect or a projectile defined in the same mod.
+        /// </summary>
+        private static Dictionary<string, int> customTypes =
+            new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>Forgets names from the previous game, before this game's DECORATE is read.</summary>
+        public static void ClearCustomTypes()
+        {
+            customTypes.Clear();
+        }
+
+        /// <summary>Registers a custom actor name for the current game.</summary>
+        public static void Register(string name, int type)
+        {
+            if (!string.IsNullOrEmpty(name) && type >= 0)
+            {
+                customTypes[name] = type;
+            }
+        }
+
+        /// <summary>Snapshot used by tests, because this table is static just like MobjInfos.</summary>
+        public static Dictionary<string, int> SaveCustomTypes()
+        {
+            return new Dictionary<string, int>(customTypes, StringComparer.OrdinalIgnoreCase);
+        }
+
+        public static void RestoreCustomTypes(Dictionary<string, int> saved)
+        {
+            customTypes = saved == null
+                ? new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+                : new Dictionary<string, int>(saved, StringComparer.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
         /// The actor type a DECORATE name means, or -1.
         ///
         /// Matched without regard to case, because DECORATE names are written in whatever case the
@@ -127,6 +166,13 @@ namespace DPTDOOM.Scripting
 
             if (!aliases.TryGetValue(name, out canonical))
             {
+                int custom;
+
+                if (customTypes.TryGetValue(name, out custom))
+                {
+                    return custom;
+                }
+
                 return -1;
             }
 
@@ -141,15 +187,23 @@ namespace DPTDOOM.Scripting
             return -1;
         }
 
-        /// <summary>The name of a type, or null for a type a mod created.</summary>
+        /// <summary>The name of a type, or null when no custom name is registered for it.</summary>
         public static string NameOf(int type)
         {
-            if (type < 0 || type >= byType.Length)
+            if (type >= 0 && type < byType.Length)
             {
-                return null;
+                return byType[type];
             }
 
-            return byType[type];
+            foreach (var pair in customTypes)
+            {
+                if (pair.Value == type)
+                {
+                    return pair.Key;
+                }
+            }
+
+            return null;
         }
 
         /// <summary>Every name a file may use, for a report that has to list them.</summary>
@@ -165,6 +219,11 @@ namespace DPTDOOM.Scripting
                 }
 
                 foreach (var pair in aliases)
+                {
+                    names.Add(pair.Key);
+                }
+
+                foreach (var pair in customTypes)
                 {
                     names.Add(pair.Key);
                 }

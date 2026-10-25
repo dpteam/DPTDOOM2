@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using DPTDOOM;
+using DPTDOOM.Scripting;
 
 namespace DPTDOOMTest.CompatibilityTests
 {
@@ -19,6 +21,7 @@ namespace DPTDOOMTest.CompatibilityTests
     {
         private readonly MobjInfo[] table;
         private readonly Entry[] entries;
+        private readonly Dictionary<string, int> customNames;
 
         private sealed class Entry
         {
@@ -49,6 +52,7 @@ namespace DPTDOOMTest.CompatibilityTests
         private ActorTableSnapshot(MobjInfo[] table)
         {
             this.table = table;
+            customNames = ActorNames.SaveCustomTypes();
             entries = new Entry[table.Length];
 
             for (var i = 0; i < table.Length; i++)
@@ -91,6 +95,8 @@ namespace DPTDOOMTest.CompatibilityTests
 
         public void Restore()
         {
+            ActorNames.RestoreCustomTypes(customNames);
+
             for (var i = 0; i < table.Length; i++)
             {
                 var to = table[i];

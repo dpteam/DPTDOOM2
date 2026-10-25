@@ -741,6 +741,33 @@ ACTOR ConfusedImp 3001
     Assert-True ($badChaseLog -like "*the flags go third*") "the mistake is explained"
     Assert-True ($badChaseLog -like "*map MAP01: OK*") "and the level still loads"
 
+    Write-Host "With A_SpawnItemEx and an unnumbered actor"
+    $spawnEx = Join-Path $work "spawnex.dec"
+
+    # This is the shape used throughout ademo1.wad: a named effect, no DoomEdNum, and a
+    # randomised argument. The expression must survive conversion; the custom name must resolve
+    # after the actor has been allocated.
+    [System.IO.File]::WriteAllText($spawnEx, @"
+ACTOR Spark : DoomImp
+{
+  Health 25
+  States
+  {
+  See:
+    TROO A 4 A_SpawnItemEx("Spark", 15 - random(0,255) * 0.1171875, 0, 16, 0, 0, 0, 0, SXF_ABSOLUTEPOSITION | SXF_ABSOLUTEVELOCITY | SXF_NOCHECKPOSITION)
+    Loop
+  }
+}
+"@)
+
+    $spawnExLog = Run-Game "spawnex" @('-decorate', $spawnEx)
+
+    Assert-True ($spawnExLog -like "*scripts: OK*") "A_SpawnItemEx converts"
+    Assert-True ($spawnExLog -like "*map MAP01: OK*") "the level loads"
+    Assert-True ($spawnExLog -notlike "*no such actor 'Spark'*") "the unnumbered actor resolves by name"
+    Assert-True ($spawnExLog -notlike "*no such spawn expression*") "the random argument has a live expression"
+    Assert-True ($spawnExLog -notlike "*decorate problem*") "a supported SpawnItemEx block reports nothing"
+
     Write-Host "With a truncated file"
     $cutLog = Run-Game "cut" @('-decorate', $truncated)
 

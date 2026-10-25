@@ -24,6 +24,20 @@ namespace DPTDOOMTest.UnitTests
     [TestClass]
     public class ActorNamesTest
     {
+        [TestInitialize]
+        public void Before()
+        {
+            // Custom names belong to the current load. Clearing them here keeps this unit test
+            // about the built-in table, not about whichever DECORATE test ran before it.
+            ActorNames.ClearCustomTypes();
+        }
+
+        [TestCleanup]
+        public void After()
+        {
+            ActorNames.ClearCustomTypes();
+        }
+
         [TestMethod]
         public void TheTableIsAsLongAsTheVanillaActors()
         {
@@ -105,8 +119,9 @@ namespace DPTDOOMTest.UnitTests
         [TestMethod]
         public void TheReserveHasNoName()
         {
-            // A type a mod created is not reachable by name from another mod, because names would
-            // then collide across mods. It is reachable by the number it was given.
+            // A type a mod created is not reachable by name from another load: custom names are
+            // cleared when a new game starts. Within one load it is reachable, which is what lets
+            // A_SpawnItemEx use an actor defined in the same mod.
             Assert.IsNull(ActorNames.NameOf((int)MobjType.Custom0));
             Assert.IsNull(ActorNames.NameOf(-1));
             Assert.AreEqual("DoomImp", ActorNames.NameOf((int)MobjType.Troop));

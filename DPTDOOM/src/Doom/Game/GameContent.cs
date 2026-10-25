@@ -643,6 +643,10 @@ namespace DPTDOOM
         /// </summary>
         private void InitializeScripts(CommandLineArgs args)
         {
+            // Actor names are per game, just like the actor table they point into. Without this,
+            // a second load could resolve a name from a previous mod's DECORATE.
+            ActorNames.ClearCustomTypes();
+
             var paths = args.script.Present ? args.script.Value : new string[0];
             var decoratePaths = args.decorate.Present ? args.decorate.Value : new string[0];
             var lump = wad.GetLumpNumber("SCRIPTS");

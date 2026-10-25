@@ -320,6 +320,60 @@ namespace DPTDOOM.Scripting
         /// than three.
         /// </summary>
         /// <summary>
+        /// Resolves one of the expression functions generated for A_SpawnItemEx.
+        /// </summary>
+        private ScriptCondition ResolveSpawnExpression(ScriptCall call, int index)
+        {
+            var name = call.AsText(index);
+
+            if (unit == null)
+            {
+                throw call.Fail("A_SpawnItemEx needs the script unit that holds its expressions");
+            }
+
+            if (unit.Find(name) == null)
+            {
+                throw call.Fail("no such spawn expression '" + name + "'");
+            }
+
+            return new ScriptCondition(unit, name, "A_SpawnItemEx");
+        }
+
+        private ScriptCondition ResolveOptionalSpawnExpression(ScriptCall call, int index)
+        {
+            if (call.AsText(index).Length == 0)
+            {
+                return null;
+            }
+
+            return ResolveSpawnExpression(call, index);
+        }
+
+        /// <summary>
+        /// Converts a fixed-point degree value without a floating-point round trip.
+        ///
+        /// A mod can write 22.5 degrees. Doing this through double would make the result depend on
+        /// the platform's rounding, while the rest of the spawn arithmetic is fixed point.
+        /// </summary>
+        private static Angle AngleFromFixedDegrees(Fixed degrees)
+        {
+            const long fullTurn = 0x100000000L;
+            var numerator = (long)degrees.Data * fullTurn;
+            var denominator = 360L * Fixed.FracUnit;
+
+            if (numerator >= 0)
+            {
+                numerator += denominator / 2;
+            }
+            else
+            {
+                numerator -= denominator / 2;
+            }
+
+            return new Angle((uint)(numerator / denominator));
+        }
+
+        /// <summary>
         /// One of A_Chase's two state arguments: -1 for "the actor's own", otherwise the state.
         ///
         /// An empty string is how the converter writes "use the actor's own", because a script has
@@ -667,6 +721,63 @@ namespace DPTDOOM.Scripting
                     var y = mobj.Y + (distance * Trig.Sin(mobj.Angle));
 
                     world.ThingAllocation.SpawnMobj(x, y, mobj.Z + mobj.Height, (MobjType)type);
+                });
+
+                return ScriptValue.Void;
+            });
+
+            // A_SpawnItemEx: the seven numeric arguments are function names, not values. Each
+            // function is evaluated when the frame runs, because it may contain random().
+            host.Register("SpawnItemEx", 11, 11, call =>
+            {
+                var number = FrameNumber(call.AsText(0), call);
+                var actorName = call.AsText(1);
+
+                var type = ActorNames.TypeOf(actorName);
+
+                if (type < 0)
+                {
+                    throw call.Fail("no such actor '" + actorName +
+                                    "'; this engine knows the built-in actors by their ZDoom names");
+                }
+
+                var expressions = new ScriptCondition[7];
+
+                for (var i = 0; i < expressions.Length; i++)
+                {
+                    expressions[i] = ResolveSpawnExpression(call, i + 2);
+                }
+
+                var failChance = ResolveOptionalSpawnExpression(call, 10);
+                var flags = call.AsInt(9);
+
+                DoomInfo.SetStateAction(number, (world, mobj) =>
+                {
+                    // ZDoom tests failchance before doing any of the spawn arithmetic. In
+                    // particular, a failed spawn must not evaluate the other random expressions.
+                    if (failChance != null)
+                    {
+                        var chance = failChance.EvaluateValue(world, mobj).AsInt();
+
+                        if (chance > 0 && world.Random.Next() < chance)
+                        {
+                            return;
+                        }
+                    }
+
+                    var parameters = new SpawnItemExParams();
+                    parameters.Type = (MobjType)type;
+                    parameters.XOffset = expressions[0].EvaluateValue(world, mobj).AsFixed();
+                    parameters.YOffset = expressions[1].EvaluateValue(world, mobj).AsFixed();
+                    parameters.ZOffset = expressions[2].EvaluateValue(world, mobj).AsFixed();
+                    parameters.XVelocity = expressions[3].EvaluateValue(world, mobj).AsFixed();
+                    parameters.YVelocity = expressions[4].EvaluateValue(world, mobj).AsFixed();
+                    parameters.ZVelocity = expressions[5].EvaluateValue(world, mobj).AsFixed();
+                    parameters.Angle = AngleFromFixedDegrees(expressions[6]
+                        .EvaluateValue(world, mobj).AsFixed());
+                    parameters.Flags = flags;
+
+                    world.ThingAllocation.SpawnItemEx(mobj, parameters);
                 });
 
                 return ScriptValue.Void;
