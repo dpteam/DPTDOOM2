@@ -1065,59 +1065,6 @@ namespace DPTDOOM
 		private static readonly Fixed floorSpeed = Fixed.One;
 
 		/// <summary>
-		/// Finds a neighbouring sector whose floor sits at a given height.
-		///
-		/// Boom uses this for the "numeric" change model: instead of taking the
-		/// texture from the line's own sector, it looks for a neighbour standing at
-		/// the target height and copies that one. The idea is that the map author
-		/// builds a model room showing what the result should look like, and the
-		/// engine finds it by height rather than by tag.
-		///
-		/// Returns null when no neighbour matches, which Boom treats as "no change
-		/// at all" rather than as an error.
-		/// </summary>
-		private Sector FindModelFloorSector(Sector sector, Fixed height)
-		{
-			foreach (var line in sector.Lines)
-			{
-				var other = line.FrontSector == sector ? line.BackSector : line.FrontSector;
-
-				if (other == null || other == sector)
-				{
-					continue;
-				}
-
-				if (other.FloorHeight == height)
-				{
-					return other;
-				}
-			}
-
-			return null;
-		}
-
-		/// <summary>The same, for ceilings.</summary>
-		private Sector FindModelCeilingSector(Sector sector, Fixed height)
-		{
-			foreach (var line in sector.Lines)
-			{
-				var other = line.FrontSector == sector ? line.BackSector : line.FrontSector;
-
-				if (other == null || other == sector)
-				{
-					continue;
-				}
-
-				if (other.CeilingHeight == height)
-				{
-					return other;
-				}
-			}
-
-			return null;
-		}
-
-		/// <summary>
 		/// Changes floor texture and sector type without moving anything.
 		///
 		/// This is Boom's 153/154 (trigger model) and 239/240 (numeric model). A
@@ -1148,7 +1095,7 @@ namespace DPTDOOM
 					continue;
 				}
 
-				var model = FindModelFloorSector(sector, sector.FloorHeight);
+				var model = NumericModel.FloorAt(sector, sector.FloorHeight);
 
 				if (model != null)
 				{
@@ -1320,17 +1267,16 @@ namespace DPTDOOM
 		///
 		/// The decoding lives in <see cref="BoomGeneralized"/>; this turns the
 		/// decoded definition into the movers the engine already has. The mapping
-		/// is deliberately direct — a generalized floor is a <see cref="FloorMove"/>
+		/// is deliberately direct - a generalized floor is a <see cref="FloorMove"/>
 		/// with its destination, speed and crush flag computed from the bit fields,
 		/// not a new kind of mover.
 		///
-		/// What is **not** implemented, and is refused rather than approximated:
-		/// the numeric change model, where Boom searches the map for a sector whose
-		/// floor sits at the target height and copies its texture. Without that
-		/// search the texture would have to come from somewhere else, and a wrong
-		/// texture is worse than the vanilla one. Floors and ceilings whose change
-		/// field asks for a numeric model are treated as trigger models instead,
-		/// which is what most maps mean anyway.
+		/// A change of texture has two models, and both are implemented. The **trigger** model
+		/// copies the line's own front sector, which is the usual case. The **numeric** model
+		/// searches for a neighbour whose floor (or ceiling, when the destination is a ceiling
+		/// height) sits where this surface will end up, and copies that one - see
+		/// <see cref="NumericModel"/>. Boom changes nothing when that search finds no sector, and
+		/// so does this: the surface still travels, the picture stays.
 		/// </summary>
 		public bool DoGeneralized(LineDef line, Mobj thing)
 		{
@@ -1414,27 +1360,60 @@ namespace DPTDOOM
 
 				if (change)
 				{
-					// The trigger model: the texture comes from the line's own
-					// front sector, which is what Boom does when the numeric model
-					// bit is clear.
-					floor.Texture = (int)line.FrontSector.FloorFlat;
+					// Which picture the floor takes on when it arrives. Two models, and the
+					// difference is visible: a pool that drains from water into slime has no
+					// slime sector at the line, so copying the line's floor would copy the water
+					// again and the pool would look unchanged.
+					var model = definition.NumericModel
+						? FindFloorModel(sector, floor.FloorDestHeight, definition)
+						: null;
 
-					if (definition.Change == 1)
+					if (definition.NumericModel && model == null)
 					{
-						floor.NewSpecial = 0;
-					}
-					else if (definition.Change == 3)
-					{
-						floor.NewSpecial = line.FrontSector.Special;
+						// Boom leaves the move alone and changes nothing when no model is found: the
+						// floor still travels, the picture stays. Downgrading the type says exactly
+						// that, instead of writing the sector's own picture back and trusting it to
+						// come out the same.
+						floor.Type = FloorMoveType.Generalized;
 					}
 					else
 					{
-						floor.NewSpecial = sector.Special;
+						var source = model != null ? model : line.FrontSector;
+
+						floor.Texture = source.FloorFlat;
+
+						if (definition.Change == 1)
+						{
+							floor.NewSpecial = 0;
+						}
+						else if (definition.Change == 3)
+						{
+							floor.NewSpecial = source.Special;
+						}
+						else
+						{
+							floor.NewSpecial = sector.Special;
+						}
 					}
 				}
 			}
 
 			return result;
+		}
+
+		/// <summary>
+		/// The sector a generalized floor should copy its picture from, for the numeric model.
+		///
+		/// Null means "no such sector", which Boom treats as "change nothing" rather than as an
+		/// error. Reports nothing: a map that asks for a model which is not there still moves the
+		/// floor, and the modder's mistake is visible in the map rather than in a log line.
+		/// </summary>
+		private static Sector FindFloorModel(Sector sector, Fixed destination,
+		                                     BoomGeneralized.Definition definition)
+		{
+			return NumericModel.FloorLooksAtCeiling(definition.Target)
+				? NumericModel.CeilingAt(sector, destination)
+				: NumericModel.FloorAt(sector, destination);
 		}
 
 		/// <summary>
@@ -1518,10 +1497,59 @@ namespace DPTDOOM
 				ceiling.TopHeight = target;
 				ceiling.BottomHeight = target;
 
+				if (definition.Change != 0)
+				{
+					// A generalized ceiling can change its picture too, and this port ignored it
+					// entirely: the ceiling arrived with the flat it started with. Same two models
+					// as a floor, and the same rule when no model sector exists.
+					var model = definition.NumericModel
+						? FindCeilingModel(sector, target, definition)
+						: null;
+
+					if (!definition.NumericModel || model != null)
+					{
+						var source = model != null ? model : line.FrontSector;
+
+						ceiling.Texture = source.CeilingFlat;
+
+						if (definition.Change == 1)
+						{
+							ceiling.NewSpecial = 0;
+						}
+						else if (definition.Change == 3)
+						{
+							ceiling.NewSpecial = source.Special;
+						}
+						else
+						{
+							ceiling.NewSpecial = sector.Special;
+						}
+
+						ceiling.Type = CeilingMoveType.GeneralizedChange;
+					}
+
+					// When the numeric model finds no sector, Boom changes nothing: the ceiling
+					// travels, the picture stays, and the mover keeps the plain generalized type.
+				}
+
 				AddActiveCeiling(ceiling);
 			}
 
 			return result;
+		}
+
+		/// <summary>
+		/// The sector a generalized ceiling should copy its picture from, for the numeric model.
+		///
+		/// The mirror of <see cref="FindFloorModel"/>, and Boom's rule is mirrored too: a ceiling
+		/// whose destination is a *floor* height looks at neighbours' floors.
+		/// </summary>
+		private static Sector FindCeilingModel(Sector sector, Fixed destination,
+		                                       BoomGeneralized.Definition definition)
+		{
+			return NumericModel.CeilingLooksAtFloor(definition.Target)
+				? NumericModel.FloorAt(sector, destination)
+				: NumericModel.CeilingAt(sector, destination);
 		}
 
 		private Fixed GeneralizedCeilingTarget(Sector sector, BoomGeneralized.Definition definition)

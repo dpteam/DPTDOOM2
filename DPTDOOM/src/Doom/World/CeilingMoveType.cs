@@ -42,6 +42,17 @@ namespace DPTDOOM
         /// A Boom generalized ceiling: destination, speed and crush flag come from
         /// the line's bit fields.
         /// </summary>
-        Generalized
+        Generalized,
+
+        /// <summary>
+        /// A Boom generalized ceiling that also changes its picture and special when it
+        /// arrives.
+        ///
+        /// Separate from <see cref="Generalized"/> rather than a flag on it, because the
+        /// difference is visible in the world: a moving ceiling that leaves the flat alone and
+        /// one that swaps it are two different things to watch, and the type is what the mover
+        /// switches on when it stops.
+        /// </summary>
+        GeneralizedChange
     }
 }

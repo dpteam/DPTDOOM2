@@ -30,6 +30,12 @@ namespace DPTDOOM
 		private Fixed speed;
 		private bool crush;
 
+		/// <summary>Flat to take on when the move finishes, for <see cref="CeilingMoveType.GeneralizedChange"/>.</summary>
+		private int texture;
+
+		/// <summary>Sector special to take on when the move finishes, for a generalized change.</summary>
+		private SectorSpecial newSpecial;
+
 		// 1 = up, 0 = waiting, -1 = down.
 		private int direction;
 
@@ -84,6 +90,12 @@ namespace DPTDOOM
 						{
 							case CeilingMoveType.RaiseToHighest:
 							case CeilingMoveType.Generalized:
+								sa.RemoveActiveCeiling(this);
+								sector.DisableFrameInterpolationForOneFrame();
+								break;
+
+							case CeilingMoveType.GeneralizedChange:
+								ApplyChange();
 								sa.RemoveActiveCeiling(this);
 								sector.DisableFrameInterpolationForOneFrame();
 								break;
@@ -156,6 +168,12 @@ namespace DPTDOOM
 								sector.DisableFrameInterpolationForOneFrame();
 								break;
 
+							case CeilingMoveType.GeneralizedChange:
+								ApplyChange();
+								sa.RemoveActiveCeiling(this);
+								sector.DisableFrameInterpolationForOneFrame();
+								break;
+
 							default:
 								break;
 						}
@@ -179,6 +197,19 @@ namespace DPTDOOM
 					}
 					break;
 			}
+		}
+
+		/// <summary>
+		/// Takes on the flat and special this ceiling was told to change to.
+		///
+		/// Done on arrival rather than at the start, which is the whole reason the numeric model
+		/// exists: the picture belongs to the height the surface reaches, not to the height it
+		/// left.
+		/// </summary>
+		private void ApplyChange()
+		{
+			sector.Special = newSpecial;
+			sector.CeilingFlat = texture;
 		}
 
 		public CeilingMoveType Type
@@ -215,6 +246,25 @@ namespace DPTDOOM
 		{
 			get => crush;
 			set => crush = value;
+		}
+
+		/// <summary>
+		/// The flat the ceiling takes on when it arrives.
+		///
+		/// Only <see cref="CeilingMoveType.GeneralizedChange"/> uses it, and only on arrival: the
+		/// whole point of the numeric model is that the picture changes when the surface reaches
+		/// the height where that picture makes sense, not while it travels.
+		/// </summary>
+		public int Texture
+		{
+			get => texture;
+			set => texture = value;
+		}
+
+		public SectorSpecial NewSpecial
+		{
+			get => newSpecial;
+			set => newSpecial = value;
 		}
 
 		public int Direction
