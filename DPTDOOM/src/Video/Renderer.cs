@@ -230,7 +230,13 @@ namespace DPTDOOM.Video
                     {
                         var hudStart = Profile.Stamp();
                         var scale = screen.Width / 320;
-                        screen.DrawText(consolePlayer.Message, 0, 7 * scale, scale);
+
+                        // Wrapped, because a chat message may be ninety-six characters and the
+                        // screen holds about forty per line. Drawing it as one line silently cut
+                        // the rest off at the right edge.
+                        screen.DrawTextWrapped(consolePlayer.Message, 0, 7 * scale, scale,
+                                               screen.Height);
+
                         Profile.Add(RenderProfile.Section.Hud, Profile.Stamp() - hudStart);
                     }
                 }

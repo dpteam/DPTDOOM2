@@ -242,6 +242,77 @@ namespace DPTDOOM.Video
         }
 
         /// <summary>
+        /// The pixel width of one character at this scale, including the space's own advance.
+        ///
+        /// Public because the message line has to know where to break, and the renderer has no way
+        /// to measure a font it does not own. A zero width means "no glyph", which is how a
+        /// character this font cannot draw is skipped rather than drawn as a gap.
+        /// </summary>
+        public int CharWidth(char ch, int scale)
+        {
+            if (ch == ' ')
+            {
+                return 4 * scale;
+            }
+
+            var index = (int)ch;
+
+            if (index >= chars.Length)
+            {
+                return 0;
+            }
+
+            if ('a' <= index && index <= 'z')
+            {
+                index = index - 'a' + 'A';
+            }
+
+            var patch = chars[index];
+
+            return patch == null ? 0 : scale * patch.Width;
+        }
+
+        /// <summary>
+        /// Text wrapped to the screen width, from the top, never past the bottom.
+        ///
+        /// Returns how many lines were drawn, so a caller can say so - and so a test can check that a
+        /// message too long for the screen is cut at a line boundary rather than in the middle of a
+        /// glyph run.
+        /// </summary>
+        public int DrawTextWrapped(string text, int x, int y, int scale, int bottom)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return 0;
+            }
+
+            var lines = TextLayout.Wrap(text, Width - 2 * x, c => CharWidth(c, scale));
+
+            // The font is 7 pixels tall and the line step is 8, which is what the status bar and
+            // the menus already assume.
+            var lineHeight = 8 * scale;
+
+            var fits = TextLayout.LinesThatFit(y, lineHeight, bottom);
+
+            var drawn = 0;
+
+            foreach (var line in lines)
+            {
+                if (drawn >= fits)
+                {
+                    break;
+                }
+
+                DrawText(line, x, y, scale);
+
+                y += lineHeight;
+                drawn++;
+            }
+
+            return drawn;
+        }
+
+        /// <summary>
         /// Text in a tinted colour.
         ///
         /// <paramref name="translation"/> is a 256-entry table that maps every
