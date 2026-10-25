@@ -125,6 +125,18 @@ namespace DPTDOOM.Scripting
 
         /// <summary>Volume for <see cref="PlaySoundName"/>, 0 to 100.</summary>
         public int PlaySoundVolume = 100;
+
+        /// <summary>Actor the frame fires, by DECORATE name, or null.</summary>
+        public string MissileName;
+
+        /// <summary>Height above the actor the missile appears at.</summary>
+        public int MissileHeight = 32;
+
+        /// <summary>Actor the frame places, by DECORATE name, or null.</summary>
+        public string SpawnName;
+
+        /// <summary>How far in front of the actor the spawned thing appears.</summary>
+        public int SpawnDistance;
     }
 
     /// <summary>
@@ -148,47 +160,6 @@ namespace DPTDOOM.Scripting
     /// </summary>
     public static class DecorateConverter
     {
-        /// <summary>
-        /// DoomEdNum by DECORATE actor name, for the names this converter can resolve.
-        ///
-        /// Only the monsters, and deliberately so. A wrong number here does not fail: it
-        /// silently rewrites a different actor, so a table guessed at from memory is worse
-        /// than no table at all - a mod replacing a shotgun guy would end up editing a
-        /// health bonus. Everything else is reported as an unknown name, which costs the
-        /// modder one line to fix and costs nobody a mystery.
-        /// </summary>
-        private static readonly string[,] KnownActors =
-        {
-            { "zombieman", "3004" },
-            { "shotgonguy", "9" },
-            { "shotgunguy", "9" },
-            { "chaingunguy", "65" },
-            { "heavyweapondude", "65" },
-            { "doomimp", "3001" },
-            { "imp", "3001" },
-            { "demon", "3002" },
-            { "pinky", "3002" },
-            { "spectre", "58" },
-            { "cacodemon", "3005" },
-            { "lostsoul", "3006" },
-            { "baronofhell", "3003" },
-            { "hellknight", "69" },
-            { "revenant", "66" },
-            { "mancubus", "67" },
-            { "fatso", "67" },
-            { "arachnotron", "68" },
-            { "archvile", "64" },
-            { "painelemental", "71" },
-            { "wolfensteinss", "84" },
-            { "ssguy", "84" },
-            { "commanderkeen", "72" },
-            { "bossbrain", "88" },
-            { "bosseye", "89" },
-            { "cyberdemon", "16" },
-            { "spidermastermind", "7" },
-            { "player", "1" }
-        };
-
         /// <summary>
         /// The properties this converter knows how to map, by DECORATE spelling.
         ///
@@ -433,23 +404,18 @@ namespace DPTDOOM.Scripting
         {
             number = -1;
 
-            if (string.IsNullOrEmpty(name))
+            var type = ActorNames.TypeOf(name);
+
+            if (type < 0 || type >= DoomInfo.MobjInfos.Length)
             {
                 return false;
             }
 
-            for (var i = 0; i < KnownActors.GetLength(0); i++)
-            {
-                if (!string.Equals(KnownActors[i, 0], name, StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                return int.TryParse(KnownActors[i, 1], NumberStyles.Integer,
-                                    CultureInfo.InvariantCulture, out number);
-            }
-
-            return false;
+            // The number is read from the actor table rather than tabulated beside the name. The
+            // table is the source of truth - a folder of actor definitions can change a DoomEdNum,
+            // and a hand-written copy would then disagree with the engine without saying so.
+            number = DoomInfo.MobjInfos[type].DoomEdNum;
+            return number >= 0;
         }
 
         /// <summary>
@@ -581,6 +547,54 @@ namespace DPTDOOM.Scripting
                           .Append(");\n");
                 }
             }
+
+            EmitSpawns(script, actor);
+        }
+
+        /// <summary>
+        /// Attaches each frame's projectile or spawned thing.
+        ///
+        /// A separate pass from the sound for the same reason a sound is separate from a
+        /// transition: these are work the frame performs. A frame carries at most one action in
+        /// DECORATE, so at most one of these applies to any frame, and each is installed as that
+        /// frame's action.
+        /// </summary>
+        private static void EmitSpawns(StringBuilder script, DecorateActor actor)
+        {
+            foreach (var chain in actor.Chains)
+            {
+                for (var i = 0; i < chain.Frames.Count; i++)
+                {
+                    var frame = chain.Frames[i];
+                    var name = FrameName(chain.Label, i + 1);
+
+                    if (frame.MissileName != null)
+                    {
+                        script.Append("    Missile(\"").Append(name).Append("\", \"")
+                              .Append(frame.MissileName).Append("\", ")
+                              .Append(FixedFromInt(frame.MissileHeight)).Append(");\n");
+                    }
+
+                    if (frame.SpawnName != null)
+                    {
+                        script.Append("    SpawnItem(\"").Append(name).Append("\", \"")
+                              .Append(frame.SpawnName).Append("\", ")
+                              .Append(FixedFromInt(frame.SpawnDistance)).Append(");\n");
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// A whole number of map units as a fixed-point literal.
+        ///
+        /// Written as "32.0" rather than "32" because the script call expects a fixed value and the
+        /// language's own rule is that a literal with a dot is fixed. Passing a plain integer would
+        /// work through the conversion, and would also read as if the unit were something else.
+        /// </summary>
+        private static string FixedFromInt(int value)
+        {
+            return value.ToString(CultureInfo.InvariantCulture) + ".0";
         }
 
         private static string FrameName(string label, int index)
@@ -1298,6 +1312,18 @@ namespace DPTDOOM.Scripting
                 return;
             }
 
+            if (string.Equals(frame.Action, "A_CustomMissile", StringComparison.OrdinalIgnoreCase))
+            {
+                ReadMissile(arguments, actor, frame, problems);
+                return;
+            }
+
+            if (string.Equals(frame.Action, "A_SpawnItem", StringComparison.OrdinalIgnoreCase))
+            {
+                ReadSpawnItem(arguments, actor, frame, problems);
+                return;
+            }
+
             if (!isJump)
             {
                 problems.Add(actor.Name + " line " + frame.Line + ": '" + frame.Action +
@@ -1428,6 +1454,149 @@ namespace DPTDOOM.Scripting
             }
 
             return tokens[0].Text;
+        }
+
+        /// <summary>
+        /// A_CustomMissile: a projectile the frame fires.
+        ///
+        /// The name is resolved **now**, while the file is being read, so a typo is a line in the
+        /// report rather than a projectile that silently does not appear. The type is then closed
+        /// over by the generated call, which is why play time needs no name lookup at all.
+        ///
+        /// Supported: the actor name and its height. `xoffset` and `angle` shift the launch, and
+        /// this engine's spawn places the missile at the actor's own position - so a non-zero value
+        /// is named in the report instead of being silently dropped, because a missile fired at an
+        /// angle is a different weapon.
+        /// </summary>
+        private static void ReadMissile(List<List<Token>> arguments, DecorateActor actor,
+                                        StateFrame frame, IList<string> problems)
+        {
+            if (arguments.Count < 1 || arguments[0].Count != 1)
+            {
+                problems.Add(actor.Name + " line " + frame.Line +
+                             ": 'A_CustomMissile' needs an actor name, so the frame fires nothing");
+                frame.Action = "";
+                return;
+            }
+
+            var name = arguments[0][0].Text;
+
+            if (ActorNames.TypeOf(name) < 0)
+            {
+                problems.Add(actor.Name + " line " + frame.Line + ": no such actor '" + name +
+                             "' for 'A_CustomMissile', so the frame fires nothing. " +
+                             "This engine knows the built-in actors by their ZDoom names");
+                frame.Action = "";
+                return;
+            }
+
+            frame.MissileName = name;
+            frame.MissileHeight = 32;
+
+            if (arguments.Count > 1)
+            {
+                if (arguments[1].Count == 1 && arguments[1][0].IsNumber)
+                {
+                    frame.MissileHeight = arguments[1][0].Number;
+                }
+                else
+                {
+                    problems.Add(actor.Name + " line " + frame.Line +
+                                 ": 'A_CustomMissile' height must be a whole number; 32 is used");
+                }
+            }
+
+            ReportIgnoredArguments(arguments, 2, actor, frame, problems, "A_CustomMissile",
+                                   "xoffset and angle");
+
+            frame.Action = "";
+        }
+
+        /// <summary>
+        /// A_SpawnItem: something the frame places in the world.
+        ///
+        /// The difference from A_CustomMissile is not a detail: this spawns a thing where the actor
+        /// stands, unaimed and motionless. A health pickup and a fireball are both "an actor", and
+        /// only one of them travels.
+        /// </summary>
+        private static void ReadSpawnItem(List<List<Token>> arguments, DecorateActor actor,
+                                          StateFrame frame, IList<string> problems)
+        {
+            if (arguments.Count < 1 || arguments[0].Count != 1)
+            {
+                problems.Add(actor.Name + " line " + frame.Line +
+                             ": 'A_SpawnItem' needs an actor name, so the frame spawns nothing");
+                frame.Action = "";
+                return;
+            }
+
+            var name = arguments[0][0].Text;
+
+            if (ActorNames.TypeOf(name) < 0)
+            {
+                problems.Add(actor.Name + " line " + frame.Line + ": no such actor '" + name +
+                             "' for 'A_SpawnItem', so the frame spawns nothing. " +
+                             "This engine knows the built-in actors by their ZDoom names");
+                frame.Action = "";
+                return;
+            }
+
+            frame.SpawnName = name;
+            frame.SpawnDistance = 0;
+
+            if (arguments.Count > 1)
+            {
+                if (arguments[1].Count == 1 && arguments[1][0].IsNumber)
+                {
+                    frame.SpawnDistance = arguments[1][0].Number;
+                }
+                else
+                {
+                    problems.Add(actor.Name + " line " + frame.Line +
+                                 ": 'A_SpawnItem' distance must be a whole number; zero is used");
+                }
+            }
+
+            ReportIgnoredArguments(arguments, 2, actor, frame, problems, "A_SpawnItem", "zheight");
+
+            frame.Action = "";
+        }
+
+        /// <summary>
+        /// Says that arguments past a supported count are ignored, once per frame.
+        ///
+        /// Not silent, because these shift where a projectile appears or how high a spawned thing
+        /// sits - and a mod that tuned them would otherwise get a subtly different actor with no
+        /// hint that anything was dropped.
+        /// </summary>
+        private static void ReportIgnoredArguments(List<List<Token>> arguments, int from,
+                                                   DecorateActor actor, StateFrame frame,
+                                                   IList<string> problems, string action,
+                                                   string what)
+        {
+            for (var i = from; i < arguments.Count; i++)
+            {
+                if (arguments[i].Count == 0)
+                {
+                    continue;
+                }
+
+                var zero = arguments[i].Count == 1 &&
+                           ((arguments[i][0].IsNumber && arguments[i][0].Number == 0) ||
+                            string.Equals(arguments[i][0].Text, "0", StringComparison.Ordinal));
+
+                if (zero)
+                {
+                    continue;
+                }
+
+                problems.Add(actor.Name + " line " + frame.Line + ": '" + action + "' " + what +
+                             " are ignored - this engine spawns at the actor's own position; " +
+                             "the frame still spawns");
+
+                // Once per frame is enough: the rest of the list is the same complaint.
+                return;
+            }
         }
 
         /// <summary>

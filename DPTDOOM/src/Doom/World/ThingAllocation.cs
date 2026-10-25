@@ -368,6 +368,61 @@ namespace DPTDOOM
         /// Get the speed of the given missile type.
         /// Some missiles have different speeds according to the game setting.
         /// </summary>
+        /// <summary>
+        /// Fires a missile of any type, from any height, at a target or along the actor's own
+        /// facing.
+        ///
+        /// A generalization of <see cref="SpawnMissile"/> for mods: DECORATE's A_CustomMissile names
+        /// the projectile, gives it a height, and works from a monster - where vanilla only ever
+        /// fires the missile a monster's own state table names. Reusing this method's private helpers
+        /// keeps the fast-monster speed rule in one place.
+        ///
+        /// A null destination means "straight ahead": a mod that spawns a projectile from a state
+        /// with no target still expects it to travel, not to be dropped.
+        /// </summary>
+        public Mobj SpawnScriptMissile(Mobj source, Mobj destination, MobjType type, Fixed height)
+        {
+            var missile = SpawnMobj(source.X, source.Y, source.Z + height, type);
+
+            if (missile.Info.SeeSound != 0 ||
+                ActorSounds.Has((int)missile.Type, ActorSoundSlot.See))
+            {
+                world.StartActorSound(missile, ActorSoundSlot.See,
+                    missile.Info.SeeSound, SfxType.Misc);
+            }
+
+            missile.Target = source;
+
+            var angle = destination != null
+                ? Geometry.PointToAngle(source.X, source.Y, destination.X, destination.Y)
+                : source.Angle;
+
+            var speed = GetMissileSpeed(missile.Type);
+
+            missile.Angle = angle;
+            missile.MomX = new Fixed(speed) * Trig.Cos(angle);
+            missile.MomY = new Fixed(speed) * Trig.Sin(angle);
+
+            if (destination != null)
+            {
+                // Aim vertically at the target, which vanilla does and a mod expects: a projectile
+                // that only travels level would sail over anything lower than its launcher.
+                var dist = Geometry.AproxDistance(
+                    destination.X - source.X,
+                    destination.Y - source.Y);
+
+                var num = (destination.Z - source.Z).Data;
+                var den = (dist / speed).Data;
+
+                if (den >= 1)
+                {
+                    missile.MomZ = new Fixed((int)((long)num * speed / den));
+                }
+            }
+
+            return missile;
+        }
+
         private int GetMissileSpeed(MobjType type)
         {
             if (world.Options.FastMonsters || world.Options.Skill == GameSkill.Nightmare)

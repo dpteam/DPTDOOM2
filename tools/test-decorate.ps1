@@ -463,6 +463,56 @@ ACTOR SoundOnlyImp 3001
     Assert-True ((State-Of $soundOnlyLog) -eq (State-Of $silentLog)) `
         ("the same actor without the sound gives the same world: $(State-Of $soundOnlyLog)")
 
+    Write-Host "With a projectile a frame fires"
+    $missile = Join-Path $work "missile.dec"
+
+    # A monster that fires an imp ball from its See chain. The world must change, and for the right
+    # reason: a spawn is simulation, so the projectile appears at the same tic on every end of a
+    # session - unlike a sound, which is presentation and leaves the world alone.
+    [System.IO.File]::WriteAllText($missile, @"
+ACTOR ShooterImp 3001
+{
+  States
+  {
+  Spawn:
+    TROO A 4 A_Look
+    TROO B 4 A_Jump(256, "See")
+  See:
+    TROO C 2 A_Chase
+    TROO C 2 A_CustomMissile("DoomImpBall", 32, 0, 0)
+    Goto See
+  }
+}
+"@)
+
+    $missileLog = Run-Game "missile" @('-decorate', $missile)
+
+    Assert-True ($missileLog -like "*scripts: OK*") "A_CustomMissile converts"
+    Assert-True ($missileLog -notlike "*takes no arguments*") "and is no longer refused"
+    Assert-True ($missileLog -like "*map MAP01: OK*") "the level loads"
+    Assert-True ((State-Of $missileLog) -ne $plainState) `
+        ("and the projectile changed the world: $(State-Of $missileLog)")
+
+    Write-Host "With a projectile name this engine does not know"
+    $missileBad = Join-Path $work "missilebad.dec"
+
+    [System.IO.File]::WriteAllText($missileBad, @"
+ACTOR ShooterImp 3001
+{
+  States
+  {
+  See:
+    TROO C 4 A_CustomMissile("NotAThing", 32, 0, 0)
+    Goto See
+  }
+}
+"@)
+
+    $missileBadLog = Run-Game "missilebad" @('-decorate', $missileBad)
+
+    Assert-True ($missileBadLog -like "*NotAThing*") "the unknown projectile is named"
+    Assert-True ($missileBadLog -like "*map MAP01: OK*") "and the level still loads"
+
     Write-Host "With A_Jump by frame count"
     $jumpByCount = Join-Path $work "jumpcount.dec"
 

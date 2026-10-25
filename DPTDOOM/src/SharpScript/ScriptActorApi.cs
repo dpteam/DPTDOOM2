@@ -312,6 +312,26 @@ namespace DPTDOOM.Scripting
         /// missing name is a modder's typo and the load report is where typos are read. At play time
         /// the delegate catches everything anyway - see <see cref="ScriptCondition.Evaluate"/>.
         /// </summary>
+        /// <summary>
+        /// The state number a frame name refers to, or a refusal.
+        ///
+        /// Shared by the calls that attach work to a frame - a sound, a projectile, an item - so
+        /// that "no such frame" is worded the same way in each and a modder reads one rule rather
+        /// than three.
+        /// </summary>
+        private int FrameNumber(string frameName, ScriptCall call)
+        {
+            int number;
+
+            if (!customStates.TryGetValue(frameName, out number))
+            {
+                throw call.Fail("no such frame '" + frameName +
+                                "'; only a frame this actor defined can carry work like this");
+            }
+
+            return number;
+        }
+
         private void ApplyCondition(PendingLink link, int target, IList<string> problems,
                                     string source)
         {
@@ -546,13 +566,7 @@ namespace DPTDOOM.Scripting
                 var soundName = call.AsText(1);
                 var volume = call.Count > 2 ? call.AsInt(2) : 100;
 
-                int number;
-
-                if (!customStates.TryGetValue(frameName, out number))
-                {
-                    throw call.Fail("no such frame '" + frameName +
-                                    "'; a sound can only be attached to a frame this actor defined");
-                }
+                var number = FrameNumber(frameName, call);
 
                 if (volume < 0)
                 {
@@ -570,6 +584,63 @@ namespace DPTDOOM.Scripting
 
                 DoomInfo.SetStateAction(number, (world, mobj) =>
                     world.StartSound(mobj, captured, SfxType.Misc, capturedVolume));
+
+                return ScriptValue.Void;
+            });
+
+            // A projectile the frame fires. DECORATE's A_CustomMissile names it, so the type is
+            // resolved here, when the file is read, and closed over: at play time there is no name
+            // to look up and no way to report a typo.
+            host.Register("Missile", 2, 3, call =>
+            {
+                var frameName = call.AsText(0);
+                var actorName = call.AsText(1);
+
+                var number = FrameNumber(frameName, call);
+
+                var type = ActorNames.TypeOf(actorName);
+
+                if (type < 0)
+                {
+                    throw call.Fail("no such actor '" + actorName +
+                                    "'; this engine knows the built-in actors by their ZDoom names");
+                }
+
+                var height = call.Count > 2 ? call.AsFixed(2) : Fixed.FromInt(32);
+
+                DoomInfo.SetStateAction(number, (world, mobj) =>
+                    world.ThingAllocation.SpawnScriptMissile(
+                        mobj, mobj.Target, (MobjType)type, height));
+
+                return ScriptValue.Void;
+            });
+
+            // Something the frame places in the world: DECORATE's A_SpawnItem. Not aimed and not
+            // moving, which is the difference from Missile and the reason they are two calls.
+            host.Register("SpawnItem", 2, 3, call =>
+            {
+                var frameName = call.AsText(0);
+                var actorName = call.AsText(1);
+
+                var number = FrameNumber(frameName, call);
+
+                var type = ActorNames.TypeOf(actorName);
+
+                if (type < 0)
+                {
+                    throw call.Fail("no such actor '" + actorName +
+                                    "'; this engine knows the built-in actors by their ZDoom names");
+                }
+
+                var distance = call.Count > 2 ? call.AsFixed(2) : Fixed.Zero;
+
+                DoomInfo.SetStateAction(number, (world, mobj) =>
+                {
+                    var x = mobj.X + (distance * Trig.Cos(mobj.Angle));
+                    var y = mobj.Y + (distance * Trig.Sin(mobj.Angle));
+
+                    world.ThingAllocation.SpawnMobj(x, y, mobj.Z + mobj.Height, (MobjType)type);
+                });
 
                 return ScriptValue.Void;
             });

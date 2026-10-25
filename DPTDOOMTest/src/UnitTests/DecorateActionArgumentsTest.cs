@@ -172,16 +172,81 @@ namespace DPTDOOMTest.UnitTests
         [TestMethod]
         public void AnUnsupportedArgumentedActionIsStillNamed()
         {
-            // The actions that need an actor-name table this project does not have must keep
-            // failing loudly rather than half-working.
+            // The actions this engine still cannot take must keep failing loudly rather than
+            // half-working. A_ThrowGrenade names an actor and a velocity this engine has no
+            // mechanism for, so it stays refused.
             List<string> problems;
 
-            ParseSingle(ActorWith("A_CustomMissile(\"Rocket\", 32)"), out problems);
+            ParseSingle(ActorWith("A_CustomPunch(32, 1)"), out problems);
 
             var text = All(problems);
 
-            StringAssert.Contains(text, "A_CustomMissile");
+            StringAssert.Contains(text, "A_CustomPunch");
             StringAssert.Contains(text, "takes no arguments");
+        }
+
+        [TestMethod]
+        public void AProjectileIsResolvedToAType()
+        {
+            List<string> problems;
+
+            var actor = ParseSingle(ActorWith("A_CustomMissile(\"DoomImpBall\", 32)"), out problems);
+
+            Assert.AreEqual(0, problems.Count, All(problems));
+
+            var frame = actor.Chains[0].Frames[0];
+
+            Assert.AreEqual("DoomImpBall", frame.MissileName);
+            Assert.AreEqual(32, frame.MissileHeight);
+        }
+
+        [TestMethod]
+        public void AProjectileNameThisEngineDoesNotKnowIsNamed()
+        {
+            // The whole reason the name table is taken from a checked source: a name that is not in
+            // it must be refused, because a guess would fire a different projectile silently.
+            List<string> problems;
+
+            var actor = ParseSingle(ActorWith("A_CustomMissile(\"NotAThing\", 32)"), out problems);
+
+            StringAssert.Contains(All(problems), "NotAThing");
+            Assert.IsNull(actor.Chains[0].Frames[0].MissileName);
+        }
+
+        [TestMethod]
+        public void ASpawnedItemIsResolvedToAType()
+        {
+            List<string> problems;
+
+            var actor = ParseSingle(ActorWith("A_SpawnItem(\"HealthBonus\")"), out problems);
+
+            Assert.AreEqual(0, problems.Count, All(problems));
+            Assert.AreEqual("HealthBonus", actor.Chains[0].Frames[0].SpawnName);
+        }
+
+        [TestMethod]
+        public void AnIgnoredOffsetIsNamed()
+        {
+            // A missile fired at an angle is a different weapon, so a non-zero angle must not be
+            // dropped in silence even though the spawn itself works.
+            List<string> problems;
+
+            ParseSingle(ActorWith("A_CustomMissile(\"DoomImpBall\", 32, 0, 15)"), out problems);
+
+            StringAssert.Contains(All(problems), "ignored");
+            StringAssert.Contains(All(problems), "xoffset and angle");
+        }
+
+        [TestMethod]
+        public void AZeroOffsetIsNotReported()
+        {
+            // The overwhelmingly common spelling is all zeroes; complaining about it would train
+            // the modder to ignore the report.
+            List<string> problems;
+
+            ParseSingle(ActorWith("A_CustomMissile(\"DoomImpBall\", 32, 0, 0)"), out problems);
+
+            Assert.AreEqual(0, problems.Count, All(problems));
         }
 
         [TestMethod]
