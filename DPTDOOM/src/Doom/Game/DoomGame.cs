@@ -98,6 +98,49 @@ namespace DPTDOOM
 		}
 
 		/// <summary>
+		/// Kills the body of a player whose slot the host has given up on.
+		///
+		/// The slot itself cannot go: a world built for three players and a world built for
+		/// two are different worlds, so the host keeps sending that player's command for ever
+		/// and every end applies the same thing. What does not have to stay is a body standing
+		/// in the corridor for the rest of the level.
+		///
+		/// It is killed rather than removed, and the difference matters:
+		///
+		///  - a corpse is inert and does not block, which is the complaint;
+		///  - `PlayersInGame()` keeps counting the slot, so a lone player who dies still
+		///    respawns in co-op instead of silently reloading the level, which is what
+		///    clearing the flag would have caused;
+		///  - nothing that already holds a `Player` has to be taught to expect a null body -
+		///    the status bar, the intermission and the death handling all still work.
+		///
+		/// Damage goes through the ordinary path rather than by setting the state, so the
+		/// death animation, the sound and the corpse flags are exactly what a killed player
+		/// gets. Running it again on later tics is harmless: a body at zero health is ignored.
+		/// </summary>
+		private void DepartedPlayers(TicCmd[] cmds)
+		{
+			var players = options.Players;
+
+			for (var i = 0; i < Player.MaxPlayerCount; i++)
+			{
+				if ((cmds[i].Buttons & TicCmdButtons.Gone) == 0)
+				{
+					continue;
+				}
+
+				var mobj = players[i].Mobj;
+
+				if (mobj == null || mobj.Health <= 0)
+				{
+					continue;
+				}
+
+				world.ThingInteraction.DamageMobj(mobj, null, null, mobj.Health);
+			}
+		}
+
+		/// <summary>
 		/// Advance the game one frame.
 		/// </summary>
 		public UpdateResult Update(TicCmd[] cmds)
@@ -142,6 +185,8 @@ namespace DPTDOOM
 						break;
 				}
 			}
+
+			DepartedPlayers(cmds);
 
 			for (var i = 0; i < Player.MaxPlayerCount; i++)
 			{

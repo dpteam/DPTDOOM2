@@ -246,6 +246,12 @@ namespace DPTDOOM.Net
                 var netTic = new NetTic();
                 netTic.Number = tic;
 
+                // The slot is kept - a world built for three players and a world built for
+                // two are different worlds - but the body is not: a player who left should
+                // not stand in the corridor for the rest of the level. The marker travels in
+                // the command so that every end removes it at the same tic.
+                netTic.Buttons = TicCmdButtons.Gone;
+
                 session.SendTic(player, netTic);
             }
         }

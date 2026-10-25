@@ -40,5 +40,19 @@ namespace DPTDOOM
 
         // Pause the game.
         public static readonly byte Pause = 1;
+
+        /// <summary>
+        /// The player in this slot has left for good, and their body should stop standing
+        /// there.
+        ///
+        /// Carried **inside** the command rather than as a separate notice, and that is the
+        /// whole reason it exists: every end must apply the removal at the same tic, or the
+        /// worlds part company. A notice arrives at a different moment on every machine; a
+        /// command is part of the agreed sequence.
+        ///
+        /// Set only by the host, only for slots it has given up on, and never by a local
+        /// input - so a demo can never contain it.
+        /// </summary>
+        public static readonly byte Gone = 64;
     }
 }
