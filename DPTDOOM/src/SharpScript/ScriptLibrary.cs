@@ -177,7 +177,7 @@ namespace DPTDOOM.Scripting
                     }
 
                     var host = new ScriptHost();
-                    var api = new ScriptActorApi(info, type);
+                    var api = new ScriptActorApi(info, type, entry.Unit);
                     api.Register(host);
 
                     try

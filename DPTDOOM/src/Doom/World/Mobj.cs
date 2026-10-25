@@ -341,11 +341,30 @@ namespace DPTDOOM
                 }
 
                 // A DECORATE jump: instead of continuing to Next, the frame may leave for another
-                // state, on a chance out of 256. The draw is the WORLD generator's, and it must
-                // be: every end of a session runs the same mod, so the same number of draws is
-                // what keeps their worlds together. This is simulation, not presentation.
-                if (st.JumpTarget >= 0 && st.JumpTarget < DoomInfo.States.Length &&
-                    world.Random.Next() < st.JumpChance)
+                // state. Two forms, and they are different instructions rather than two spellings:
+                //
+                //  - a **question** (A_JumpIf) leaves when the script answers true, always;
+                //  - a **chance** (A_Jump) rolls one number out of 256.
+                //
+                // The chance draw is the WORLD generator's, and it must be: every end of a session
+                // runs the same mod, so the same number of draws is what keeps their worlds
+                // together. This is simulation, not presentation.
+                var condition = st.JumpCondition;
+
+                if (condition != null)
+                {
+                    if (st.JumpTarget >= 0 && st.JumpTarget < DoomInfo.States.Length &&
+                        condition(world, this))
+                    {
+                        var target = st.JumpTarget;
+
+                        st = DoomInfo.States[target];
+                        isNull = target == 0;
+                        continue;
+                    }
+                }
+                else if (st.JumpTarget >= 0 && st.JumpTarget < DoomInfo.States.Length &&
+                         world.Random.Next() < st.JumpChance)
                 {
                     var target = st.JumpTarget;
 

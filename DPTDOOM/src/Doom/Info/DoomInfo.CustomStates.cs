@@ -173,6 +173,30 @@ namespace DPTDOOM
 
             table[number].JumpTarget = target;
             table[number].JumpChance = chance < 0 ? 0 : (chance > 256 ? 256 : chance);
+            table[number].JumpCondition = null;
+            return true;
+        }
+
+        /// <summary>
+        /// Gives a state a **conditional** jump: leave for the target when the question is true.
+        ///
+        /// The chance is reset to nothing, because the two forms are different instructions and a
+        /// state carrying both would have to decide which wins. Setting one clears the other, so
+        /// whichever a mod asks for last is what the frame does.
+        /// </summary>
+        public static bool SetStateCondition(int number, int target,
+                                             Func<World, Mobj, bool> condition)
+        {
+            var table = States;
+
+            if (number < CustomStateFirst || number >= table.Length)
+            {
+                return false;
+            }
+
+            table[number].JumpTarget = target;
+            table[number].JumpChance = 0;
+            table[number].JumpCondition = condition;
             return true;
         }
 

@@ -40,6 +40,17 @@ namespace DPTDOOM.Scripting
     /// </summary>
     public sealed class ScriptActorApi
     {
+        /// <summary>
+        /// The compiled script this actor was described by, kept so a conditional jump can be
+        /// answered later.
+        ///
+        /// A condition is a question about the actor at the moment the frame ends, which is long
+        /// after the definition has run - so the condition has to keep the unit and evaluate on
+        /// demand. Null when the caller had no unit to give, in which case a condition is refused
+        /// rather than half-supported.
+        /// </summary>
+        private readonly ScriptUnit unit;
+
         private readonly MobjInfo info;
 
         /// <summary>
@@ -47,10 +58,11 @@ namespace DPTDOOM.Scripting
         /// </summary>
         private readonly int type;
 
-        public ScriptActorApi(MobjInfo info, int type)
+        public ScriptActorApi(MobjInfo info, int type, ScriptUnit unit)
         {
             this.info = info;
             this.type = type;
+            this.unit = unit;
         }
 
         // ------------------------------------------------------------ states for a mod
@@ -80,6 +92,14 @@ namespace DPTDOOM.Scripting
 
             /// <summary>Chance out of 256; 256 means always.</summary>
             public int JumpChance;
+
+            /// <summary>
+            /// Function that decides the jump instead of the chance, or null.
+            ///
+            /// A name rather than the compiled thing, because the function is checked and wrapped
+            /// in <see cref="Finish"/> along with every other link.
+            /// </summary>
+            public string JumpConditionName;
         }
 
         /// <summary>
@@ -107,7 +127,7 @@ namespace DPTDOOM.Scripting
         /// </summary>
         private void RegisterStates(ScriptHost host)
         {
-            host.Register("State", 5, 8, call =>
+            host.Register("State", 5, 9, call =>
             {
                 var name = call.AsText(0);
 
@@ -180,7 +200,18 @@ namespace DPTDOOM.Scripting
                 if (call.Count > 6)
                 {
                     link.JumpName = call.AsText(6);
-                    link.JumpChance = call.Count > 7 ? call.AsInt(7) : 256;
+
+                    // A 9th argument names a script function instead of a chance: A_JumpIf asks a
+                    // question rather than rolling a die. The two are exclusive because they are
+                    // different instructions, and the state table enforces that.
+                    if (call.Count > 8)
+                    {
+                        link.JumpConditionName = call.AsText(8);
+                    }
+                    else
+                    {
+                        link.JumpChance = call.Count > 7 ? call.AsInt(7) : 256;
+                    }
                 }
 
                 pendingLinks.Add(link);
@@ -223,7 +254,14 @@ namespace DPTDOOM.Scripting
 
                     if (ResolveState(link.JumpName, out target))
                     {
-                        DoomInfo.SetStateJump(link.Number, target, link.JumpChance);
+                        if (!string.IsNullOrEmpty(link.JumpConditionName))
+                        {
+                            ApplyCondition(link, target, problems, source);
+                        }
+                        else
+                        {
+                            DoomInfo.SetStateJump(link.Number, target, link.JumpChance);
+                        }
                     }
                     else
                     {
@@ -265,6 +303,50 @@ namespace DPTDOOM.Scripting
 
             number = -1;
             return false;
+        }
+
+        /// <summary>
+        /// Wraps a named function into a condition the state can ask.
+        ///
+        /// The check that the function exists happens here rather than at play time, because a
+        /// missing name is a modder's typo and the load report is where typos are read. At play time
+        /// the delegate catches everything anyway - see <see cref="ScriptCondition.Evaluate"/>.
+        /// </summary>
+        private void ApplyCondition(PendingLink link, int target, IList<string> problems,
+                                    string source)
+        {
+            if (unit == null)
+            {
+                problems.Add(source + ": the state '" + NameOf(link.Number) +
+                             "' has a condition, but this actor was described without a compiled " +
+                             "script to ask; the jump is dropped");
+                return;
+            }
+
+            var function = unit.Find(link.JumpConditionName);
+
+            if (function == null)
+            {
+                problems.Add(source + ": the state '" + NameOf(link.Number) +
+                             "' asks '" + link.JumpConditionName +
+                             "', which is not a function in this script; the jump is dropped");
+                return;
+            }
+
+            if (function.Parameters.Count != 0)
+            {
+                // The condition is asked with no arguments: everything it needs it reads from the
+                // actor through its own host. A function that wants arguments is not a question
+                // about this actor, and guessing which actor to pass would be a guess.
+                problems.Add(source + ": the condition '" + link.JumpConditionName +
+                             "' takes " + function.Parameters.Count +
+                             " parameter(s), but a condition is asked with none; the jump is dropped");
+                return;
+            }
+
+            var condition = new ScriptCondition(unit, link.JumpConditionName, source);
+
+            DoomInfo.SetStateCondition(link.Number, target, condition.Evaluate);
         }
 
         private string NameOf(int number)

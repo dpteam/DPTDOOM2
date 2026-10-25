@@ -44,6 +44,23 @@ namespace DPTDOOM
         /// <summary>How likely the jump is, as one chance in 256.</summary>
         private int jumpChance;
 
+        /// <summary>
+        /// A question that decides the jump instead of the chance, or null.
+        ///
+        /// DECORATE's A_JumpIf: the frame leaves for its target when the question is true, with no
+        /// roll. A delegate rather than the script type itself, for the same reason the actions are
+        /// delegates: the world layer does not have to know that a scripting language exists, and
+        /// the state table stays as cheap to copy as before.
+        /// </summary>
+        private Func<World, Mobj, bool> jumpCondition;
+
+        /// <summary>A question that decides the jump instead of the chance, or null.</summary>
+        public Func<World, Mobj, bool> JumpCondition
+        {
+            get => jumpCondition;
+            set => jumpCondition = value;
+        }
+
         public MobjStateDef(
             int number,
             Sprite sprite,

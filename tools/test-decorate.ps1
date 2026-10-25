@@ -305,6 +305,75 @@ ACTOR JumpingImp 3001
     Assert-True ((State-Of $jumpLog) -ne (State-Of $noJumpLog)) `
         ("the jump moved the world: with $(State-Of $jumpLog), without $(State-Of $noJumpLog)")
 
+    Write-Host "With an A_JumpIf this engine can take"
+    $jumpIfTrue = Join-Path $work "jumpif.dec"
+    $jumpIfFalse = Join-Path $work "jumpifnot.dec"
+
+    # Two files identical except for the threshold. The imp's health is 60 in the IWAD, so one
+    # condition is true and the other false - and the two worlds must differ. A single file would
+    # only show that the condition was read, not that its answer decides the jump.
+    [System.IO.File]::WriteAllText($jumpIfTrue, @"
+ACTOR ConditionalImp 3001
+{
+  States
+  {
+  Spawn:
+    TROO A 4 A_Look
+    TROO B 4 A_JumpIf(health > 10, "See")
+  See:
+    TROO C 4 A_Chase
+    Goto See
+  }
+}
+"@)
+
+    [System.IO.File]::WriteAllText($jumpIfFalse, @"
+ACTOR ConditionalImp 3001
+{
+  States
+  {
+  Spawn:
+    TROO A 4 A_Look
+    TROO B 4 A_JumpIf(health > 100000, "See")
+  See:
+    TROO C 4 A_Chase
+    Goto See
+  }
+}
+"@)
+
+    $trueLog = Run-Game "jumpif" @('-decorate', $jumpIfTrue)
+    $falseLog = Run-Game "jumpifnot" @('-decorate', $jumpIfFalse)
+
+    Assert-True ($trueLog -like "*scripts: OK*") "the converted script loaded"
+    Assert-True ($trueLog -notlike "*no such action*") "A_JumpIf is no longer a missing action"
+    Assert-True ($trueLog -like "*map MAP01: OK*") "the level loads"
+
+    Assert-True ((State-Of $trueLog) -ne (State-Of $falseLog)) `
+        ("the answer decided the jump: true $(State-Of $trueLog), false $(State-Of $falseLog)")
+
+    Write-Host "With an A_JumpIf on a field this engine does not have"
+    $jumpIfBad = Join-Path $work "jumpifbad.dec"
+
+    [System.IO.File]::WriteAllText($jumpIfBad, @"
+ACTOR CountingImp 3001
+{
+  States
+  {
+  See:
+    TROO A 4 A_JumpIf(CountInv("Clip") > 0, "See")
+    TROO B 4
+    Loop
+  }
+}
+"@)
+
+    $badLog = Run-Game "jumpifbad" @('-decorate', $jumpIfBad)
+
+    Assert-True ($badLog -like "*CountInv*") "the unknown field is named"
+    Assert-True ($badLog -like "*jump is dropped*") "and only the jump is dropped"
+    Assert-True ($badLog -like "*map MAP01: OK*") "the level still loads"
+
     Write-Host "With an A_Jump by frame count"
     $jumpByCount = Join-Path $work "jumpcount.dec"
 

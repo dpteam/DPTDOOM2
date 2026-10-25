@@ -104,6 +104,15 @@ namespace DPTDOOM.Scripting
 
         /// <summary>Chance of the jump, out of 256.</summary>
         public int JumpChance = 256;
+
+        /// <summary>
+        /// The jump's condition, already translated into this engine's language, or null.
+        ///
+        /// A_JumpIf asks a question instead of rolling a die, so this and
+        /// <see cref="JumpChance"/> are exclusive: a frame has one jump, and it is either certain
+        /// when the question is true or taken on a chance.
+        /// </summary>
+        public string JumpCondition;
     }
 
     /// <summary>
@@ -310,6 +319,11 @@ namespace DPTDOOM.Scripting
                 EmitStates(script, actor, problems);
 
                 script.Append("}\n");
+
+                // Conditions come after the definition they belong to, as top-level functions:
+                // the state layer looks them up by name when the frame ends, which is long after
+                // this script has run.
+                EmitConditions(script, actor);
             }
 
             return script.ToString();
@@ -493,8 +507,20 @@ namespace DPTDOOM.Scripting
                             : frame.JumpLabel;
 
                         script.Append(", \"")
-                              .Append(jumpTo).Append("\", ")
-                              .Append(frame.JumpChance.ToString(CultureInfo.InvariantCulture));
+                              .Append(jumpTo).Append("\", ");
+
+                        if (frame.JumpCondition != null)
+                        {
+                            // A conditional jump: the chance slot carries nothing and the tenth
+                            // argument names the function that answers the question.
+                            var condition = ConditionName(actor, chain.Label, i + 1);
+
+                            script.Append("0, \"").Append(condition).Append("\"");
+                        }
+                        else
+                        {
+                            script.Append(frame.JumpChance.ToString(CultureInfo.InvariantCulture));
+                        }
                     }
 
                     script.Append(");\n");
@@ -513,6 +539,70 @@ namespace DPTDOOM.Scripting
         private static string FrameName(string label, int index)
         {
             return label + "#" + index.ToString(CultureInfo.InvariantCulture);
+        }
+
+        /// <summary>
+        /// The name of the function that answers one frame's condition.
+        ///
+        /// Built from the frame's identity rather than counted, so the emission order of frames
+        /// cannot change which condition belongs to which - the same property the frame names
+        /// themselves have. Characters that are not letters or digits are dropped because this has
+        /// to be a legal identifier in the script, not merely a unique string.
+        /// </summary>
+        private static string ConditionName(DecorateActor actor, string label, int index)
+        {
+            var name = new System.Text.StringBuilder("Cond_");
+
+            foreach (var c in actor.Name)
+            {
+                if (char.IsLetterOrDigit(c))
+                {
+                    name.Append(c);
+                }
+            }
+
+            name.Append('_');
+
+            foreach (var c in label)
+            {
+                if (char.IsLetterOrDigit(c))
+                {
+                    name.Append(c);
+                }
+            }
+
+            name.Append('_').Append(index.ToString(CultureInfo.InvariantCulture));
+            return name.ToString();
+        }
+
+        /// <summary>
+        /// Writes one function per conditional jump.
+        ///
+        /// The condition is already in this engine's language - <see cref="DecorateCondition"/>
+        /// translated it while the frame was read - so this is only the wrapper. A condition that
+        /// could not be translated left the frame with no jump at all and was reported there.
+        /// </summary>
+        private static void EmitConditions(StringBuilder script, DecorateActor actor)
+        {
+            for (var chainIndex = 0; chainIndex < actor.Chains.Count; chainIndex++)
+            {
+                var chain = actor.Chains[chainIndex];
+
+                for (var i = 0; i < chain.Frames.Count; i++)
+                {
+                    var frame = chain.Frames[i];
+
+                    if (frame.JumpLabel == null || frame.JumpCondition == null)
+                    {
+                        continue;
+                    }
+
+                    script.Append("\nfn ").Append(ConditionName(actor, chain.Label, i + 1))
+                          .Append("() {\n")
+                          .Append("    return ").Append(frame.JumpCondition).Append(";\n")
+                          .Append("}\n");
+                }
+            }
         }
 
         /// <summary>True when this actor describes a chain with that label.</summary>
@@ -1090,7 +1180,16 @@ namespace DPTDOOM.Scripting
                 return;
             }
 
-            var arguments = new List<Token>();
+            // Commas are kept as argument boundaries rather than dropped. A_JumpIf's first argument
+            // is an expression of several tokens, so the split has to happen here - splitting the
+            // flat stream later cannot tell `health < 100, "Pain"` from a comma inside a nested
+            // call.
+            //
+            // Depth matters: `A_JumpIf(CountInv("Clip") > 0, "Pain")` has a closing bracket of its
+            // own, and stopping at the first one ended the argument list inside the condition.
+            var arguments = new List<List<Token>>();
+            var current = new List<Token>();
+            var depth = 0;
 
             while (true)
             {
@@ -1103,20 +1202,35 @@ namespace DPTDOOM.Scripting
                     return;
                 }
 
-                if (token.Text == ")")
+                if (token.Text == "(")
                 {
-                    break;
+                    depth++;
+                }
+                else if (token.Text == ")")
+                {
+                    if (depth == 0)
+                    {
+                        break;
+                    }
+
+                    depth--;
+                }
+                else if (token.Text == "," && depth == 0)
+                {
+                    arguments.Add(current);
+                    current = new List<Token>();
+                    continue;
                 }
 
-                if (token.Text != ",")
-                {
-                    arguments.Add(token);
-                }
+                current.Add(token);
             }
 
-            var isJump = string.Equals(frame.Action, "A_Jump", StringComparison.OrdinalIgnoreCase);
+            arguments.Add(current);
 
-            if (!isJump)
+            var isJump = string.Equals(frame.Action, "A_Jump", StringComparison.OrdinalIgnoreCase);
+            var isJumpIf = string.Equals(frame.Action, "A_JumpIf", StringComparison.OrdinalIgnoreCase);
+
+            if (!isJump && !isJumpIf)
             {
                 problems.Add(actor.Name + " line " + frame.Line + ": '" + frame.Action +
                              "' takes no arguments in this engine, so they are ignored; " +
@@ -1124,40 +1238,92 @@ namespace DPTDOOM.Scripting
                 return;
             }
 
-            // A_Jump(chance, "Label"). The chance is out of 256, as DECORATE writes it.
             if (arguments.Count != 2)
             {
-                problems.Add(actor.Name + " line " + frame.Line + ": 'A_Jump' needs a chance and a " +
-                             "label, so the jump is dropped");
+                problems.Add(actor.Name + " line " + frame.Line + ": '" + frame.Action +
+                             "' needs " +
+                             (isJump ? "a chance and a label" : "a condition and a label") +
+                             ", so the jump is dropped");
                 frame.Action = "";
                 return;
             }
 
-            if (!arguments[0].IsNumber)
-            {
-                problems.Add(actor.Name + " line " + frame.Line + ": 'A_Jump' needs a whole chance " +
-                             "such as 128, found '" + arguments[0].Text + "'; the jump is dropped");
-                frame.Action = "";
-                return;
-            }
-
-            var chance = arguments[0].Number;
+            var label = arguments[1];
 
             // A relative offset is legal DECORATE ("skip two frames") and is deliberately not
             // guessed at: the number counts states, not frames of this chain, and a wrong guess
             // would move the actor to a frame the author never meant.
-            if (arguments[1].IsNumber)
+            if (label.Count == 1 && label[0].IsNumber)
             {
-                problems.Add(actor.Name + " line " + frame.Line + ": 'A_Jump' by a frame count (" +
-                             arguments[1].Text + ") is not supported; name the label instead. " +
-                             "The jump is dropped");
+                problems.Add(actor.Name + " line " + frame.Line + ": '" + frame.Action +
+                             "' by a frame count (" + label[0].Text +
+                             ") is not supported; name the label instead. The jump is dropped");
                 frame.Action = "";
                 return;
             }
 
-            frame.JumpLabel = arguments[1].Text;
-            frame.JumpChance = chance < 0 ? 0 : (chance > 256 ? 256 : chance);
+            if (label.Count != 1)
+            {
+                problems.Add(actor.Name + " line " + frame.Line + ": '" + frame.Action +
+                             "' ends with something that is not a single label; the jump is dropped");
+                frame.Action = "";
+                return;
+            }
+
+            frame.JumpLabel = label[0].Text;
             frame.Action = "";
+
+            if (isJump)
+            {
+                var chance = arguments[0];
+
+                if (chance.Count != 1 || !chance[0].IsNumber)
+                {
+                    problems.Add(actor.Name + " line " + frame.Line +
+                                 ": 'A_Jump' needs a whole chance such as 128; the jump is dropped");
+                    frame.JumpLabel = null;
+                    return;
+                }
+
+                var value = chance[0].Number;
+                frame.JumpChance = value < 0 ? 0 : (value > 256 ? 256 : value);
+                return;
+            }
+
+            // A_JumpIf: the condition is translated into this engine's own language. Translating
+            // rather than passing the text through is deliberate - an unknown word then names
+            // itself in the report instead of surfacing as a script error at load.
+            frame.JumpCondition = DecorateCondition.Translate(
+                JoinTokens(arguments[0]), actor.Name, frame.Line, problems);
+
+            if (frame.JumpCondition == null)
+            {
+                // Already reported. The frame keeps its animation and loses only the jump.
+                frame.JumpLabel = null;
+            }
+        }
+
+        /// <summary>
+        /// The tokens of one argument as text.
+        ///
+        /// Spaces between words are not preserved and do not need to be: the condition reader is
+        /// whitespace-insensitive and the tokens are already separated.
+        /// </summary>
+        private static string JoinTokens(List<Token> tokens)
+        {
+            var text = new System.Text.StringBuilder();
+
+            foreach (var token in tokens)
+            {
+                if (text.Length > 0)
+                {
+                    text.Append(' ');
+                }
+
+                text.Append(token.Text);
+            }
+
+            return text.ToString();
         }
 
 
