@@ -324,7 +324,7 @@ namespace DPTDOOMTest.CompatibilityTests
                 foreach (var offset in new[] { 64, -64, 96, -96 })
                 {
                     var candidate = world.ThingAllocation.SpawnMobj(
-                        pm.X + new Fixed(offset), pm.Y, pm.Z, MobjType.Troop);
+                        pm.X + Fixed.FromInt(offset), pm.Y, pm.Z, MobjType.Troop);
 
                     if (world.VisibilityCheck.CheckSight(candidate, pm))
                     {

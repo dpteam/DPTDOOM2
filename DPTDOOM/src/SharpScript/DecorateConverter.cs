@@ -137,6 +137,33 @@ namespace DPTDOOM.Scripting
 
         /// <summary>How far in front of the actor the spawned thing appears.</summary>
         public int SpawnDistance;
+
+        /// <summary>
+        /// True when the frame's action was A_LookEx.
+        ///
+        /// A flag rather than "LookExFov != 0", because zero is a meaningful field of view: it is
+        /// how a mod writes "half a circle", and reading it as "no A_LookEx here" would turn the
+        /// most common call in the family into plain A_Look.
+        /// </summary>
+        public bool HasLookEx;
+
+        /// <summary>A_LookEx's flags, already summed from the LOF_ names.</summary>
+        public int LookExFlags;
+
+        /// <summary>A_LookEx's minimum sight distance, in map units. Zero means no minimum.</summary>
+        public int LookExMinSee;
+
+        /// <summary>A_LookEx's maximum sight distance, in map units. Zero means no maximum.</summary>
+        public int LookExMaxSee;
+
+        /// <summary>A_LookEx's maximum hearing distance, in map units. Zero means no maximum.</summary>
+        public int LookExMaxHear;
+
+        /// <summary>A_LookEx's field of view in degrees. Zero means half a circle.</summary>
+        public int LookExFov;
+
+        /// <summary>State to enter instead of the see state, or null for the actor's own.</summary>
+        public string LookExSeeState;
     }
 
     /// <summary>
@@ -305,7 +332,7 @@ namespace DPTDOOM.Scripting
                 // Sounds are attached to their frames as extra calls *inside* the definition: a
                 // sound is a piece of work the frame performs, not something the transition
                 // describes. They come after the frames exist, which is why this is a second pass.
-                EmitSounds(script, actor);
+                EmitSounds(script, actor, problems);
 
                 script.Append("}\n");
 
@@ -528,7 +555,8 @@ namespace DPTDOOM.Scripting
         /// plays on the way. The frame is addressed by the name it was created with, so the order
         /// of emission cannot change which sound belongs to which frame.
         /// </summary>
-        private static void EmitSounds(StringBuilder script, DecorateActor actor)
+        private static void EmitSounds(StringBuilder script, DecorateActor actor,
+                                           IList<string> problems)
         {
             foreach (var chain in actor.Chains)
             {
@@ -549,18 +577,19 @@ namespace DPTDOOM.Scripting
                 }
             }
 
-            EmitSpawns(script, actor);
+            EmitFrameActions(script, actor, problems);
         }
 
         /// <summary>
-        /// Attaches each frame's projectile or spawned thing.
+        /// Attaches each frame's projectile, spawned thing, or look test.
         ///
         /// A separate pass from the sound for the same reason a sound is separate from a
         /// transition: these are work the frame performs. A frame carries at most one action in
         /// DECORATE, so at most one of these applies to any frame, and each is installed as that
         /// frame's action.
         /// </summary>
-        private static void EmitSpawns(StringBuilder script, DecorateActor actor)
+        private static void EmitFrameActions(StringBuilder script, DecorateActor actor,
+                                                    IList<string> problems)
         {
             foreach (var chain in actor.Chains)
             {
@@ -581,6 +610,43 @@ namespace DPTDOOM.Scripting
                         script.Append("    SpawnItem(\"").Append(name).Append("\", \"")
                               .Append(frame.SpawnName).Append("\", ")
                               .Append(FixedFromInt(frame.SpawnDistance)).Append(");\n");
+                    }
+
+                    if (frame.HasLookEx)
+                    {
+                        // The see state is written as a frame of this actor when the mod named one
+                        // of its own chains, and as the bare name otherwise - which the script
+                        // layer resolves the same way a "Goto See" does. Same rule as a jump, for
+                        // the same reason: a mod's own chain has to win over the engine's.
+                        var seeState = "";
+
+                        if (frame.LookExSeeState != null)
+                        {
+                            if (HasChain(actor, frame.LookExSeeState))
+                            {
+                                seeState = FrameName(frame.LookExSeeState, 1);
+                            }
+                            else
+                            {
+                                // The actor's own see state is used, which for a mod that did not
+                                // write a chain of that name is the inherited one - the same thing
+                                // it asked for. Saying so beats emitting a name the script would
+                                // refuse to resolve and losing the whole actor over it.
+                                problems.Add(actor.Name + " line " + frame.Line + ": 'A_LookEx' " +
+                                             "names the state '" + frame.LookExSeeState +
+                                             "', which is not one of this actor's own chains, so " +
+                                             "the actor's own see state is used");
+                            }
+                        }
+
+                        script.Append("    LookEx(\"").Append(name).Append("\", ")
+                              .Append(frame.LookExFlags.ToString(CultureInfo.InvariantCulture))
+                              .Append(", ")
+                              .Append(FixedFromInt(frame.LookExMinSee)).Append(", ")
+                              .Append(FixedFromInt(frame.LookExMaxSee)).Append(", ")
+                              .Append(FixedFromInt(frame.LookExMaxHear)).Append(", ")
+                              .Append(frame.LookExFov.ToString(CultureInfo.InvariantCulture))
+                              .Append(", \"").Append(seeState).Append("\");\n");
                     }
                 }
             }
@@ -1325,6 +1391,12 @@ namespace DPTDOOM.Scripting
                 return;
             }
 
+            if (string.Equals(frame.Action, "A_LookEx", StringComparison.OrdinalIgnoreCase))
+            {
+                ReadLookEx(arguments, actor, frame, problems);
+                return;
+            }
+
             if (!isJump)
             {
                 problems.Add(actor.Name + " line " + frame.Line + ": '" + frame.Action +
@@ -1561,6 +1633,245 @@ namespace DPTDOOM.Scripting
             ReportIgnoredArguments(arguments, 2, actor, frame, problems, "A_SpawnItem", "zheight");
 
             frame.Action = "";
+        }
+
+        /// <summary>
+        /// A_LookEx: the wake-up test with a window, a cone and a choice of state.
+        ///
+        /// The engine has one look routine and this configures it, rather than adding a second
+        /// look. Six arguments and six flags is exactly the case where a separate implementation
+        /// would drift: the vanilla path is the one every monster in the IWAD takes, and a copy
+        /// would be the one nobody runs until a mod does.
+        ///
+        /// LOF_DONTCHASEGOAL is accepted and does nothing, because this engine has no patrol goals
+        /// for a monster to chase. That is said in the report rather than passed on silently: a mod
+        /// that gave a monster a route expects it to walk it.
+        /// </summary>
+        private static void ReadLookEx(List<List<Token>> arguments, DecorateActor actor,
+                                       StateFrame frame, IList<string> problems)
+        {
+            frame.Action = "";
+            frame.HasLookEx = true;
+
+            if (arguments.Count > 0 && arguments[0].Count > 0)
+            {
+                int flags;
+                string unknown;
+
+                if (TryReadLookFlags(arguments[0], out flags, out unknown))
+                {
+                    frame.LookExFlags = flags;
+
+                    if ((flags & LookExFlags.DontChaseGoal) != 0)
+                    {
+                        problems.Add(actor.Name + " line " + frame.Line + ": 'A_LookEx' " +
+                                     "LOF_DONTCHASEGOAL is accepted and has no effect - this " +
+                                     "engine gives monsters no patrol goal to ignore");
+                    }
+                }
+                else
+                {
+                    problems.Add(actor.Name + " line " + frame.Line + ": 'A_LookEx' flag '" +
+                                 unknown + "' is not one this engine knows, so the look runs " +
+                                 "without it");
+                }
+            }
+
+            frame.LookExMinSee = ReadLookDistance(arguments, 1, actor, frame, problems, "minseedist");
+            frame.LookExMaxSee = ReadLookDistance(arguments, 2, actor, frame, problems, "maxseedist");
+            frame.LookExMaxHear = ReadLookDistance(arguments, 3, actor, frame, problems, "maxheardist");
+
+            if (arguments.Count > 4 && arguments[4].Count > 0)
+            {
+                int fov;
+
+                if (TryReadWholeNumber(arguments[4], out fov))
+                {
+                    if (fov < 0)
+                    {
+                        problems.Add(actor.Name + " line " + frame.Line + ": 'A_LookEx' fov is " +
+                                     "negative, so half a circle is used");
+                        fov = 0;
+                    }
+                    else if (fov > 360)
+                    {
+                        problems.Add(actor.Name + " line " + frame.Line + ": 'A_LookEx' fov is " +
+                                     "more than a full circle, so a full circle is used");
+                        fov = 360;
+                    }
+
+                    frame.LookExFov = fov;
+                }
+                else
+                {
+                    problems.Add(actor.Name + " line " + frame.Line + ": 'A_LookEx' fov must be " +
+                                 "a whole number of degrees; half a circle is used");
+                }
+            }
+
+            if (arguments.Count > 5 && arguments[5].Count == 1 && arguments[5][0].Text.Length > 0)
+            {
+                // The name is kept as written and resolved when the states are emitted. It cannot
+                // be checked here: the actor's chains are still being read, so the chain this
+                // points at may not exist yet, and checking now would reject a call that names a
+                // label further down the same block.
+                frame.LookExSeeState = arguments[5][0].Text;
+            }
+        }
+
+        /// <summary>One of A_LookEx's three distance arguments.</summary>
+        private static int ReadLookDistance(List<List<Token>> arguments, int index,
+                                            DecorateActor actor, StateFrame frame,
+                                            IList<string> problems, string name)
+        {
+            if (index >= arguments.Count || arguments[index].Count == 0)
+            {
+                return 0;
+            }
+
+            int value;
+
+            if (TryReadWholeNumber(arguments[index], out value))
+            {
+                return value;
+            }
+
+            problems.Add(actor.Name + " line " + frame.Line + ": 'A_LookEx' " + name +
+                         " is not a whole number of map units, so no limit is applied");
+
+            return 0;
+        }
+
+        /// <summary>
+        /// A_LookEx's flag argument, which DECORATE writes as LOF_ names joined by bars, as a
+        /// number, or as a mix of the two.
+        ///
+        /// The numbers are ZDoom's own (p_enemy.h), not a guess: a wrong one would silently mean a
+        /// different flag, and these flags are about what a monster can see.
+        /// </summary>
+        private static bool TryReadLookFlags(List<Token> argument, out int flags, out string unknown)
+        {
+            flags = 0;
+            unknown = null;
+
+            if (argument.Count != 1)
+            {
+                unknown = "the whole argument";
+                return false;
+            }
+
+            var token = argument[0];
+
+            if (token.IsNumber)
+            {
+                flags = token.Number;
+                return true;
+            }
+
+            foreach (var part in token.Text.Split('|'))
+            {
+                var name = part.Trim();
+
+                if (name.Length == 0)
+                {
+                    continue;
+                }
+
+                switch (name.ToUpperInvariant())
+                {
+                    case "LOF_NOSIGHTCHECK":
+                        flags |= LookExFlags.NoSightCheck;
+                        break;
+
+                    case "LOF_NOSOUNDCHECK":
+                        flags |= LookExFlags.NoSoundCheck;
+                        break;
+
+                    case "LOF_DONTCHASEGOAL":
+                        flags |= LookExFlags.DontChaseGoal;
+                        break;
+
+                    case "LOF_NOSEESOUND":
+                        flags |= LookExFlags.NoSeeSound;
+                        break;
+
+                    case "LOF_FULLVOLSEESOUND":
+                        flags |= LookExFlags.FullVolSeeSound;
+                        break;
+
+                    case "LOF_NOJUMP":
+                        flags |= LookExFlags.NoJump;
+                        break;
+
+                    default:
+                        int value;
+
+                        if (!TryReadWholeNumberText(name, out value))
+                        {
+                            unknown = name;
+                            return false;
+                        }
+
+                        flags |= value;
+                        break;
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// One numeric argument, which DECORATE may write as a whole number or as a fixed literal.
+        ///
+        /// "512.0" is how most mods write a distance, and refusing it would turn the common case
+        /// into a report line. A non-zero fraction is refused rather than truncated: a fraction of
+        /// a map unit means nothing here, and rounding it silently would move a monster's
+        /// threshold without saying so.
+        /// </summary>
+        private static bool TryReadWholeNumber(List<Token> argument, out int value)
+        {
+            value = 0;
+
+            if (argument.Count != 1)
+            {
+                return false;
+            }
+
+            if (argument[0].IsNumber)
+            {
+                value = argument[0].Number;
+                return true;
+            }
+
+            return TryReadWholeNumberText(argument[0].Text, out value);
+        }
+
+        private static bool TryReadWholeNumberText(string text, out int value)
+        {
+            value = 0;
+
+            var dot = text.IndexOf('.');
+
+            if (dot >= 0)
+            {
+                for (var i = dot + 1; i < text.Length; i++)
+                {
+                    if (text[i] != '0')
+                    {
+                        return false;
+                    }
+                }
+
+                text = text.Substring(0, dot);
+            }
+
+            if (text.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+            {
+                return int.TryParse(text.Substring(2), NumberStyles.HexNumber,
+                                    CultureInfo.InvariantCulture, out value);
+            }
+
+            return int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out value);
         }
 
         /// <summary>

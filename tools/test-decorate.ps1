@@ -11,9 +11,9 @@
 # health makes the run diverge from the same run without it, which is proof that something
 # happened rather than a log line saying it did.
 #
-# What is deliberately *not* asserted, because it would be a lie: that a States section
-# worked. It does not work yet, and the test checks the opposite - that the log says so, in
-# the modder's own terms, with the file and the line.
+# What is deliberately *not* asserted: that a sound is audible. There is no sound device in a
+# headless run, so the check is the opposite one - a file that only names sounds must leave the
+# world bit for bit as it was, because a sound is presentation and not simulation.
 
 param(
     [string]$Iwad = "refs\iwads\doom2.wad",
@@ -533,6 +533,60 @@ ACTOR CountingImp 3001
 
     Assert-True ($countLog -like "*frame count*") "a jump by frame count is named"
     Assert-True ($countLog -like "*map MAP01: OK*") "and the level still loads"
+
+    Write-Host "With an A_LookEx this engine can take"
+    $lookEx = Join-Path $work "lookex.dec"
+
+    # The observable here is the report, not the world hash: a headless run has no input, so no
+    # monster ever wakes and a look test cannot show up in the world. What this does prove is the
+    # whole path - the call is converted, the script parses, and the see-state name resolves
+    # against the actor's own chains. A name that did not resolve would throw while the actor was
+    # being defined, and the report would say so.
+    [System.IO.File]::WriteAllText($lookEx, @"
+ACTOR WatchImp 3001
+{
+  States
+  {
+  Spawn:
+    TROO A 4 A_LookEx(LOF_NOSIGHTCHECK|LOF_FULLVOLSEESOUND, 0, 1024.0, 512, 90, "See")
+  See:
+    TROO C 4 A_Chase
+    Goto See
+  }
+}
+"@)
+
+    $lookExLog = Run-Game "lookex" @('-decorate', $lookEx)
+
+    Assert-True ($lookExLog -like "*scripts: OK*") "A_LookEx converts"
+    Assert-True ($lookExLog -notlike "*takes no arguments*") "and is no longer refused"
+    Assert-True ($lookExLog -notlike "*decorate problem*") "a call this engine can take reports nothing"
+    Assert-True ($lookExLog -like "*map MAP01: OK*") "the level loads"
+
+    Write-Host "With an A_LookEx naming a state that does not exist"
+    $lookExBad = Join-Path $work "lookexbad.dec"
+
+    # The state name is resolved when the states are emitted, and a name that leads nowhere must
+    # cost the name and not the actor: the imp keeps its own see state and the level loads.
+    [System.IO.File]::WriteAllText($lookExBad, @"
+ACTOR ConfusedImp 3001
+{
+  States
+  {
+  Spawn:
+    TROO A 4 A_LookEx(0, 0, 0, 0, 0, "NoSuchState")
+  See:
+    TROO C 4 A_Chase
+    Goto See
+  }
+}
+"@)
+
+    $lookExBadLog = Run-Game "lookexbad" @('-decorate', $lookExBad)
+
+    Assert-True ($lookExBadLog -like "*NoSuchState*") "the unknown state is named"
+    Assert-True ($lookExBadLog -like "*map MAP01: OK*") "and the level still loads"
+    Assert-True ($lookExBadLog -notlike "*scripts: FAILED*") "the actor survives it"
 
     Write-Host "With a truncated file"
     $cutLog = Run-Game "cut" @('-decorate', $truncated)

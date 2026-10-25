@@ -645,6 +645,53 @@ namespace DPTDOOM.Scripting
                 return ScriptValue.Void;
             });
 
+            // A_LookEx: the wake-up test with a window, a cone and a choice of state.
+            //
+            // One call with the parameters written out, rather than six small setters: the
+            // parameters only mean anything together, and a frame that set the cone but not the
+            // distance would otherwise look like it had asked for both.
+            host.Register("LookEx", 6, 7, call =>
+            {
+                var number = FrameNumber(call.AsText(0), call);
+
+                var parameters = new LookExParams();
+
+                parameters.Flags = call.AsInt(1);
+                parameters.MinSeeDist = call.AsFixed(2);
+                parameters.MaxSeeDist = call.AsFixed(3);
+                parameters.MaxHearDist = call.AsFixed(4);
+
+                // DECORATE writes the cone in degrees and means "half a circle" by zero, which is
+                // also what plain A_Look uses. Converting here, once, keeps the per-tic check down
+                // to one comparison and one subtraction.
+                var fov = call.AsInt(5);
+
+                parameters.Fov = fov <= 0
+                    ? Angle.Ang180
+                    : Angle.FromDegree(fov > 360 ? 360 : fov);
+
+                if (call.Count > 6 && call.AsText(6).Length > 0)
+                {
+                    var name = call.AsText(6);
+
+                    int state;
+
+                    if (!ResolveState(name, out state))
+                    {
+                        throw call.Fail("no such state '" + name +
+                                        "' for 'A_LookEx'; it is neither a state of this actor " +
+                                        "nor one of the engine's");
+                    }
+
+                    parameters.SeeState = (MobjState)state;
+                }
+
+                DoomInfo.SetStateAction(number, (world, mobj) =>
+                    world.MonsterBehavior.LookEx(mobj, parameters));
+
+                return ScriptValue.Void;
+            });
+
             // Diagnostics: the only way a script can say something is wrong, since it
             // cannot throw. Collected by the library and reported with the line.
             host.Register("Fail", 1, call =>

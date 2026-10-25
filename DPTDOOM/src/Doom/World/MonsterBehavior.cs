@@ -40,6 +40,11 @@ namespace DPTDOOM
 
         private bool LookForPlayers(Mobj actor, bool allAround)
         {
+            return LookForPlayers(actor, allAround, null);
+        }
+
+        private bool LookForPlayers(Mobj actor, bool allAround, LookExParams p)
+        {
             var players = world.Options.Players;
 
             var count = 0;
@@ -77,6 +82,28 @@ namespace DPTDOOM
                     continue;
                 }
 
+                // The distance window of A_LookEx is checked before the sight test, which is what
+                // ZDoom does and also the cheap order: a target outside the window is not worth
+                // tracing a line for. A_Look has no window, and this block costs it nothing.
+                var distance = Fixed.Zero;
+
+                if (p != null)
+                {
+                    distance = Geometry.AproxDistance(
+                        player.Mobj.X - actor.X,
+                        player.Mobj.Y - actor.Y);
+
+                    if (p.MaxSeeDist.Data != 0 && distance > p.MaxSeeDist)
+                    {
+                        continue;
+                    }
+
+                    if (p.MinSeeDist.Data != 0 && distance < p.MinSeeDist)
+                    {
+                        continue;
+                    }
+                }
+
                 if (!world.VisibilityCheck.CheckSight(actor, player.Mobj))
                 {
                     // Out of sight.
@@ -85,21 +112,43 @@ namespace DPTDOOM
 
                 if (!allAround)
                 {
-                    var angle = Geometry.PointToAngle(
-                        actor.X, actor.Y,
-                        player.Mobj.X, player.Mobj.Y) - actor.Angle;
-
-                    if (angle > Angle.Ang90 && angle < Angle.Ang270)
+                    if (p == null)
                     {
-                        var dist = Geometry.AproxDistance(
-                            player.Mobj.X - actor.X,
-                            player.Mobj.Y - actor.Y);
+                        var angle = Geometry.PointToAngle(
+                            actor.X, actor.Y,
+                            player.Mobj.X, player.Mobj.Y) - actor.Angle;
 
-                        // If real close, react anyway.
-                        if (dist > WeaponBehavior.MeleeRange)
+                        if (angle > Angle.Ang90 && angle < Angle.Ang270)
                         {
-                            // Behind back.
-                            continue;
+                            var dist = Geometry.AproxDistance(
+                                player.Mobj.X - actor.X,
+                                player.Mobj.Y - actor.Y);
+
+                            // If real close, react anyway.
+                            if (dist > WeaponBehavior.MeleeRange)
+                            {
+                                // Behind back.
+                                continue;
+                            }
+                        }
+                    }
+                    else if (p.Fov.Data != 0)
+                    {
+                        // A_LookEx's own field of view, in the angle it is given in. ZDoom reads
+                        // "outside the cone" as more than half the field away, and keeps the
+                        // vanilla rule that something right in front of its face is noticed
+                        // whatever the cone says.
+                        var away = Angle.Abs(Geometry.PointToAngle(
+                            actor.X, actor.Y,
+                            player.Mobj.X, player.Mobj.Y) - actor.Angle);
+
+                        if (away > p.Fov / 2u)
+                        {
+                            if (p.MinSeeDist.Data != 0 ||
+                                distance > WeaponBehavior.MeleeRange + actor.Radius)
+                            {
+                                continue;
+                            }
                         }
                     }
                 }
@@ -113,38 +162,67 @@ namespace DPTDOOM
 
         public void Look(Mobj actor)
         {
+            LookEx(actor, null);
+        }
+
+        /// <summary>
+        /// A_Look, with the knobs DECORATE's A_LookEx adds.
+        ///
+        /// The null case is plain A_Look, and it has to stay **bit for bit** the same: it runs on
+        /// every vanilla monster every tic, so its draws, its sight checks and its state changes go
+        /// into the world hash. Every difference below is behind a flag or a parameter that A_Look
+        /// never sets.
+        /// </summary>
+        public void LookEx(Mobj actor, LookExParams p)
+        {
+            var flags = p == null ? 0 : p.Flags;
+
             // Any shot will wake up.
             actor.Threshold = 0;
 
-            var target = actor.Subsector.Sector.SoundTarget;
-
-            if (target != null &&
-                (target.Flags & MobjFlags.Shootable) != 0 &&
-                (target.Flags & MobjFlags.NeverTarget) == 0)
+            // LOF_NOSOUNDCHECK: ignore the noise that woke the sector, and look only.
+            if ((flags & LookExFlags.NoSoundCheck) == 0)
             {
-                actor.Target = target;
+                var target = actor.Subsector.Sector.SoundTarget;
 
-                if ((actor.Flags & MobjFlags.Ambush) != 0)
+                if (target != null &&
+                    (target.Flags & MobjFlags.Shootable) != 0 &&
+                    (target.Flags & MobjFlags.NeverTarget) == 0 &&
+                    !TooFarToHear(actor, target, p))
                 {
-                    if (world.VisibilityCheck.CheckSight(actor, actor.Target))
+                    actor.Target = target;
+
+                    if ((actor.Flags & MobjFlags.Ambush) != 0)
+                    {
+                        // Ambush means "check for yourself": the noise alone is not enough.
+                        if (WithinSeeRange(actor, target, p) &&
+                            world.VisibilityCheck.CheckSight(actor, target))
+                        {
+                            goto seeYou;
+                        }
+                    }
+                    else
                     {
                         goto seeYou;
                     }
                 }
-                else
-                {
-                    goto seeYou;
-                }
             }
 
-            if (!LookForPlayers(actor, false))
+            // LOF_NOSIGHTCHECK: a monster that only reacts to noise never opens its eyes.
+            if ((flags & LookExFlags.NoSightCheck) != 0)
+            {
+                return;
+            }
+
+            if (!LookForPlayers(actor, false, p))
             {
                 return;
             }
 
             // Go into chase state.
             seeYou:
-            if (actor.Info.SeeSound != 0 || ActorSounds.Has((int)actor.Type, ActorSoundSlot.See))
+            if ((flags & LookExFlags.NoSeeSound) == 0 &&
+                (actor.Info.SeeSound != 0 || ActorSounds.Has((int)actor.Type, ActorSoundSlot.See)))
             {
                 int sound;
 
@@ -168,9 +246,11 @@ namespace DPTDOOM
 
                 // The override is applied here, after the variant draw, so a mod's sound cannot
                 // change how many numbers the world generator uses.
-                if (actor.Type == MobjType.Spider || actor.Type == MobjType.Cyborg)
+                if ((flags & LookExFlags.FullVolSeeSound) != 0 ||
+                    actor.Type == MobjType.Spider ||
+                    actor.Type == MobjType.Cyborg)
                 {
-                    // Full volume for boss monsters.
+                    // Full volume for boss monsters, and for LOF_FULLVOLSEESOUND.
                     world.StartActorSound(actor, ActorSoundSlot.See, (Sfx)sound, SfxType.Diffuse);
                 }
                 else
@@ -179,7 +259,58 @@ namespace DPTDOOM
                 }
             }
 
-            actor.SetState(actor.Info.SeeState);
+            // LOF_NOJUMP: the target is taken, but the animation is left to the mod's own frames.
+            if ((flags & LookExFlags.NoJump) == 0)
+            {
+                actor.SetState(p != null && p.SeeState != MobjState.Null
+                    ? p.SeeState
+                    : actor.Info.SeeState);
+            }
+        }
+
+        /// <summary>
+        /// Is the noise too far away to answer? A_LookEx's maxheardist, which A_Look does not have.
+        /// </summary>
+        private static bool TooFarToHear(Mobj actor, Mobj target, LookExParams p)
+        {
+            if (p == null || p.MaxHearDist.Data == 0)
+            {
+                return false;
+            }
+
+            return Geometry.AproxDistance(
+                target.X - actor.X,
+                target.Y - actor.Y) > p.MaxHearDist;
+        }
+
+        /// <summary>
+        /// Is the noise's source inside the distance window A_LookEx asked for?
+        ///
+        /// Only an ambush monster asks this, and only because it is the one case where the engine
+        /// has to decide about a target it was told about rather than one it saw.
+        /// </summary>
+        private static bool WithinSeeRange(Mobj actor, Mobj target, LookExParams p)
+        {
+            if (p == null)
+            {
+                return true;
+            }
+
+            var distance = Geometry.AproxDistance(
+                target.X - actor.X,
+                target.Y - actor.Y);
+
+            if (p.MaxSeeDist.Data != 0 && distance > p.MaxSeeDist)
+            {
+                return false;
+            }
+
+            if (p.MinSeeDist.Data != 0 && distance < p.MinSeeDist)
+            {
+                return false;
+            }
+
+            return true;
         }
 
 
