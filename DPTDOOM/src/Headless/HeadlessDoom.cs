@@ -63,6 +63,46 @@ namespace DPTDOOM.Headless
             printed = console.LineCount;
         }
 
+        /// <summary>
+        /// Runs whatever the operator typed. Returns false when the server should stop.
+        ///
+        /// The three verbs cannot touch the world - see <see cref="DedicatedServer.Parse"/> for why
+        /// a server console must not be an in-game console with a network attached.
+        /// </summary>
+        private static bool RunServerCommands(ServerConsole console, NetSession session, int tic,
+                                              TimeSpan up)
+        {
+            string line;
+
+            while (console.TryTake(out line))
+            {
+                string argument;
+
+                switch (DedicatedServer.Parse(line, out argument))
+                {
+                    case ServerCommand.Quit:
+                        Console.WriteLine("Server: stopping on request.");
+                        return false;
+
+                    case ServerCommand.Status:
+                        Console.WriteLine("Server: " + DedicatedServer.Status(
+                            session.PlayerCount, session.ExpectedPlayers, session.LeftCount,
+                            tic, up));
+                        break;
+
+                    case ServerCommand.Say:
+                        // Sent as the server's own slot, because there is no other sender. It shows
+                        // up as a chat line like any other player's, which is what a guest expects -
+                        // a message that appeared as if from nowhere would look like a bug.
+                        session.SendChat(session.LocalPlayer, argument);
+                        Console.WriteLine("Server said: " + argument);
+                        break;
+                }
+            }
+
+            return true;
+        }
+
         private static int GameTics(Doom doom, int updateCount)
         {
             var game = doom.Game;
@@ -92,12 +132,24 @@ namespace DPTDOOM.Headless
                 NetSession session = null;
                 NetDriver driver = null;
 
+                // Created before the session, because the host waits for its players inside the
+                // network startup - and an operator who started a server by mistake has to be able
+                // to stop it during that wait, before a world exists.
+                var dedicated = args.dedicated.Present;
+                var serverConsole = dedicated ? new ServerConsole() : null;
+
                 if (args.net.Present)
                 {
                     session = NetStartup.Create(args, content, (title, lines) =>
                     {
                         Console.WriteLine("Net: " + title + " (" + string.Join("; ", lines) + ")");
-                    });
+                    }, dedicated ? (Func<bool>)serverConsole.PollForQuit : null);
+
+                    if (session == null)
+                    {
+                        // Stopped by the operator during the wait for players. Nothing to run.
+                        return 0;
+                    }
                     driver = new NetDriver(session);
                     driver.DeterministicInput = args.botinput.Present;
                 }
@@ -112,6 +164,20 @@ namespace DPTDOOM.Headless
                     var stateAtPrinted = false;
                     var faulted = false;
                     var lastMap = 0;
+
+                    var started = DateTime.Now;
+                    var lastStatus = DateTime.Now;
+
+                    if (dedicated)
+                    {
+                        Console.WriteLine("Dedicated server: " +
+                                          (session == null
+                                              ? "no session, which is a mistake"
+                                              : DedicatedServer.Status(session.PlayerCount,
+                                                    session.ExpectedPlayers, session.LeftCount,
+                                                    0, TimeSpan.Zero)));
+                        Console.WriteLine("Commands on standard input: status, say <text>, quit.");
+                    }
                     var levelTics = 0;
                     var printedConsoleLines = 0;
 
@@ -197,7 +263,7 @@ namespace DPTDOOM.Headless
                                 DoomDebug.GetSectorHash(doom.Game.World).ToString("x8"));
                         }
 
-                        if (limit > 0 && simulated >= limit)
+                        if (limit > 0 && DedicatedServer.TicLimitReached(dedicated, simulated, limit))
                         {
                             break;
                         }
@@ -205,7 +271,11 @@ namespace DPTDOOM.Headless
                         // A paused game stops advancing the level time, which is the
                         // point of a pause - but a headless run asked for tics, and if
                         // it cannot get them it should say so instead of spinning.
-                        if (stalledUpdates > 5000)
+                        //
+                        // A dedicated server waits forever instead: "nobody is connected yet" is
+                        // the normal state of a server, and treating it as a fault is what made
+                        // the first version quit before a player could join.
+                        if (DedicatedServer.WaitIsAFault(dedicated, stalledUpdates, 5000))
                         {
                             Console.WriteLine("Simulation is not advancing (paused?); stopping after " +
                                               simulated + " tics.");
@@ -213,7 +283,7 @@ namespace DPTDOOM.Headless
                         }
 
                         // Safety net for a game that never ends without input.
-                        if (tics >= 10000000)
+                        if (DedicatedServer.SafetyNetReached(dedicated, tics))
                         {
                             break;
                         }
@@ -242,6 +312,29 @@ namespace DPTDOOM.Headless
 
                             // The lockstep loop idles while waiting for peers.
                             Thread.Sleep(1);
+                        }
+
+                        if (serverConsole != null)
+                        {
+                            if (!RunServerCommands(serverConsole, session,
+                                                   driver != null ? driver.CurrentTic : simulated,
+                                                   DateTime.Now - started))
+                            {
+                                break;
+                            }
+
+                            // A heartbeat, so an operator can tell a working server from a hung one
+                            // without trying to join it. Once a minute is often enough to notice and
+                            // rare enough not to bury the log.
+                            if ((DateTime.Now - lastStatus).TotalSeconds >= 60)
+                            {
+                                lastStatus = DateTime.Now;
+
+                                Console.WriteLine("Server: " + DedicatedServer.Status(
+                                    session.PlayerCount, session.ExpectedPlayers, session.LeftCount,
+                                    driver != null ? driver.CurrentTic : simulated,
+                                    DateTime.Now - started));
+                            }
                         }
 
                         // Report a level transition as it happens.

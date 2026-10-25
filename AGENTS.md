@@ -75,7 +75,8 @@ powershell -NoProfile -File tools\test-launcher.ps1
 - Тесты совместимости без IWAD помечаются `Inconclusive`, а не падают.
 - Геймплейные тесты сравнивают хеши мира с эталонами Managed Doom. Не обновлять
   эталоны молча при расхождении — это признак регрессии.
-- Headless — тестовый бэкенд, **не** dedicated server.
+- Headless — тестовый бэкенд, **не** dedicated server. Сервер — это `-dedicated`: тот же
+  headless-хост, но ожидание игроков не считается ошибкой. `docs/DEDICATED.md`.
 - Звук — свой микшер (`src/Audio/SoundMixer.cs`, `SoundPan.cs`) плюс `waveOut`.
   Проверяется офлайн через `-soundtest` и юнит-тестами. Панораму не ломать:
   в Doom **положительный** относительный угол = источник **слева**. Перегруз

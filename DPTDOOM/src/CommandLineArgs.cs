@@ -76,6 +76,16 @@ namespace DPTDOOM
         public readonly Arg nodeh;
 
         public readonly Arg headless;
+
+        /// <summary>
+        /// Run as a server: headless, hosting, and never stopping because nothing is happening.
+        ///
+        /// Separate from <see cref="headless"/> because the difference is policy, not backend: a
+        /// headless run is a test that should stop when it stalls, and a server is a service that
+        /// should not. Implies <c>headless</c> and <c>-net host</c>.
+        /// </summary>
+        public readonly Arg dedicated;
+
         public readonly Arg<int> tics;
 
         /// <summary>
@@ -279,13 +289,26 @@ namespace DPTDOOM
 
             nodeh = new Arg(args.Contains("-nodeh"));
 
-            headless = new Arg(args.Contains("-headless"));
+            headless = new Arg(args.Contains("-headless") || args.Contains("-dedicated"));
+
+            // A dedicated server is a headless host that keeps running: the two flags differ in what
+            // happens when nothing is happening, which is a policy rather than a backend.
+            dedicated = new Arg(args.Contains("-dedicated"));
             tics = GetInt(args, "-tics");
             stateat = GetInt(args, "-stateat");
             shot = GetString(args, "-shot");
             version = new Arg(args.Contains("-version") || args.Contains("--version"));
 
             net = GetString(args, "-net");
+
+            if (!net.Present && args.Contains("-dedicated"))
+            {
+                // A dedicated server hosts. Requiring `-net host -dedicated` would be a rule that
+                // exists only to be forgotten; an explicit `-net` still wins, so a dedicated
+                // **guest** is expressible - which is how the server gets tested against a real host.
+                net = new Arg<string>("host");
+            }
+
             port = GetInt(args, "-port");
             players = GetInt(args, "-players");
             address = GetString(args, "-address");

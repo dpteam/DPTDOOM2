@@ -109,6 +109,7 @@ Internet Explorer. WebView2 на Windows XP не ставится, а MSHTML е�
 | [docs/LOCKDEFS.md](docs/LOCKDEFS.md) | LOCKDEFS: что нужно замку с номером |
 | [docs/TEXTURES.md](docs/TEXTURES.md) | TEXTURES: составные текстуры из кусков |
 | [docs/TERRAIN.md](docs/TERRAIN.md) | TERRAIN: что пол делает с тем, кто по нему ходит |
+| [docs/DEDICATED.md](docs/DEDICATED.md) | Dedicated server: сервер, который не останавливается |
 | [docs/DECORATE.md](docs/DECORATE.md) | DECORATE: что переносится в SharpScript, а что честно не переносится |
 | [docs/MASTER.md](docs/MASTER.md) · [docs/RELAY.md](docs/RELAY.md) | сервер списка сессий и relay |
 | [docs/LAUNCHER.md](docs/LAUNCHER.md) | лаунчер: страница, мост, темы |

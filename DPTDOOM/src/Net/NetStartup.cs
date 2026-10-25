@@ -31,7 +31,8 @@ namespace DPTDOOM.Net
     {
         public delegate void StatusHandler(string title, string[] lines);
 
-        public static NetSession Create(CommandLineArgs args, GameContent content, StatusHandler status)
+        public static NetSession Create(CommandLineArgs args, GameContent content, StatusHandler status,
+                                       Func<bool> quitRequested = null)
         {
             var port = args.port.Present ? args.port.Value : NetProtocol.DefaultPort;
             var name = args.name.Present ? args.name.Value : Environment.MachineName;
@@ -39,7 +40,7 @@ namespace DPTDOOM.Net
 
             if (mode == "host")
             {
-                return Host(args, content, status, port, name);
+                return Host(args, content, status, port, name, quitRequested);
             }
 
             if (mode == "join")
@@ -50,7 +51,8 @@ namespace DPTDOOM.Net
             throw new Exception("Unknown -net mode '" + mode + "'. Use 'host' or 'join'.");
         }
 
-        private static NetSession Host(CommandLineArgs args, GameContent content, StatusHandler status, int port, string name)
+        private static NetSession Host(CommandLineArgs args, GameContent content, StatusHandler status,
+                                     int port, string name, Func<bool> quitRequested)
         {
             var players = args.players.Present ? args.players.Value : 2;
             var settings = BuildSettings(args, content);
@@ -205,6 +207,15 @@ namespace DPTDOOM.Net
 
             var deadline = DateTime.Now.AddSeconds(300);
 
+            // A dedicated server waits for as long as it takes. The five-minute deadline is right
+            // for somebody who launched a game and is waiting for a friend to type the address: at
+            // five minutes they have given up. A server with nobody on it is not failing - that is
+            // its normal state - and exiting after five minutes is the one thing that makes a
+            // dedicated server impossible.
+            var forever = args.dedicated.Present;
+
+            var lastWaiting = -1;
+
             while (session.PlayerCount < session.HumansNeeded)
             {
                 if (session.Faulted)
@@ -213,7 +224,15 @@ namespace DPTDOOM.Net
                     throw new Exception("Network: " + session.FaultReason);
                 }
 
-                if (DateTime.Now > deadline)
+                // An operator who started a server by mistake has to be able to stop it during
+                // this wait, not only after somebody joins.
+                if (quitRequested != null && quitRequested())
+                {
+                    session.Dispose();
+                    return null;
+                }
+
+                if (!forever && DateTime.Now > deadline)
                 {
                     session.Dispose();
                     throw new Exception("Timed out waiting for players.");
@@ -226,6 +245,26 @@ namespace DPTDOOM.Net
                 // definitely not true.
                 var guests = session.PlayerCount - 1;
                 var guestSlots = session.HumansNeeded - 1;
+
+                // A server reports only when the count changes. Printing the same line ten times a
+                // second for a week is a log nobody can read, and the line says nothing new until
+                // somebody joins - which is the moment it is worth writing.
+                if (forever)
+                {
+                    if (guests != lastWaiting)
+                    {
+                        lastWaiting = guests;
+
+                        Console.WriteLine("Server: waiting for players, " + guests + "/" +
+                                          guestSlots + " connected." +
+                                          (guestSlots > 0
+                                              ? " Ready when " + guestSlots + " have joined."
+                                              : ""));
+                    }
+
+                    Thread.Sleep(100);
+                    continue;
+                }
 
                 var waiting = new System.Collections.Generic.List<string>(lines);
                 waiting[waiting.Count - 1] = "WAITING FOR PLAYER " + guests + "/" + guestSlots;
