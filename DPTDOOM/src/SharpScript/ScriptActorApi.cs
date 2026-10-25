@@ -645,6 +645,88 @@ namespace DPTDOOM.Scripting
                 return ScriptValue.Void;
             });
 
+            // A flag the frame sets or clears. DECORATE's A_ChangeFlag names a flag, so the name is
+            // resolved here, when the file is read: a typo must reach the report, not disappear into
+            // a frame that quietly changes nothing.
+            host.Register("ChangeFlag", 3, 3, call =>
+            {
+                var number = FrameNumber(call.AsText(0), call);
+                var name = call.AsText(1);
+                var value = call.AsBool(2);
+
+                MobjFlags flag;
+
+                if (!TryParseFlagName(name, out flag))
+                {
+                    throw call.Fail("no such flag '" + name +
+                                    "'; this engine's flags are the vanilla set plus the ones " +
+                                    "DECORATE needed");
+                }
+
+                DoomInfo.SetStateAction(number, (world, mobj) =>
+                {
+                    if (value)
+                    {
+                        mobj.Flags |= flag;
+                    }
+                    else
+                    {
+                        mobj.Flags &= ~flag;
+                    }
+                });
+
+                return ScriptValue.Void;
+            });
+
+            // A_SetTics: how long this frame lasts. It writes the actor's own tic counter, which is
+            // what the state loop reads on the next pass - so the frame that is running keeps
+            // whatever it had, and the change takes effect from here on.
+            host.Register("SetTics", 2, 2, call =>
+            {
+                var number = FrameNumber(call.AsText(0), call);
+                var tics = call.AsInt(1);
+
+                if (tics < -1)
+                {
+                    throw call.Fail("A_SetTics cannot set fewer than -1 tics, which means never");
+                }
+
+                DoomInfo.SetStateAction(number, (world, mobj) => mobj.Tics = tics);
+
+                return ScriptValue.Void;
+            });
+
+            // A_Recoil: a push backwards along the actor's own facing.
+            host.Register("Recoil", 2, 2, call =>
+            {
+                var number = FrameNumber(call.AsText(0), call);
+                var distance = call.AsFixed(1);
+
+                DoomInfo.SetStateAction(number, (world, mobj) =>
+                    world.MonsterBehavior.Recoil(mobj, distance));
+
+                return ScriptValue.Void;
+            });
+
+            // A_FaceTarget with ZDoom's arguments: the first is a limit on how far the actor may
+            // turn, not an offset. A mod writing A_FaceTarget(90) wants a gradual turn.
+            host.Register("FaceTarget", 3, 3, call =>
+            {
+                var number = FrameNumber(call.AsText(0), call);
+                var maxTurn = Angle.FromDegree(call.AsInt(1));
+                var offset = Angle.FromDegree(call.AsInt(2));
+
+                if (maxTurn.Data < 0)
+                {
+                    throw call.Fail("A_FaceTarget's turn limit cannot be negative");
+                }
+
+                DoomInfo.SetStateAction(number, (world, mobj) =>
+                    world.MonsterBehavior.FaceTarget(mobj, maxTurn, offset));
+
+                return ScriptValue.Void;
+            });
+
             // A_LookEx: the wake-up test with a window, a cone and a choice of state.
             //
             // One call with the parameters written out, rather than six small setters: the

@@ -164,6 +164,33 @@ namespace DPTDOOM.Scripting
 
         /// <summary>State to enter instead of the see state, or null for the actor's own.</summary>
         public string LookExSeeState;
+
+        /// <summary>Flag the frame sets or clears, by the engine's own name, or null.</summary>
+        public string ChangeFlagName;
+
+        /// <summary>Whether <see cref="ChangeFlagName"/> is set rather than cleared.</summary>
+        public bool ChangeFlagValue;
+
+        /// <summary>True when the frame's action was A_SetTics.</summary>
+        public bool HasSetTics;
+
+        /// <summary>How long the frame lasts, in tics.</summary>
+        public int SetTicsValue;
+
+        /// <summary>True when the frame's action was A_Recoil.</summary>
+        public bool HasRecoil;
+
+        /// <summary>How far the frame pushes the actor backwards, in map units.</summary>
+        public int RecoilDistance;
+
+        /// <summary>True when the frame's action was A_FaceTarget with arguments.</summary>
+        public bool HasFaceTarget;
+
+        /// <summary>How far the actor may turn toward its target, in degrees. Zero means all the way.</summary>
+        public int FaceMaxTurn;
+
+        /// <summary>Offset added to the resulting angle, in degrees.</summary>
+        public int FaceOffset;
     }
 
     /// <summary>
@@ -610,6 +637,35 @@ namespace DPTDOOM.Scripting
                         script.Append("    SpawnItem(\"").Append(name).Append("\", \"")
                               .Append(frame.SpawnName).Append("\", ")
                               .Append(FixedFromInt(frame.SpawnDistance)).Append(");\n");
+                    }
+
+                    if (frame.ChangeFlagName != null)
+                    {
+                        script.Append("    ChangeFlag(\"").Append(name).Append("\", \"")
+                              .Append(frame.ChangeFlagName).Append("\", ")
+                              .Append(frame.ChangeFlagValue ? "true" : "false").Append(");\n");
+                    }
+
+                    if (frame.HasSetTics)
+                    {
+                        script.Append("    SetTics(\"").Append(name).Append("\", ")
+                              .Append(frame.SetTicsValue.ToString(CultureInfo.InvariantCulture))
+                              .Append(");\n");
+                    }
+
+                    if (frame.HasRecoil)
+                    {
+                        script.Append("    Recoil(\"").Append(name).Append("\", ")
+                              .Append(FixedFromInt(frame.RecoilDistance)).Append(");\n");
+                    }
+
+                    if (frame.HasFaceTarget)
+                    {
+                        script.Append("    FaceTarget(\"").Append(name).Append("\", ")
+                              .Append(frame.FaceMaxTurn.ToString(CultureInfo.InvariantCulture))
+                              .Append(", ")
+                              .Append(frame.FaceOffset.ToString(CultureInfo.InvariantCulture))
+                              .Append(");\n");
                     }
 
                     if (frame.HasLookEx)
@@ -1355,6 +1411,17 @@ namespace DPTDOOM.Scripting
 
             arguments.Add(current);
 
+            // An empty argument list - "A_Look()" - is not an argument list. DECORATE allows the
+            // parentheses and mods write them, so complaining about them would be a report line
+            // about correct input. The call is still dispatched: "A_LookEx()" is a perfectly good
+            // request for every default, and skipping the handler would lose it.
+            var hasArguments = !(arguments.Count == 1 && arguments[0].Count == 0);
+
+            if (!hasArguments)
+            {
+                arguments = new List<List<Token>>();
+            }
+
             var isJump = string.Equals(frame.Action, "A_Jump", StringComparison.OrdinalIgnoreCase);
             var isJumpIf = string.Equals(frame.Action, "A_JumpIf", StringComparison.OrdinalIgnoreCase);
 
@@ -1397,11 +1464,39 @@ namespace DPTDOOM.Scripting
                 return;
             }
 
+            if (string.Equals(frame.Action, "A_ChangeFlag", StringComparison.OrdinalIgnoreCase))
+            {
+                ReadChangeFlag(arguments, actor, frame, problems);
+                return;
+            }
+
+            if (string.Equals(frame.Action, "A_SetTics", StringComparison.OrdinalIgnoreCase))
+            {
+                ReadSetTics(arguments, actor, frame, problems);
+                return;
+            }
+
+            if (string.Equals(frame.Action, "A_Recoil", StringComparison.OrdinalIgnoreCase))
+            {
+                ReadRecoil(arguments, actor, frame, problems);
+                return;
+            }
+
+            if (string.Equals(frame.Action, "A_FaceTarget", StringComparison.OrdinalIgnoreCase))
+            {
+                ReadFaceTarget(arguments, actor, frame, problems);
+                return;
+            }
+
             if (!isJump)
             {
-                problems.Add(actor.Name + " line " + frame.Line + ": '" + frame.Action +
-                             "' takes no arguments in this engine, so they are ignored; " +
-                             "the action itself still runs");
+                if (hasArguments)
+                {
+                    problems.Add(actor.Name + " line " + frame.Line + ": '" + frame.Action +
+                                 "' takes no arguments in this engine, so they are ignored; " +
+                                 "the action itself still runs");
+                }
+
                 return;
             }
 
@@ -1872,6 +1967,183 @@ namespace DPTDOOM.Scripting
             }
 
             return int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out value);
+        }
+
+        /// <summary>
+        /// A_ChangeFlag: set or clear one flag on the actor.
+        ///
+        /// The name is normalised the same way a "+FLAG" line is, so "NO_BLOCKMAP" and "NOBLOCKMAP"
+        /// both reach the engine's name. An unknown flag is reported and costs the frame's action
+        /// rather than the actor: a frame that quietly changes nothing is the failure this is
+        /// meant to prevent.
+        ///
+        /// Link flags are a real limitation and are not pretended away: this engine keeps the
+        /// sector and blockmap links it built when the actor was spawned, so clearing NOBLOCKMAP or
+        /// NOSECTOR at runtime changes the flag but does not move the actor in the world links.
+        /// </summary>
+        private static void ReadChangeFlag(List<List<Token>> arguments, DecorateActor actor,
+                                           StateFrame frame, IList<string> problems)
+        {
+            if (arguments.Count < 1 || arguments[0].Count != 1)
+            {
+                problems.Add(actor.Name + " line " + frame.Line +
+                             ": 'A_ChangeFlag' needs a flag name, so the frame changes nothing");
+                frame.Action = "";
+                return;
+            }
+
+            var name = NormaliseFlagName(arguments[0][0].Text);
+
+            if (!ScriptActorApi.TryParseFlagName(name, out _))
+            {
+                problems.Add(actor.Name + " line " + frame.Line + ": there is no flag '" +
+                             arguments[0][0].Text + "' in this engine, so 'A_ChangeFlag' changes " +
+                             "nothing; the frame itself is kept");
+                frame.Action = "";
+                return;
+            }
+
+            var value = true;
+
+            if (arguments.Count > 1)
+            {
+                var token = arguments[1].Count == 1 ? arguments[1][0] : null;
+
+                if (token == null)
+                {
+                    problems.Add(actor.Name + " line " + frame.Line + ": 'A_ChangeFlag' value must " +
+                                 "be 0 or 1; the flag is set");
+                }
+                else if (token.IsNumber)
+                {
+                    value = token.Number != 0;
+                }
+                else if (string.Equals(token.Text, "true", StringComparison.OrdinalIgnoreCase))
+                {
+                    value = true;
+                }
+                else if (string.Equals(token.Text, "false", StringComparison.OrdinalIgnoreCase))
+                {
+                    value = false;
+                }
+                else
+                {
+                    problems.Add(actor.Name + " line " + frame.Line + ": 'A_ChangeFlag' value '" +
+                                 token.Text + "' is not a number or true/false; the flag is set");
+                }
+            }
+
+            frame.ChangeFlagName = name;
+            frame.ChangeFlagValue = value;
+            frame.Action = "";
+        }
+
+        /// <summary>A_SetTics: how long the frame lasts.</summary>
+        private static void ReadSetTics(List<List<Token>> arguments, DecorateActor actor,
+                                        StateFrame frame, IList<string> problems)
+        {
+            int tics;
+
+            if (arguments.Count < 1 || !TryReadWholeNumber(arguments[0], out tics))
+            {
+                problems.Add(actor.Name + " line " + frame.Line +
+                             ": 'A_SetTics' needs a whole number of tics, so the frame keeps its own");
+                frame.Action = "";
+                return;
+            }
+
+            if (tics < -1)
+            {
+                problems.Add(actor.Name + " line " + frame.Line + ": 'A_SetTics' cannot be less " +
+                             "than -1, which means never; -1 is used");
+                tics = -1;
+            }
+
+            frame.SetTicsValue = tics;
+            frame.HasSetTics = true;
+            frame.Action = "";
+        }
+
+        /// <summary>A_Recoil: a push backwards along the actor's own facing.</summary>
+        private static void ReadRecoil(List<List<Token>> arguments, DecorateActor actor,
+                                       StateFrame frame, IList<string> problems)
+        {
+            int distance;
+
+            if (arguments.Count < 1 || !TryReadWholeNumber(arguments[0], out distance))
+            {
+                problems.Add(actor.Name + " line " + frame.Line +
+                             ": 'A_Recoil' needs a whole number of map units, so the frame " +
+                             "pushes nothing");
+                frame.Action = "";
+                return;
+            }
+
+            frame.RecoilDistance = distance;
+            frame.HasRecoil = true;
+            frame.Action = "";
+        }
+
+        /// <summary>
+        /// A_FaceTarget with arguments.
+        ///
+        /// ZDoom's signature is (max_turn, max_pitch, ang_offset, ...), so the first number is a
+        /// **limit on turning**, not an offset. A mod that wrote A_FaceTarget(90) asked for a
+        /// gradual turn and would get an instant one if the argument were read as an offset - the
+        /// opposite of what it wanted.
+        ///
+        /// max_pitch is reported when it is used: this engine has no per-actor pitch, so a mod
+        /// asking a monster to aim up or down gets a monster that still aims level, and should be
+        /// told so rather than left to wonder.
+        /// </summary>
+        private static void ReadFaceTarget(List<List<Token>> arguments, DecorateActor actor,
+                                           StateFrame frame, IList<string> problems)
+        {
+            int maxTurn;
+
+            if (arguments.Count < 1 || !TryReadWholeNumber(arguments[0], out maxTurn))
+            {
+                problems.Add(actor.Name + " line " + frame.Line +
+                             ": 'A_FaceTarget' turn limit must be a whole number of degrees, " +
+                             "so the actor turns all the way");
+                frame.Action = "";
+                return;
+            }
+
+            if (maxTurn < 0)
+            {
+                problems.Add(actor.Name + " line " + frame.Line +
+                             ": 'A_FaceTarget' turn limit is negative; it is read as positive");
+                maxTurn = -maxTurn;
+            }
+
+            if (arguments.Count > 1 && arguments[1].Count > 0)
+            {
+                int pitch;
+
+                if (TryReadWholeNumber(arguments[1], out pitch) && pitch != 270)
+                {
+                    problems.Add(actor.Name + " line " + frame.Line + ": 'A_FaceTarget' pitch " +
+                                 "limit is ignored - this engine has no per-actor pitch, so the " +
+                                 "actor still aims level");
+                }
+            }
+
+            var offset = 0;
+
+            if (arguments.Count > 2 && arguments[2].Count > 0 &&
+                !TryReadWholeNumber(arguments[2], out offset))
+            {
+                problems.Add(actor.Name + " line " + frame.Line +
+                             ": 'A_FaceTarget' angle offset must be a whole number of degrees; " +
+                             "no offset is applied");
+                offset = 0;
+            }
+
+            frame.FaceMaxTurn = maxTurn;
+            frame.FaceOffset = offset;
+            frame.HasFaceTarget = true;
+            frame.Action = "";
         }
 
         /// <summary>

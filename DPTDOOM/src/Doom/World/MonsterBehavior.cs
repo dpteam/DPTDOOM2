@@ -930,6 +930,24 @@ namespace DPTDOOM
 
         public void FaceTarget(Mobj actor)
         {
+            FaceTarget(actor, Angle.Ang0, Angle.Ang0);
+        }
+
+        /// <summary>
+        /// A_FaceTarget with its two useful arguments: a limit on how far the actor may turn, and
+        /// an offset added to the resulting angle.
+        ///
+        /// ZDoom's own A_FaceTarget signature is (max_turn, max_pitch, ang_offset, ...), so a mod
+        /// writing A_FaceTarget(90) is asking for a gradual turn of at most 90 degrees per call,
+        /// not for an offset of 90 degrees. Reading that argument as an offset would make a
+        /// turreting monster snap round instantly, which is the opposite of what it asked for.
+        ///
+        /// With both zero this is plain A_FaceTarget, and it has to stay **bit for bit** the same:
+        /// every vanilla monster that attacks calls it, so its random draws and its angle go into
+        /// the world hash.
+        /// </summary>
+        public void FaceTarget(Mobj actor, Angle maxTurn, Angle offset)
+        {
             if (actor.Target == null)
             {
                 return;
@@ -937,9 +955,42 @@ namespace DPTDOOM
 
             actor.Flags &= ~MobjFlags.Ambush;
 
-            actor.Angle = Geometry.PointToAngle(
+            var toTarget = Geometry.PointToAngle(
                 actor.X, actor.Y,
                 actor.Target.X, actor.Target.Y);
+
+            if (maxTurn.Data == 0)
+            {
+                actor.Angle = toTarget + offset;
+            }
+            else
+            {
+                // The signed shortest difference, which is what an angle subtraction gives: the
+                // data wraps at a full turn, so reading it as an int is already the short way
+                // round and is in the range -180 to 180 degrees.
+                var delta = (int)(toTarget - actor.Angle).Data;
+
+                var magnitude = delta < 0 ? -(long)delta : delta;
+
+                if (magnitude > maxTurn.Data)
+                {
+                    // Turn as far as allowed, in the direction the target lies. The offset is
+                    // added to the step, which is what ZDoom does and not an accident: it keeps
+                    // an offsetted turret turning at the same rate as an offsetless one.
+                    if (delta < 0)
+                    {
+                        actor.Angle -= maxTurn + offset;
+                    }
+                    else
+                    {
+                        actor.Angle += maxTurn + offset;
+                    }
+                }
+                else
+                {
+                    actor.Angle = toTarget + offset;
+                }
+            }
 
             var random = world.Random;
 
@@ -947,6 +998,32 @@ namespace DPTDOOM
             {
                 actor.Angle += new Angle((random.Next() - random.Next()) << 21);
             }
+        }
+
+        /// <summary>
+        /// A_ClearTarget: forget the target.
+        ///
+        /// ZDoom clears three fields - target, lastheard and lastenemy. This engine keeps no
+        /// per-actor memory of either: a noise lives on the sector (<see cref="Sector.SoundTarget"/>),
+        /// so there is nothing else here to forget, and writing code for fields that do not exist
+        /// would only look thorough.
+        /// </summary>
+        public void ClearTarget(Mobj actor)
+        {
+            actor.Target = null;
+        }
+
+        /// <summary>
+        /// A_Recoil: throw the actor backwards along its own facing.
+        ///
+        /// Thrust, not teleport: it is a velocity added to whatever the actor already had, which is
+        /// what makes a shotgun push and a rocket jump work. Not divided by mass either - ZDoom
+        /// does not, and a mod that tuned the number expects the number it wrote.
+        /// </summary>
+        public void Recoil(Mobj actor, Fixed distance)
+        {
+            actor.MomX -= distance * Trig.Cos(actor.Angle);
+            actor.MomY -= distance * Trig.Sin(actor.Angle);
         }
 
 

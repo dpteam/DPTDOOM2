@@ -534,6 +534,62 @@ ACTOR CountingImp 3001
     Assert-True ($countLog -like "*frame count*") "a jump by frame count is named"
     Assert-True ($countLog -like "*map MAP01: OK*") "and the level still loads"
 
+    Write-Host "With frame actions this engine can take"
+    $actions = Join-Path $work "actions.dec"
+
+    # A_ChangeFlag, A_SetTics, A_Recoil, A_FaceTarget and A_ClearTarget in one block. What this
+    # proves is the whole path: the calls are converted, the script parses, and the flag name
+    # resolves against the engine's own flags. A frame whose action was dropped would still load,
+    # so the check that matters is the absence of a report line.
+    [System.IO.File]::WriteAllText($actions, @"
+ACTOR ActiveImp 3001
+{
+  States
+  {
+  Spawn:
+    TROO A 4 A_Look
+    TROO B 4 A_ChangeFlag("NOPAIN", 1)
+    TROO C 4 A_SetTics(6)
+    TROO D 4 A_Recoil(4)
+    TROO E 4 A_FaceTarget(90)
+    TROO F 4 A_ClearTarget
+    Goto See
+  See:
+    TROO G 4 A_Chase
+    Goto See
+  }
+}
+"@)
+
+    $actionLog = Run-Game "actions" @('-decorate', $actions)
+
+    Assert-True ($actionLog -like "*scripts: OK*") "the frame actions convert"
+    Assert-True ($actionLog -like "*map MAP01: OK*") "the level loads"
+    Assert-True ($actionLog -notlike "*no such action*") "none of them is a missing action"
+    Assert-True ($actionLog -notlike "*takes no arguments*") "and none is refused for its arguments"
+    Assert-True ($actionLog -notlike "*decorate problem*") "a block this engine can take reports nothing"
+
+    Write-Host "With a flag A_ChangeFlag names that does not exist"
+    $badFlag = Join-Path $work "badflag.dec"
+
+    [System.IO.File]::WriteAllText($badFlag, @"
+ACTOR ConfusedImp 3001
+{
+  States
+  {
+  See:
+    TROO A 4 A_ChangeFlag("NOSUCHFLAG", 1)
+    TROO B 4 A_Chase
+    Loop
+  }
+}
+"@)
+
+    $badFlagLog = Run-Game "badflag" @('-decorate', $badFlag)
+
+    Assert-True ($badFlagLog -like "*NOSUCHFLAG*") "the unknown flag is named"
+    Assert-True ($badFlagLog -like "*map MAP01: OK*") "and the level still loads"
+
     Write-Host "With an A_LookEx this engine can take"
     $lookEx = Join-Path $work "lookex.dec"
 

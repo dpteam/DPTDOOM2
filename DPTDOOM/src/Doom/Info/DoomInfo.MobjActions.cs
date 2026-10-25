@@ -68,6 +68,11 @@ namespace DPTDOOM
                 world.MonsterBehavior.FaceTarget(actor);
             }
 
+            public void ClearTarget(World world, Mobj actor)
+            {
+                world.MonsterBehavior.ClearTarget(actor);
+            }
+
             public void PosAttack(World world, Mobj actor)
             {
                 world.MonsterBehavior.PosAttack(actor);
