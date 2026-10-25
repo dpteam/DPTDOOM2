@@ -1316,11 +1316,12 @@ namespace DPTDOOM
 					return DoGeneralizedCrusher(line, definition);
 
 				case BoomGeneralized.Family.Stairs:
-					// Boom's generalized stairs differ from the vanilla ones only in
-					// step size and speed, both of which the existing builder takes.
-					return BuildStairs(
-						line,
-						definition.StairStep == 16 ? StairType.Turbo16 : StairType.Build8);
+					// Boom's generalized stairs differ from the vanilla ones in four ways the
+					// vanilla builder cannot express: direction, step size, speed, and whether the
+					// chain may cross a change of floor texture. Routing them to BuildStairs (which
+					// is what this did at first) silently built them **up** whatever the direction
+					// bit said, so a map with descending stairs got ascending ones.
+					return DoGeneralizedStairs(line, definition);
 			}
 
 			return false;
@@ -2001,6 +2002,129 @@ namespace DPTDOOM
 			return result;
 		}
 
+
+		/// <summary>
+		/// Builds a Boom generalized staircase: direction, step size, speed and texture
+		/// continuity all come from the line's bit fields.
+		///
+		/// Deliberately **not** the vanilla builder, and not a refactor of it either. The two walk
+		/// the same shape - follow two-sided lines out of the tagged sector - but they differ in
+		/// something that is in the world hash: vanilla increments the running height *before* it
+		/// checks whether the next sector already has a mover, so a blocked step still raises the
+		/// next one. That quirk is vanilla, maps in the IWAD rely on it, and changing it would move
+		/// the hashes. Boom 2.02 incremented after the check instead, so a second builder is the
+		/// honest way to have both.
+		///
+		/// The chain cannot loop for ever without a separate lock: every sector it touches is given
+		/// a mover, and a sector that already has one ends the walk. That is Boom's `stairlock`
+		/// doing its job by another means, and it is why there is no iteration guard here.
+		/// </summary>
+		private bool DoGeneralizedStairs(LineDef line, BoomGeneralized.Definition definition)
+		{
+			var sectors = world.Map.Sectors;
+			var sectorNumber = -1;
+			var result = false;
+
+			var direction = definition.Up ? 1 : -1;
+			var step = Fixed.FromInt(definition.StairStep);
+			var speed = BoomGeneralized.SpeedOf(BoomGeneralized.Family.Stairs, definition.Speed);
+
+			while ((sectorNumber = FindSectorFromLineTag(line, sectorNumber)) >= 0)
+			{
+				var sector = sectors[sectorNumber];
+
+				if (sector.SpecialData != null)
+				{
+					continue;
+				}
+
+				result = true;
+
+				// The texture the chain must keep, or may ignore. Boom compares against the floor
+				// of the first sector, not against the previous step.
+				var texture = sector.FloorFlat;
+
+				var current = sector;
+				var currentNumber = sectorNumber;
+				var height = current.FloorHeight + (direction > 0 ? step : -step);
+
+				while (true)
+				{
+					StartStairStep(current, height, direction, speed);
+
+					int nextNumber;
+					var next = NextStairSector(current, currentNumber, texture,
+					                           definition.StairIgnoresTexture, out nextNumber);
+
+					if (next == null || next.SpecialData != null)
+					{
+						break;
+					}
+
+					height += direction > 0 ? step : -step;
+					current = next;
+					currentNumber = nextNumber;
+				}
+			}
+
+			return result;
+		}
+
+		/// <summary>
+		/// The next sector in a staircase: across the first two-sided line whose front side is
+		/// this sector, with the floor texture the chain insists on.
+		///
+		/// Boom's own rule, including the part that looks like an oversight and is not: it takes the
+		/// **first** qualifying line, not the nearest sector, so the chain follows the map's line
+		/// order. A prettier rule would build a different staircase from the one the author drew.
+		/// </summary>
+		private static Sector NextStairSector(Sector sector, int sectorNumber, int texture,
+		                                      bool ignoreTexture, out int nextNumber)
+		{
+			nextNumber = -1;
+
+			foreach (var line in sector.Lines)
+			{
+				if ((line.Flags & LineFlags.TwoSided) == 0 || line.BackSector == null)
+				{
+					continue;
+				}
+
+				if (line.FrontSector.Number != sectorNumber)
+				{
+					continue;
+				}
+
+				var target = line.BackSector;
+
+				// Whole stops a staircase at a change of floor texture: a step that looks
+				// different is where the author meant the stairs to end.
+				if (!ignoreTexture && target.FloorFlat != texture)
+				{
+					continue;
+				}
+
+				nextNumber = target.Number;
+				return target;
+			}
+
+			return null;
+		}
+
+		private void StartStairStep(Sector sector, Fixed height, int direction, Fixed speed)
+		{
+			var floor = new FloorMove(world);
+
+			world.Thinkers.Add(floor);
+			sector.SpecialData = floor;
+
+			floor.Type = FloorMoveType.Generalized;
+			floor.Direction = direction;
+			floor.Sector = sector;
+			floor.Speed = speed;
+			floor.FloorDestHeight = height;
+			floor.Crush = false;
+		}
 
 		public bool BuildStairs(LineDef line, StairType type)
 		{

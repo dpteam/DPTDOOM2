@@ -184,10 +184,18 @@ namespace DPTDOOM
             /// <summary>Lift or stairs: whether monsters can activate it.</summary>
             public bool MonstersCanTrigger;
 
-            /// <summary>Stairs: whether the direction bit is ignored.</summary>
-            public bool StairIgnoreDirection;
+            /// <summary>Stairs: whether the chain ignores the floor texture when looking for the next step.</summary>
+            public bool StairIgnoresTexture;
 
-            /// <summary>Stairs: step size in map units.</summary>
+            /// <summary>
+            /// Stairs: step size in map units, one of 4, 8, 16 or 24.
+            ///
+            /// The field in the line is a two-bit selector, and Boom's table is 0→4, 1→8, 2→16,
+            /// 3→24. It is stored here as the size rather than the selector because the size is
+            /// what the builder needs, and because the previous version of this decoder mapped
+            /// "selector 0" to eight and everything else to sixteen - which is not Boom's table
+            /// and would have built the wrong staircase for two of the four values.
+            /// </summary>
             public int StairStep;
 
             /// <summary>Door: what the door does after opening.</summary>
@@ -299,9 +307,18 @@ namespace DPTDOOM
                     break;
 
                 case Family.Stairs:
-                    definition.StairIgnoreDirection = (value & StairIgnore) != 0;
+                    definition.StairIgnoresTexture = (value & StairIgnore) != 0;
                     definition.Up = ((value & StairDirection) >> StairDirectionShift) != 0;
-                    definition.StairStep = ((value & StairStep) >> StairStepShift) == 0 ? 8 : 16;
+
+                    // Boom's table, from EV_DoGenStairs: 0, 1, 2, 3 mean 4, 8, 16, 24 units.
+                    switch ((value & StairStep) >> StairStepShift)
+                    {
+                        case 0: definition.StairStep = 4; break;
+                        case 1: definition.StairStep = 8; break;
+                        case 2: definition.StairStep = 16; break;
+                        default: definition.StairStep = 24; break;
+                    }
+
                     definition.MonstersCanTrigger = (value & 0x0020) != 0;
                     definition.Speed = (Speed)((value & StairSpeed) >> StairSpeedShift);
                     break;

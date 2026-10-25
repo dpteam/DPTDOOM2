@@ -240,13 +240,37 @@ namespace DPTDOOMTest.CompatibilityTests
         }
 
         [TestMethod]
-        public void StairsStepIsEightOrSixteen()
+        public void StairsStepComesFromBoomsTable()
         {
-            var eight = BoomGeneralized.Decode(BoomGeneralized.GenStairsBase);
-            Assert.AreEqual(8, eight.StairStep, "step field clear means eight");
+            // Boom's table, from EV_DoGenStairs: the two-bit field means 4, 8, 16, 24 units.
+            // The previous version of this decoder mapped selector 0 to eight and everything else
+            // to sixteen, so two of the four values built the wrong staircase.
+            Assert.AreEqual(4, BoomGeneralized.Decode(BoomGeneralized.GenStairsBase).StairStep,
+                "selector 0");
 
-            var sixteen = BoomGeneralized.Decode(BoomGeneralized.GenStairsBase | (1 << 6));
-            Assert.AreEqual(16, sixteen.StairStep);
+            Assert.AreEqual(8, BoomGeneralized.Decode(
+                BoomGeneralized.GenStairsBase | (1 << 6)).StairStep, "selector 1");
+
+            Assert.AreEqual(16, BoomGeneralized.Decode(
+                BoomGeneralized.GenStairsBase | (2 << 6)).StairStep, "selector 2");
+
+            Assert.AreEqual(24, BoomGeneralized.Decode(
+                BoomGeneralized.GenStairsBase | (3 << 6)).StairStep, "selector 3");
+        }
+
+        [TestMethod]
+        public void StairsDirectionAndTextureBitsAreRead()
+        {
+            var plain = BoomGeneralized.Decode(BoomGeneralized.GenStairsBase);
+
+            Assert.IsFalse(plain.Up, "direction bit clear means down, as Boom reads it");
+            Assert.IsFalse(plain.StairIgnoresTexture);
+
+            var up = BoomGeneralized.Decode(BoomGeneralized.GenStairsBase | (1 << 8));
+            Assert.IsTrue(up.Up, "the direction bit means up");
+
+            var ignore = BoomGeneralized.Decode(BoomGeneralized.GenStairsBase | (1 << 9));
+            Assert.IsTrue(ignore.StairIgnoresTexture, "and 0x200 means the texture is ignored");
         }
 
         [TestMethod]
