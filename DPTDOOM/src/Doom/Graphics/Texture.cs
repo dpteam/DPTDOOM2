@@ -66,6 +66,83 @@ namespace DPTDOOM
                 patches);
         }
 
+        /// <summary>
+        /// Reads one TEXTURE1/TEXTURE2 record without trusting any of its numbers.
+        ///
+        /// Some old content deliberately abuses these records: DOOM ACE's ademo1.wad carries
+        /// texture entries used by its DOOM2.EXE exploit, including negative patch counts, zero
+        /// heights and offsets beyond the lump. ZDoom rejects those entries and carries on; an
+        /// uncaught array-index exception here used to kill the whole game before the map loaded.
+        ///
+        /// This validates structure, not artistic intent. A well-formed unusual texture is still
+        /// accepted. The size ceiling is there because a two-byte dimension can otherwise request
+        /// gigabytes of arrays before the renderer ever sees the record.
+        /// </summary>
+        public static bool TryFromData(byte[] data, int offset, Patch[] patchLookup,
+                                       out Texture texture, out string reason)
+        {
+            texture = null;
+            reason = null;
+
+            const int headerSize = 22;
+            const int maxDimension = 16384;
+            const long maxPixels = 16L * 1024 * 1024;
+
+            if (data == null || offset < 0 || offset > data.Length - headerSize)
+            {
+                reason = "the record is outside the lump";
+                return false;
+            }
+
+            var width = BitConverter.ToInt16(data, offset + 12);
+            var height = BitConverter.ToInt16(data, offset + 14);
+            var patchCount = BitConverter.ToInt16(data, offset + 20);
+
+            if (width <= 0 || height <= 0 || width > maxDimension || height > maxDimension ||
+                (long)width * height > maxPixels)
+            {
+                reason = "invalid dimensions " + width + "x" + height;
+                return false;
+            }
+
+            if (patchCount < 0)
+            {
+                reason = "negative patch count " + patchCount;
+                return false;
+            }
+
+            var availablePatches = (data.Length - offset - headerSize) / TexturePatch.DataSize;
+
+            if (patchCount > availablePatches)
+            {
+                reason = "the patch list extends beyond the lump";
+                return false;
+            }
+
+            var patches = new TexturePatch[patchCount];
+
+            for (var i = 0; i < patchCount; i++)
+            {
+                var patchOffset = offset + headerSize + TexturePatch.DataSize * i;
+                var patchNumber = BitConverter.ToInt16(data, patchOffset + 4);
+
+                if (patchNumber < 0 || patchNumber >= patchLookup.Length ||
+                    patchLookup[patchNumber] == null)
+                {
+                    reason = "patch " + i + " refers to missing PNAMES entry " + patchNumber;
+                    return false;
+                }
+
+                patches[i] = TexturePatch.FromData(data, patchOffset, patchLookup);
+            }
+
+            var name = DoomInterop.ToString(data, offset, 8);
+            var masked = BitConverter.ToInt32(data, offset + 8);
+
+            texture = new Texture(name, masked != 0, width, height, patches);
+            return true;
+        }
+
         public static string GetName(byte[] data, int offset)
         {
             return DoomInterop.ToString(data, offset, 8);

@@ -11,6 +11,7 @@ namespace DPTDOOM
         private Dictionary<string, int> nameToNumber;
 
         private int[] switchList;
+        private int missingTextureNumber = -1;
 
         public DummyTextureLookup(Wad wad)
         {
@@ -65,6 +66,11 @@ namespace DPTDOOM
 
         public int GetNumber(string name)
         {
+            if (string.IsNullOrEmpty(name))
+            {
+                return -1;
+            }
+
             if (name[0] == '-')
             {
                 return 0;
@@ -79,6 +85,33 @@ namespace DPTDOOM
             {
                 return -1;
             }
+        }
+
+        public int GetNumberOrDummy(string name)
+        {
+            var blank = string.IsNullOrEmpty(name);
+
+            if (!blank && name[0] != '-')
+            {
+                int existing;
+
+                if (nameToNumber.TryGetValue(name, out existing))
+                {
+                    return existing;
+                }
+            }
+            else if (!blank && textures.Count > 0)
+            {
+                return 0;
+            }
+
+            if (missingTextureNumber < 0)
+            {
+                missingTextureNumber = textures.Count;
+                textures.Add(DummyData.GetTexture(64));
+            }
+
+            return missingTextureNumber;
         }
 
         public IEnumerator<Texture> GetEnumerator()

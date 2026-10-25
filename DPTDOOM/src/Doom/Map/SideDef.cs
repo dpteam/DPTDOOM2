@@ -58,9 +58,9 @@ namespace DPTDOOM
             return new SideDef(
                 Fixed.FromInt(textureOffset),
                 Fixed.FromInt(rowOffset),
-                textures.GetNumber(topTextureName),
-                textures.GetNumber(bottomTextureName),
-                textures.GetNumber(middleTextureName),
+                textures.GetNumberOrDummy(topTextureName),
+                textures.GetNumberOrDummy(bottomTextureName),
+                textures.GetNumberOrDummy(middleTextureName),
                 sectorNum != -1 ? sectors[sectorNum] : null);
         }
 

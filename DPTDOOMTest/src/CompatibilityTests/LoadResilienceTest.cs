@@ -189,7 +189,166 @@ namespace DPTDOOMTest.CompatibilityTests
             Assert.IsFalse(LoadReport.HasProblems, "exact lump sizes are the normal case");
         }
 
+        // ------------------------------------------------------------ malformed textures
+
+        /// <summary>
+        /// A texture directory containing one good record and three kinds of bad ones.
+        ///
+        /// This is the shape found in DOOM ACE's ademo1.wad: the bad records are exploit data, not
+        /// pictures, and a loader that trusts them dies before the map is even considered.
+        /// </summary>
+        [TestMethod]
+        public void MalformedTextureRecordsAreSkipped()
+        {
+            var path = BuildMalformedTextureWad();
+
+            try
+            {
+                LoadReport.Clear();
+
+                using (var wad = new Wad(new[] { path }))
+                {
+                    var lookup = new TextureLookup(wad);
+
+                    Assert.IsTrue(lookup.GetNumber("GOOD") >= 0,
+                        "the valid texture after the directory still loads");
+                    Assert.AreEqual(-1, lookup.GetNumber("BAD"), "negative patch counts are rejected");
+                    Assert.AreEqual(-1, lookup.GetNumber("ZERO"), "zero-sized textures are rejected");
+                    Assert.AreEqual(-1, lookup.GetNumber("OUT"), "out-of-lump offsets are rejected");
+
+                    var text = LoadReport.Describe();
+
+                    StringAssert.Contains(text, "bad texture definition", text);
+                    StringAssert.Contains(text, "negative patch count", text);
+                    StringAssert.Contains(text, "outside the lump", text);
+                }
+            }
+            finally
+            {
+                TryDelete(path);
+            }
+        }
+
+        /// <summary>
+        /// Missing map artwork gets a drawable substitute, without changing what "exists" means.
+        /// </summary>
+        [TestMethod]
+        public void MissingMapTexturesGetADummyWithoutLyingAboutExistence()
+        {
+            var path = BuildMalformedTextureWad();
+
+            try
+            {
+                LoadReport.Clear();
+
+                using (var wad = new Wad(new[] { path }))
+                {
+                    var lookup = new TextureLookup(wad);
+                    var number = lookup.GetNumberOrDummy("SKY1");
+
+                    Assert.IsTrue(number >= 0, "the renderer has a valid index");
+                    Assert.IsNotNull(lookup[number], "and something it can draw");
+                    Assert.AreEqual(number, lookup.GetNumberOrDummy("SKY1"),
+                        "the same missing name reuses the same dummy");
+                    Assert.AreEqual(-1, lookup.GetNumber("SKY1"),
+                        "existence checks are not changed by the rendering fallback");
+                    StringAssert.Contains(LoadReport.Describe(), "unknown texture");
+                }
+            }
+            finally
+            {
+                TryDelete(path);
+            }
+        }
+
         // ------------------------------------------------------------ helpers
+
+        /// <summary>
+        /// Builds a tiny WAD with one valid patch and a deliberately hostile TEXTURE1 directory.
+        /// No external mod is needed, so this tests the same failure modes on every machine.
+        /// </summary>
+        private static string BuildMalformedTextureWad()
+        {
+            var pnames = new byte[12];
+            WriteInt32(pnames, 0, 1);
+            var patchName = Encoding.ASCII.GetBytes("PATCH0");
+            Array.Copy(patchName, 0, pnames, 4, patchName.Length);
+
+            const int count = 4;
+            const int goodOffset = 4 + 4 * count;
+            const int badOffset = goodOffset + 32;
+            const int zeroOffset = badOffset + 22;
+            var textureData = new byte[zeroOffset + 22];
+
+            WriteInt32(textureData, 0, count);
+            WriteInt32(textureData, 4, goodOffset);
+            WriteInt32(textureData, 8, badOffset);
+            WriteInt32(textureData, 12, zeroOffset);
+            WriteInt32(textureData, 16, textureData.Length + 1000);
+
+            WriteTextureRecord(textureData, goodOffset, "GOOD", 4, 4, 1);
+            WriteTextureRecord(textureData, badOffset, "BAD", 4, 4, -1);
+            WriteTextureRecord(textureData, zeroOffset, "ZERO", 4, 0, 0);
+
+            var lumps = new List<KeyValuePair<string, byte[]>>
+            {
+                Lump("PNAMES", pnames),
+                Lump("TEXTURE1", textureData),
+                Lump("PATCH0", MakeTwoByTwoPatch()),
+                Lump("MAP01", new byte[0])
+            };
+
+            var path = Path.Combine(
+                Path.GetTempPath(), "dptdoom-textures-" + Guid.NewGuid().ToString("N") + ".wad");
+
+            WriteWad(path, lumps);
+            return path;
+        }
+
+        private static void WriteTextureRecord(byte[] data, int offset, string name,
+                                               int width, int height, int patchCount)
+        {
+            var bytes = Encoding.ASCII.GetBytes(name);
+            Array.Copy(bytes, 0, data, offset, Math.Min(8, bytes.Length));
+            WriteInt16(data, offset + 12, width);
+            WriteInt16(data, offset + 14, height);
+            WriteInt16(data, offset + 20, patchCount);
+        }
+
+        /// <summary>A valid 2x2 patch with one post per column.</summary>
+        private static byte[] MakeTwoByTwoPatch()
+        {
+            var data = new byte[30];
+
+            WriteInt16(data, 0, 2);
+            WriteInt16(data, 2, 2);
+            WriteInt32(data, 8, 16);
+            WriteInt32(data, 12, 23);
+
+            WritePost(data, 16);
+            WritePost(data, 23);
+
+            return data;
+        }
+
+        private static void WritePost(byte[] data, int offset)
+        {
+            data[offset] = 0;
+            data[offset + 1] = 2;
+            data[offset + 2] = 0;
+            data[offset + 3] = 1;
+            data[offset + 4] = 2;
+            data[offset + 5] = 0;
+            data[offset + 6] = 255;
+        }
+
+        private static void WriteInt32(byte[] data, int offset, int value)
+        {
+            data[offset] = (byte)(value & 0xFF);
+            data[offset + 1] = (byte)((value >> 8) & 0xFF);
+            data[offset + 2] = (byte)((value >> 16) & 0xFF);
+            data[offset + 3] = (byte)((value >> 24) & 0xFF);
+        }
 
         /// <summary>
         /// How many things MAP01 has when loaded straight from the IWAD.

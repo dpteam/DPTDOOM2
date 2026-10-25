@@ -50,6 +50,7 @@ powershell -NoProfile -File tools\test-master-allow.ps1
 powershell -NoProfile -File tools\test-master-config.ps1
 powershell -NoProfile -File tools\test-scripts.ps1
 powershell -NoProfile -File tools\test-decorate.ps1
+powershell -NoProfile -File tools\test-ademo.ps1
 powershell -NoProfile -File tools\test-jump.ps1
 powershell -NoProfile -File tools\test-rofl.ps1
 powershell -NoProfile -File tools\test-actors.ps1
@@ -89,6 +90,11 @@ powershell -NoProfile -File tools\test-launcher.ps1
 - Тест, ставящий кастомный кадр, не должен брать `CustomStateFirst`: в полном прогоне
   этот слот уже занят предыдущими тестами, и выполнится чужой кадр. Состояние
   достаётся по имени через `SeeState`/`DeathState` самого актора.
+- Битая `TEXTURE1`/`TEXTURE2`/`PNAMES`/патч не должна ронять игру: бинарные записи
+  проверяются по границам **до** чтения, плохая запись пропускается, остальное грузится.
+  `GetNumber` по-прежнему отвечает «существует ли текстура» (`-1` если нет); для рендера
+  карты есть `GetNumberOrDummy` с видимой заглушкой. Подменять `GetNumber` нельзя.
+  DOOM ACE `ademo1.wad` с эксплоитными текстурами — проверка `tools/test-ademo.ps1`.
 - Headless — тестовый бэкенд, **не** dedicated server. Сервер — это `-dedicated`: тот же
   headless-хост, но ожидание игроков не считается ошибкой. `docs/DEDICATED.md`.
 - Звук — свой микшер (`src/Audio/SoundMixer.cs`, `SoundPan.cs`) плюс `waveOut`.

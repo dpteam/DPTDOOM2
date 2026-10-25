@@ -25,6 +25,7 @@ namespace DPTDOOM
         int Count { get; }
         Texture this[int index] { get; }
         int GetNumber(string name);
+        int GetNumberOrDummy(string name);
         Texture this[string name] { get; }
         public int[] SwitchList { get; }
     }

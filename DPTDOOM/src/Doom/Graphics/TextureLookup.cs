@@ -32,6 +32,12 @@ namespace DPTDOOM
         private int pk3Replaced;
         private int textDefined;
 
+        // Created only when a map actually names a texture that is not there. Keeping it out of
+        // the ordinary table means a clean IWAD has exactly the texture numbers it always had.
+        private int missingTextureNumber = -1;
+        private readonly HashSet<string> reportedMissing = new HashSet<string>(
+            StringComparer.OrdinalIgnoreCase);
+
         public TextureLookup(Wad wad) : this(wad, false)
         {
         }
@@ -73,11 +79,49 @@ namespace DPTDOOM
                 }
 
                 var data = wad.ReadLump(lumpNumber);
-                var count = BitConverter.ToInt32(data, 0);
+                var lumpName = "TEXTURE" + n;
+
+                if (data.Length < 4)
+                {
+                    LoadReport.Add("bad texture directory", lumpName,
+                        "the lump is too short, so its textures are skipped and the rest of the " +
+                        "WAD is loaded");
+                    continue;
+                }
+
+                var declaredCount = BitConverter.ToInt32(data, 0);
+                var available = (data.Length - 4) / 4;
+                var count = declaredCount;
+
+                if (count < 0)
+                {
+                    LoadReport.Add("bad texture directory", lumpName + " (negative count)",
+                        "its textures are skipped and the rest of the WAD is loaded");
+                    continue;
+                }
+
+                if (count > available)
+                {
+                    LoadReport.Add("bad texture directory",
+                        lumpName + " (" + count + " declared, " + available + " offsets fit)",
+                        "only complete directory entries are read; the rest of the WAD is loaded");
+                    count = available;
+                }
+
                 for (var i = 0; i < count; i++)
                 {
                     var offset = BitConverter.ToInt32(data, 4 + 4 * i);
-                    var texture = Texture.FromData(data, offset, patches);
+                    Texture texture;
+                    string reason;
+
+                    if (!Texture.TryFromData(data, offset, patches, out texture, out reason))
+                    {
+                        LoadReport.Add("bad texture definition",
+                            lumpName + " entry " + i + " at offset " + offset + ": " + reason,
+                            "that texture is skipped; the rest of the WAD is loaded");
+                        continue;
+                    }
+
                     nameToNumber.TryAdd(texture.Name, textures.Count);
                     textures.Add(texture);
                     nameToTexture.TryAdd(texture.Name, texture);
@@ -365,6 +409,11 @@ namespace DPTDOOM
 
         public int GetNumber(string name)
         {
+            if (string.IsNullOrEmpty(name))
+            {
+                return -1;
+            }
+
             if (name[0] == '-')
             {
                 return 0;
@@ -379,6 +428,51 @@ namespace DPTDOOM
             {
                 return -1;
             }
+        }
+
+        /// <summary>
+        /// Resolves a texture for rendering a map, substituting a visible dummy for a missing one.
+        ///
+        /// This is deliberately **not** what <see cref="GetNumber"/> does. That method answers
+        /// "does this texture exist?", and returning a valid dummy number there would make every
+        /// existence check lie. This method answers "what can the renderer safely draw?", which is
+        /// a different question and the one a malformed PWAD needs answered.
+        ///
+        /// The dummy is appended lazily, so all real textures keep their numbers. In particular an
+        /// exploit TEXTURE1 whose entries are all unusable no longer takes the map down with a
+        /// KeyNotFoundException on SKY1 or an index of -1 on a sidedef.
+        /// </summary>
+        public int GetNumberOrDummy(string name)
+        {
+            var blank = string.IsNullOrEmpty(name);
+
+            if (!blank && name[0] != '-')
+            {
+                int existing;
+
+                if (nameToNumber.TryGetValue(name, out existing))
+                {
+                    return existing;
+                }
+            }
+            else if (!blank && textures.Count > 0)
+            {
+                return 0;
+            }
+
+            if (missingTextureNumber < 0)
+            {
+                missingTextureNumber = textures.Count;
+                textures.Add(DummyData.GetTexture(64));
+            }
+
+            if (!blank && name[0] != '-' && reportedMissing.Add(name))
+            {
+                LoadReport.Add("unknown texture", name,
+                    "a dummy texture is used so the level can still load");
+            }
+
+            return missingTextureNumber;
         }
 
         private static Patch[] LoadPatches(Wad wad)
@@ -396,15 +490,162 @@ namespace DPTDOOM
                 }
 
                 var data = wad.ReadLump(name);
-                patches[i] = Patch.FromData(name, data);
+                Patch patch;
+                string reason;
+
+                if (TryReadPatch(name, data, out patch, out reason))
+                {
+                    patches[i] = patch;
+                }
+                else
+                {
+                    LoadReport.Add("bad texture patch", name + ": " + reason,
+                        "that patch is left out; textures using it are skipped");
+                }
             }
             return patches;
         }
 
+        /// <summary>
+        /// Validates one binary patch before the original Doom reader walks its columns.
+        ///
+        /// The reader trusts column offsets and post lengths, so a crafted lump can send it outside
+        /// the byte array or make it walk forever. Checking here keeps the established patch format
+        /// and renderer intact while making a bad patch cost only that patch.
+        /// </summary>
+        private static bool TryReadPatch(string name, byte[] data, out Patch patch, out string reason)
+        {
+            patch = null;
+            reason = null;
+
+            const int maxDimension = 16384;
+            const long maxPixels = 16L * 1024 * 1024;
+
+            if (data.Length < 8)
+            {
+                reason = "shorter than the patch header";
+                return false;
+            }
+
+            var width = BitConverter.ToInt16(data, 0);
+            var height = BitConverter.ToInt16(data, 2);
+
+            if (width <= 0 || height <= 0 || width > maxDimension || height > maxDimension ||
+                (long)width * height > maxPixels)
+            {
+                reason = "invalid dimensions " + width + "x" + height;
+                return false;
+            }
+
+            var directoryEnd = 8L + 4L * width;
+
+            if (directoryEnd > data.Length)
+            {
+                reason = "the column directory extends beyond the lump";
+                return false;
+            }
+
+            for (var x = 0; x < width; x++)
+            {
+                var p = BitConverter.ToInt32(data, 8 + 4 * x);
+
+                if (p < directoryEnd || p >= data.Length)
+                {
+                    reason = "column " + x + " starts outside the lump";
+                    return false;
+                }
+
+                var posts = 0;
+
+                while (data[p] != Column.Last)
+                {
+                    if (p + 2 >= data.Length)
+                    {
+                        reason = "a post in column " + x + " is truncated";
+                        return false;
+                    }
+
+                    var length = data[p + 1];
+                    var next = (long)p + length + 4;
+
+                    // There must be room for the next post header or the terminating 0xff.
+                    if (next <= p || next >= data.Length)
+                    {
+                        reason = "a post in column " + x + " extends beyond the lump";
+                        return false;
+                    }
+
+                    p = (int)next;
+
+                    if (++posts > data.Length)
+                    {
+                        reason = "column " + x + " has no terminator";
+                        return false;
+                    }
+                }
+            }
+
+            try
+            {
+                patch = Patch.FromData(name, data);
+                return true;
+            }
+            catch (IndexOutOfRangeException)
+            {
+                reason = "the column data is malformed";
+                return false;
+            }
+            catch (ArgumentException)
+            {
+                reason = "the patch data is malformed";
+                return false;
+            }
+            catch (OverflowException)
+            {
+                reason = "the patch data is malformed";
+                return false;
+            }
+        }
+
         private static string[] LoadPatchNames(Wad wad)
         {
-            var data = wad.ReadLump("PNAMES");
-            var count = BitConverter.ToInt32(data, 0);
+            var lump = wad.GetLumpNumber("PNAMES");
+
+            if (lump == -1)
+            {
+                LoadReport.Add("missing texture patch directory", "PNAMES",
+                    "no binary patches are loaded; text and PK3 textures are still read");
+                return new string[0];
+            }
+
+            var data = wad.ReadLump(lump);
+
+            if (data.Length < 4)
+            {
+                LoadReport.Add("bad texture patch directory", "PNAMES (shorter than its count)",
+                    "no binary patches are loaded; text and PK3 textures are still read");
+                return new string[0];
+            }
+
+            var declared = BitConverter.ToInt32(data, 0);
+            var available = (data.Length - 4) / 8;
+            var count = declared;
+
+            if (count < 0)
+            {
+                LoadReport.Add("bad texture patch directory", "PNAMES (negative count)",
+                    "no binary patches are loaded; text and PK3 textures are still read");
+                return new string[0];
+            }
+
+            if (count > available)
+            {
+                LoadReport.Add("bad texture patch directory",
+                    "PNAMES (" + count + " declared, " + available + " names fit)",
+                    "only complete names are read; the rest of the WAD is loaded");
+                count = available;
+            }
+
             var names = new string[count];
             for (var i = 0; i < names.Length; i++)
             {

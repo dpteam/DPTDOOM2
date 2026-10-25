@@ -246,13 +246,13 @@ namespace DPTDOOM
                 switch (name[1])
                 {
                     case '1':
-                        return textures["SKY1"];
+                        return GetSkyTexture("SKY1");
                     case '2':
-                        return textures["SKY2"];
+                        return GetSkyTexture("SKY2");
                     case '3':
-                        return textures["SKY3"];
+                        return GetSkyTexture("SKY3");
                     default:
-                        return textures["SKY4"];
+                        return GetSkyTexture("SKY4");
                 }
             }
             else
@@ -260,17 +260,22 @@ namespace DPTDOOM
                 var number = int.Parse(name.Substring(3));
                 if (number <= 11)
                 {
-                    return textures["SKY1"];
+                    return GetSkyTexture("SKY1");
                 }
                 else if (number <= 21)
                 {
-                    return textures["SKY2"];
+                    return GetSkyTexture("SKY2");
                 }
                 else
                 {
-                    return textures["SKY3"];
+                    return GetSkyTexture("SKY3");
                 }
             }
+        }
+
+        private Texture GetSkyTexture(string name)
+        {
+            return textures[textures.GetNumberOrDummy(name)];
         }
 
         public ITextureLookup Textures => textures;
