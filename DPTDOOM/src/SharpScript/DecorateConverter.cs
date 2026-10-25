@@ -234,6 +234,42 @@ namespace DPTDOOM.Scripting
 
         /// <summary>A_Explode's flags, already summed from the XF_ names.</summary>
         public int ExplodeFlags = ExplosionFlags.HurtSource;
+
+        /// <summary>True when the frame's action was A_CustomMeleeAttack.</summary>
+        public bool HasCustomMelee;
+
+        /// <summary>The damage expression, evaluated when the frame runs.</summary>
+        public string MeleeDamageExpression;
+
+        /// <summary>Sound on a hit, by SNDINFO name, or null.</summary>
+        public string MeleeHitSound;
+
+        /// <summary>Sound on a miss, by SNDINFO name, or null.</summary>
+        public string MeleeMissSound;
+
+        /// <summary>True when the frame's action was A_CustomPunch.</summary>
+        public bool HasCustomPunch;
+
+        /// <summary>The punch's damage expression, evaluated when the frame runs.</summary>
+        public string PunchDamageExpression;
+
+        /// <summary>Whether the punch skips the random 1..8 multiplier.</summary>
+        public bool PunchNoRandom;
+
+        /// <summary>The supported CPF flags.</summary>
+        public int PunchFlags;
+
+        /// <summary>Puff actor name, by DECORATE name.</summary>
+        public string PunchPuffName;
+
+        /// <summary>Punch range in map units, as an expression.</summary>
+        public string PunchRangeExpression;
+
+        /// <summary>Sound on a miss, by SNDINFO name, or null.</summary>
+        public string PunchMissSound;
+
+        /// <summary>Sound on a hit, by SNDINFO name, or null.</summary>
+        public string PunchHitSound;
     }
 
     /// <summary>
@@ -853,6 +889,36 @@ namespace DPTDOOM.Scripting
                               .Append(", \"").Append(failName).Append("\");\n");
                     }
 
+                    if (frame.HasCustomPunch)
+                    {
+                        script.Append("    CustomPunch(\"").Append(name).Append("\", \"")
+                              .Append(SpawnExFunctionName(actor, chain.Label, i + 1, 8))
+                              .Append("\", ")
+                              .Append(frame.PunchNoRandom ? "true" : "false")
+                              .Append(", ")
+                              .Append(frame.PunchFlags.ToString(CultureInfo.InvariantCulture))
+                              .Append(", \"")
+                              .Append(frame.PunchPuffName ?? "BulletPuff")
+                              .Append("\", \"")
+                              .Append(SpawnExFunctionName(actor, chain.Label, i + 1, 9))
+                              .Append("\", \"")
+                              .Append(frame.PunchHitSound ?? "")
+                              .Append("\", \"")
+                              .Append(frame.PunchMissSound ?? "")
+                              .Append("\");\n");
+                    }
+
+                    if (frame.HasCustomMelee)
+                    {
+                        script.Append("    CustomMeleeAttack(\"").Append(name).Append("\", \"")
+                              .Append(SpawnExFunctionName(actor, chain.Label, i + 1, 8))
+                              .Append("\", \"")
+                              .Append(frame.MeleeHitSound ?? "")
+                              .Append("\", \"")
+                              .Append(frame.MeleeMissSound ?? "")
+                              .Append("\");\n");
+                    }
+
                     if (frame.HasLookEx)
                     {
                         // The see state is written as a frame of this actor when the mod named one
@@ -972,21 +1038,38 @@ namespace DPTDOOM.Scripting
                 {
                     var frame = chain.Frames[i];
 
-                    if (!frame.HasSpawnItemEx)
+                    if (!frame.HasSpawnItemEx && !frame.HasCustomMelee && !frame.HasCustomPunch)
                     {
                         continue;
                     }
 
-                    for (var value = 0; value < frame.SpawnExValues.Length; value++)
+                    if (frame.HasSpawnItemEx)
                     {
-                        EmitSpawnExpression(script, actor, chain.Label, i + 1, value,
-                            frame.SpawnExValues[value]);
+                        for (var value = 0; value < frame.SpawnExValues.Length; value++)
+                        {
+                            EmitSpawnExpression(script, actor, chain.Label, i + 1, value,
+                                frame.SpawnExValues[value]);
+                        }
+
+                        if (frame.SpawnExFailChance != null)
+                        {
+                            EmitSpawnExpression(script, actor, chain.Label, i + 1, 7,
+                                frame.SpawnExFailChance);
+                        }
                     }
 
-                    if (frame.SpawnExFailChance != null)
+                    if (frame.HasCustomMelee)
                     {
-                        EmitSpawnExpression(script, actor, chain.Label, i + 1, 7,
-                            frame.SpawnExFailChance);
+                        EmitSpawnExpression(script, actor, chain.Label, i + 1, 8,
+                            frame.MeleeDamageExpression);
+                    }
+
+                    if (frame.HasCustomPunch)
+                    {
+                        EmitSpawnExpression(script, actor, chain.Label, i + 1, 8,
+                            frame.PunchDamageExpression);
+                        EmitSpawnExpression(script, actor, chain.Label, i + 1, 9,
+                            frame.PunchRangeExpression);
                     }
                 }
             }
@@ -1747,6 +1830,18 @@ namespace DPTDOOM.Scripting
             if (string.Equals(frame.Action, "A_Explode", StringComparison.OrdinalIgnoreCase))
             {
                 ReadExplode(arguments, actor, frame, problems);
+                return;
+            }
+
+            if (string.Equals(frame.Action, "A_CustomMeleeAttack", StringComparison.OrdinalIgnoreCase))
+            {
+                ReadCustomMelee(arguments, actor, frame, problems);
+                return;
+            }
+
+            if (string.Equals(frame.Action, "A_CustomPunch", StringComparison.OrdinalIgnoreCase))
+            {
+                ReadCustomPunch(arguments, actor, frame, problems);
                 return;
             }
 
@@ -2909,6 +3004,217 @@ namespace DPTDOOM.Scripting
             }
 
             return true;
+        }
+
+        /// <summary>
+        /// A_CustomPunch: damage, norandom, flags, puff and range are supported; the remaining
+        /// arguments are reported rather than silently approximated.
+        ///
+        /// In ademo1.wad the second argument is 1, meaning "do not roll the 1..8 multiplier". It is
+        /// a boolean in ZDoom, not an ammo count, and reading it as such would change the weapon's
+        /// damage by a factor of eight.
+        /// </summary>
+        private static void ReadCustomPunch(List<List<Token>> arguments, DecorateActor actor,
+                                            StateFrame frame, IList<string> problems)
+        {
+            frame.Action = "";
+            frame.HasCustomPunch = true;
+
+            frame.PunchDamageExpression = ReadSpawnExpression(
+                arguments, 0, actor, frame, problems, "0");
+            frame.PunchNoRandom = ReadPunchBoolean(arguments, 1, actor, frame, problems);
+            frame.PunchFlags = ReadPunchFlags(arguments, 2, actor, frame, problems);
+
+            if (arguments.Count > 3 && arguments[3].Count == 1)
+            {
+                frame.PunchPuffName = arguments[3][0].Text;
+
+                if (ActorNames.TypeOf(frame.PunchPuffName) < 0)
+                {
+                    problems.Add(actor.Name + " line " + frame.Line + ": no such actor '" +
+                                 frame.PunchPuffName + "' for 'A_CustomPunch', so BulletPuff is used");
+                    frame.PunchPuffName = "BulletPuff";
+                }
+            }
+
+            frame.PunchRangeExpression = ReadSpawnExpression(
+                arguments, 4, actor, frame, problems, "0");
+
+            if (arguments.Count > 5 && arguments[5].Count > 0)
+            {
+                var lifeSteal = JoinTokens(arguments[5]).Trim();
+
+                if (lifeSteal != "0" && lifeSteal != "0.0" && lifeSteal != "0.00")
+                {
+                    problems.Add(actor.Name + " line " + frame.Line + ": 'A_CustomPunch' " +
+                                 "lifesteal is not supported, so it is ignored");
+                }
+            }
+
+            if (arguments.Count > 6 && arguments[6].Count > 0)
+            {
+                problems.Add(actor.Name + " line " + frame.Line + ": 'A_CustomPunch' " +
+                             "lifestealmax and armour bonus are not supported, so they are ignored");
+            }
+
+            if (arguments.Count > 7 && arguments[7].Count > 0)
+            {
+                problems.Add(actor.Name + " line " + frame.Line + ": 'A_CustomPunch' " +
+                             "armorbonustype is not supported, so it is ignored");
+            }
+
+            frame.PunchHitSound = ReadOptionalSound(arguments, 8);
+            frame.PunchMissSound = ReadOptionalSound(arguments, 9);
+        }
+
+        private static bool ReadPunchBoolean(List<List<Token>> arguments, int index,
+                                             DecorateActor actor, StateFrame frame,
+                                             IList<string> problems)
+        {
+            if (index >= arguments.Count || arguments[index].Count == 0)
+            {
+                return false;
+            }
+
+            if (arguments[index].Count == 1)
+            {
+                var token = arguments[index][0];
+
+                if (token.IsNumber)
+                {
+                    return token.Number != 0;
+                }
+
+                if (string.Equals(token.Text, "true", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+
+                if (string.Equals(token.Text, "false", StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+            }
+
+            problems.Add(actor.Name + " line " + frame.Line + ": 'A_CustomPunch' norandom must " +
+                         "be true/false or 0/1; the random multiplier is used");
+            return false;
+        }
+
+        private static int ReadPunchFlags(List<List<Token>> arguments, int index,
+                                          DecorateActor actor, StateFrame frame,
+                                          IList<string> problems)
+        {
+            if (index >= arguments.Count || arguments[index].Count == 0)
+            {
+                return CustomPunchFlags.UseAmmo;
+            }
+
+            var text = JoinTokens(arguments[index]).Replace(" ", "");
+            int flags = 0;
+            var unsupported = new List<string>();
+
+            foreach (var part in text.Split('|'))
+            {
+                if (part.Length == 0)
+                {
+                    continue;
+                }
+
+                int value;
+
+                if (int.TryParse(part, NumberStyles.Integer, CultureInfo.InvariantCulture, out value))
+                {
+                    flags |= value;
+                    continue;
+                }
+
+                switch (part.ToUpperInvariant())
+                {
+                    case "CPF_USEAMMO": flags |= CustomPunchFlags.UseAmmo; break;
+                    case "CPF_DAGGER": flags |= CustomPunchFlags.Dagger; break;
+                    case "CPF_PULLIN": flags |= CustomPunchFlags.PullIn; break;
+                    case "CPF_NORANDOMPUFFZ": flags |= CustomPunchFlags.NoRandomPuffZ; break;
+                    case "CPF_NOTURN": flags |= CustomPunchFlags.NoTurn; break;
+                    case "CPF_STEALARMOR": flags |= CustomPunchFlags.StealArmor; break;
+                    default:
+                        problems.Add(actor.Name + " line " + frame.Line + ": 'A_CustomPunch' flag '" +
+                                     part + "' is not one this engine knows, so it is ignored");
+                        break;
+                }
+            }
+
+            var unsupportedBits = flags & ~CustomPunchFlags.Supported;
+
+            if (unsupportedBits != 0)
+            {
+                problems.Add(actor.Name + " line " + frame.Line + ": 'A_CustomPunch' flags 0x" +
+                             unsupportedBits.ToString("x", CultureInfo.InvariantCulture) +
+                             " (ammo, dagger, pull-in or armour stealing) are not supported here; " +
+                             "the punch still runs without them");
+            }
+
+            return flags & CustomPunchFlags.Supported;
+        }
+
+        /// <summary>
+        /// A_CustomMeleeAttack: damage, hit sound, miss sound, damage type and bleed.
+        ///
+        /// The first three arguments are what most mods use. Damage is kept as an expression
+        /// because random(20,24) is common. Damage types have no counterpart in this engine, so
+        /// they are reported when written; bleed=false is also reported rather than ignored,
+        /// because the engine's damage path does not have a per-action blood toggle.
+        /// </summary>
+        private static void ReadCustomMelee(List<List<Token>> arguments, DecorateActor actor,
+                                            StateFrame frame, IList<string> problems)
+        {
+            frame.Action = "";
+            frame.HasCustomMelee = true;
+
+            frame.MeleeDamageExpression = ReadSpawnExpression(
+                arguments, 0, actor, frame, problems, "0");
+            frame.MeleeHitSound = ReadOptionalSound(arguments, 1);
+            frame.MeleeMissSound = ReadOptionalSound(arguments, 2);
+
+            if (arguments.Count > 3 && arguments[3].Count > 0)
+            {
+                var type = JoinTokens(arguments[3]).Trim();
+
+                if (type.Length > 0 && type != "\"\"" &&
+                    !string.Equals(type, "none", StringComparison.OrdinalIgnoreCase))
+                {
+                    problems.Add(actor.Name + " line " + frame.Line + ": 'A_CustomMeleeAttack' " +
+                                 "damage type " + type + " is ignored - this engine has no " +
+                                 "damage types");
+                }
+            }
+
+            if (arguments.Count > 4 && arguments[4].Count > 0)
+            {
+                var token = arguments[4].Count == 1 ? arguments[4][0] : null;
+
+                if (token != null &&
+                    ((token.IsNumber && token.Number == 0) ||
+                     string.Equals(token.Text, "false", StringComparison.OrdinalIgnoreCase)))
+                {
+                    problems.Add(actor.Name + " line " + frame.Line + ": 'A_CustomMeleeAttack' " +
+                                 "bleed=false is ignored - there is no per-action blood toggle " +
+                                 "in this engine");
+                }
+            }
+        }
+
+        /// <summary>One optional sound argument, without the quotes DECORATE uses.</summary>
+        private static string ReadOptionalSound(List<List<Token>> arguments, int index)
+        {
+            if (index >= arguments.Count || arguments[index].Count != 1)
+            {
+                return null;
+            }
+
+            var text = arguments[index][0].Text;
+
+            return text.Length == 0 ? null : text;
         }
 
         /// <summary>

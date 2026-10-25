@@ -726,6 +726,50 @@ namespace DPTDOOM.Scripting
                 return ScriptValue.Void;
             });
 
+            // A_CustomPunch: the damage and range are expressions, the puff is an actor name.
+            host.Register("CustomPunch", 8, 8, call =>
+            {
+                var number = FrameNumber(call.AsText(0), call);
+                var damage = ResolveSpawnExpression(call, 1);
+                var noRandom = call.AsBool(2);
+                var flags = call.AsInt(3);
+                var puffName = call.AsText(4);
+                var range = ResolveSpawnExpression(call, 5);
+                var hitSound = call.AsText(6);
+                var missSound = call.AsText(7);
+
+                var type = ActorNames.TypeOf(puffName);
+
+                if (type < 0)
+                {
+                    throw call.Fail("no such actor '" + puffName + "' for A_CustomPunch");
+                }
+
+                DoomInfo.SetStateAction(number, (world, mobj) =>
+                    world.MonsterBehavior.CustomPunch(
+                        mobj, damage.EvaluateValue(world, mobj).AsInt(), noRandom, flags,
+                        (MobjType)type, range.EvaluateValue(world, mobj).AsFixed(),
+                        hitSound, missSound));
+
+                return ScriptValue.Void;
+            });
+
+            // A_CustomMeleeAttack: damage is an expression, because mods write random(20,24)
+            // rather than a fixed number. Sounds are names resolved at play time through SNDINFO.
+            host.Register("CustomMeleeAttack", 4, 4, call =>
+            {
+                var number = FrameNumber(call.AsText(0), call);
+                var damage = ResolveSpawnExpression(call, 1);
+                var hitSound = call.AsText(2);
+                var missSound = call.AsText(3);
+
+                DoomInfo.SetStateAction(number, (world, mobj) =>
+                    world.MonsterBehavior.CustomMeleeAttack(
+                        mobj, damage.EvaluateValue(world, mobj).AsInt(), hitSound, missSound));
+
+                return ScriptValue.Void;
+            });
+
             // A_SpawnItemEx: the seven numeric arguments are function names, not values. Each
             // function is evaluated when the frame runs, because it may contain random().
             host.Register("SpawnItemEx", 11, 11, call =>

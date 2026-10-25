@@ -177,11 +177,11 @@ namespace DPTDOOMTest.UnitTests
             // mechanism for, so it stays refused.
             List<string> problems;
 
-            ParseSingle(ActorWith("A_CustomPunch(32, 1)"), out problems);
+            ParseSingle(ActorWith("A_ThrowGrenade(\"Rocket\", 0, 0, 0)"), out problems);
 
             var text = All(problems);
 
-            StringAssert.Contains(text, "A_CustomPunch");
+            StringAssert.Contains(text, "A_ThrowGrenade");
             StringAssert.Contains(text, "takes no arguments");
         }
 

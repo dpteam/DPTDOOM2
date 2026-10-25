@@ -44,6 +44,17 @@ namespace DPTDOOM
         private Fixed currentAimSlope;
         private int currentDamage;
 
+        /// <summary>
+        /// The actor to spawn as a bullet puff, or null for the vanilla BulletPuff.
+        ///
+        /// Only a mod action sets this. The ordinary weapon path leaves it null, so every vanilla
+        /// shot keeps its existing spawn type, random draws and world hash.
+        /// </summary>
+        private MobjType? currentPuffType;
+
+        /// <summary>Whether the puff's vertical random offset is suppressed.</summary>
+        private bool noRandomPuffZ;
+
         // Slopes to top and bottom of target.
         private Fixed topSlope;
         private Fixed bottomSlope;
@@ -369,11 +380,26 @@ namespace DPTDOOM
         /// </summary>
         public void LineAttack(Mobj shooter, Angle angle, Fixed range, Fixed slope, int damage)
         {
+            LineAttack(shooter, angle, range, slope, damage, null, false);
+        }
+
+        /// <summary>
+        /// Fires a hitscan bullet with an optional DECORATE puff and puff-z policy.
+        ///
+        /// The four-argument overload above is the vanilla entry point and passes exactly the same
+        /// defaults as before. The extra arguments exist for A_CustomPunch, which names a puff actor
+        /// and may request that its vertical position not be randomised.
+        /// </summary>
+        public void LineAttack(Mobj shooter, Angle angle, Fixed range, Fixed slope, int damage,
+                               MobjType? puffType, bool noRandomPuffZ)
+        {
             currentShooter = shooter;
             currentShooterZ = shooter.Z + (shooter.Height >> 1) + Fixed.FromInt(8);
             currentRange = range;
             currentAimSlope = slope;
             currentDamage = damage;
+            currentPuffType = puffType;
+            this.noRandomPuffZ = noRandomPuffZ;
 
             var targetX = shooter.X + range.ToIntFloor() * Trig.Cos(angle);
             var targetY = shooter.Y + range.ToIntFloor() * Trig.Sin(angle);
@@ -383,6 +409,10 @@ namespace DPTDOOM
                 targetX, targetY,
                 PathTraverseFlags.AddLines | PathTraverseFlags.AddThings,
                 shootTraverseFunc);
+
+            // A later vanilla shot must not inherit a custom action's puff.
+            currentPuffType = null;
+            this.noRandomPuffZ = false;
         }
 
         /// <summary>
@@ -392,9 +422,12 @@ namespace DPTDOOM
         {
             var random = world.Random;
 
-            z += new Fixed((random.Next() - random.Next()) << 10);
+            if (!noRandomPuffZ)
+            {
+                z += new Fixed((random.Next() - random.Next()) << 10);
+            }
 
-            var thing = world.ThingAllocation.SpawnMobj(x, y, z, MobjType.Puff);
+            var thing = world.ThingAllocation.SpawnMobj(x, y, z, currentPuffType ?? MobjType.Puff);
             thing.MomZ = Fixed.One;
             thing.Tics -= random.Next() & 3;
 

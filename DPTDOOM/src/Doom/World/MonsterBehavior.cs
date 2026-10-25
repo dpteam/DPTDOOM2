@@ -1118,6 +1118,99 @@ namespace DPTDOOM
         }
 
 
+        /// <summary>
+        /// A_CustomPunch: a melee hitscan with a custom damage amount, puff and range.
+        ///
+        /// The random multiplier is 1..8, as in ZDoom. When the caller passes norandom=true it is
+        /// skipped entirely, including its draw; that is the form ademo1.wad uses, and skipping the
+        /// draw is important because the multiplier belongs to the world simulation.
+        ///
+        /// Ammo, life stealing and dagger/pull-in behaviour are not silently approximated: their
+        /// flags are reported by the converter. NoTurn and NoRandomPuffZ are implemented.
+        /// </summary>
+        public void CustomPunch(Mobj actor, int damage, bool noRandom, int flags,
+                                MobjType puffType, Fixed range, string hitSound, string missSound)
+        {
+            if (actor.Player == null)
+            {
+                // ZDoom's A_CustomPunch is a player action, not a monster attack. A mod that puts
+                // it on a monster gets no phantom melee hit; the converter still accepts the call,
+                // because actor types are resolved before the world exists.
+                return;
+            }
+
+            var random = world.Random;
+
+            if (!noRandom)
+            {
+                damage *= random.Next() % 8 + 1;
+            }
+
+            if (range.Data == 0)
+            {
+                range = WeaponBehavior.MeleeRange;
+            }
+
+            var angle = actor.Angle +
+                        new Angle((random.Next() - random.Next()) << 18);
+
+            var slope = world.Hitscan.AimLineAttack(actor, angle, range);
+            world.Hitscan.LineAttack(actor, angle, range, slope, damage, puffType,
+                (flags & CustomPunchFlags.NoRandomPuffZ) != 0);
+
+            if (world.Hitscan.LineTarget != null)
+            {
+                if (!string.IsNullOrEmpty(hitSound))
+                {
+                    world.StartSound(actor, hitSound, SfxType.Weapon, 100);
+                }
+
+                if ((flags & CustomPunchFlags.NoTurn) == 0)
+                {
+                    actor.Angle = Geometry.PointToAngle(
+                        actor.X, actor.Y,
+                        world.Hitscan.LineTarget.X, world.Hitscan.LineTarget.Y);
+                }
+            }
+            else if (!string.IsNullOrEmpty(missSound))
+            {
+                world.StartSound(actor, missSound, SfxType.Weapon, 100);
+            }
+        }
+
+        /// <summary>
+        /// A_CustomMeleeAttack: face the target and, if it is in melee range, damage it.
+        ///
+        /// Kept separate from the vanilla TroopAttack/SargAttack routines because the damage is a
+        /// parameter of the frame, not a dice formula owned by the monster type. The range test is
+        /// shared with those routines, so a mod's melee reach is the same as a vanilla monster's.
+        /// Sounds are optional and named through SNDINFO, exactly like A_PlaySound.
+        /// </summary>
+        public void CustomMeleeAttack(Mobj actor, int damage, string hitSound, string missSound)
+        {
+            if (actor.Target == null)
+            {
+                return;
+            }
+
+            FaceTarget(actor);
+
+            if (CheckMeleeRange(actor))
+            {
+                if (!string.IsNullOrEmpty(hitSound))
+                {
+                    world.StartSound(actor, hitSound, SfxType.Weapon, 100);
+                }
+
+                world.ThingInteraction.DamageMobj(actor.Target, actor, actor, damage);
+            }
+            else if (!string.IsNullOrEmpty(missSound))
+            {
+                world.StartSound(actor, missSound, SfxType.Weapon, 100);
+            }
+        }
+
+
         public void PosAttack(Mobj actor)
         {
             if (actor.Target == null)
