@@ -538,6 +538,42 @@ namespace DPTDOOM.Scripting
             RegisterSfx(host, "ActiveSound", ActorSoundSlot.Active,
                 () => info.ActiveSound, value => info.ActiveSound = value);
 
+            // The sound one frame plays, attached after the frame exists. DECORATE's A_PlaySound:
+            // the name is a sound name from SNDINFO, and the volume is a percentage.
+            host.Register("PlaySound", 2, 3, call =>
+            {
+                var frameName = call.AsText(0);
+                var soundName = call.AsText(1);
+                var volume = call.Count > 2 ? call.AsInt(2) : 100;
+
+                int number;
+
+                if (!customStates.TryGetValue(frameName, out number))
+                {
+                    throw call.Fail("no such frame '" + frameName +
+                                    "'; a sound can only be attached to a frame this actor defined");
+                }
+
+                if (volume < 0)
+                {
+                    volume = 0;
+                }
+                else if (volume > 100)
+                {
+                    volume = 100;
+                }
+
+                // The name is captured, not looked up now: the sound system is built after the
+                // content is read, and SNDINFO may be read after this script runs.
+                var captured = soundName;
+                var capturedVolume = volume;
+
+                DoomInfo.SetStateAction(number, (world, mobj) =>
+                    world.StartSound(mobj, captured, SfxType.Misc, capturedVolume));
+
+                return ScriptValue.Void;
+            });
+
             // Diagnostics: the only way a script can say something is wrong, since it
             // cannot throw. Collected by the library and reported with the line.
             host.Register("Fail", 1, call =>

@@ -374,7 +374,96 @@ ACTOR CountingImp 3001
     Assert-True ($badLog -like "*jump is dropped*") "and only the jump is dropped"
     Assert-True ($badLog -like "*map MAP01: OK*") "the level still loads"
 
-    Write-Host "With an A_Jump by frame count"
+    Write-Host "With A_JumpIfHealthLower and A_PlaySound"
+    $argLow = Join-Path $work "arglow.dec"
+    $argHigh = Join-Path $work "arghigh.dec"
+    $argSound = Join-Path $work "argsound.dec"
+
+    # The same imp with the same chain; only the threshold differs. One condition is true for a
+    # 60-health imp and the other is not, so the worlds must differ - which is the only way to
+    # show that the answer, not the file, decided the jump.
+    [System.IO.File]::WriteAllText($argLow, @"
+ACTOR ArgImp 3001
+{
+  States
+  {
+  Spawn:
+    TROO A 4 A_Look
+    TROO B 4 A_JumpIfHealthLower(10, "See")
+  See:
+    TROO C 4 A_Chase
+    Goto See
+  }
+}
+"@)
+
+    [System.IO.File]::WriteAllText($argHigh, @"
+ACTOR ArgImp 3001
+{
+  States
+  {
+  Spawn:
+    TROO A 4 A_Look
+    TROO B 4 A_JumpIfHealthLower(100000, "See")
+  See:
+    TROO C 4 A_Chase
+    Goto See
+  }
+}
+"@)
+
+    $lowLog = Run-Game "arglow" @('-decorate', $argLow)
+    $highLog = Run-Game "arghigh" @('-decorate', $argHigh)
+
+    Assert-True ($lowLog -like "*scripts: OK*") "A_JumpIfHealthLower converts"
+    Assert-True ($lowLog -notlike "*no such action*") "and is no longer a missing action"
+    Assert-True ((State-Of $lowLog) -ne (State-Of $highLog)) `
+        ("the threshold decided the jump: low $(State-Of $lowLog), high $(State-Of $highLog)")
+
+    # A sound is presentation, so a file that only adds one must leave the world bit for bit as a
+    # file that adds nothing. If these differed, adding a sound to a mod would break every demo
+    # recorded with it.
+    [System.IO.File]::WriteAllText($argSound, @"
+ACTOR SoundOnlyImp 3001
+{
+  States
+  {
+  Spawn:
+    TROO A 4 A_Look
+    TROO B 4 A_PlaySound("dspistol")
+  See:
+    TROO C 4 A_Chase
+    Goto See
+  }
+}
+"@)
+
+    $silent = Join-Path $work "argsilent.dec"
+
+    [System.IO.File]::WriteAllText($silent, @"
+ACTOR SoundOnlyImp 3001
+{
+  States
+  {
+  Spawn:
+    TROO A 4 A_Look
+    TROO B 4
+  See:
+    TROO C 4 A_Chase
+    Goto See
+  }
+}
+"@)
+
+    $soundOnlyLog = Run-Game "argsound" @('-decorate', $argSound)
+    $silentLog = Run-Game "argsilent" @('-decorate', $silent)
+
+    Assert-True ($soundOnlyLog -like "*scripts: OK*") "A_PlaySound converts"
+    Assert-True ($soundOnlyLog -notlike "*takes no arguments*") "and is no longer refused"
+    Assert-True ((State-Of $soundOnlyLog) -eq (State-Of $silentLog)) `
+        ("the same actor without the sound gives the same world: $(State-Of $soundOnlyLog)")
+
+    Write-Host "With A_Jump by frame count"
     $jumpByCount = Join-Path $work "jumpcount.dec"
 
     [System.IO.File]::WriteAllText($jumpByCount, @"

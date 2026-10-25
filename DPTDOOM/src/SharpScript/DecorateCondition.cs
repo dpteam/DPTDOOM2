@@ -225,7 +225,12 @@ namespace DPTDOOM.Scripting
 
             if (reader.PeekIsNumber)
             {
-                return reader.ReadNumber().ToString(CultureInfo.InvariantCulture);
+                // The literal is carried through as written, not parsed and re-printed. A literal
+                // with a dot is a fixed-point number in this language, and that is exactly what a
+                // condition comparing a distance needs: "Distance() < 128.0" must compare fixed to
+                // fixed. Truncating the dot to a whole number - the first version of this - quietly
+                // changed 0.5 into 0.
+                return reader.ReadNumber();
             }
 
             var name = reader.ReadName();
@@ -340,7 +345,7 @@ namespace DPTDOOM.Scripting
                 }
             }
 
-            public int ReadNumber()
+            public string ReadNumber()
             {
                 SkipSpace();
 
@@ -354,27 +359,20 @@ namespace DPTDOOM.Scripting
 
                 var body = Text.Substring(start, position - start);
 
-                int value;
-
-                // A decimal literal is read as a whole number: this engine's actor fields that a
-                // condition compares are integers, and DECORATE writes "health < 100" far more often
-                // than "health < 100.5". A fractional part is truncated rather than refused, and the
-                // comparison still means what the author meant for every whole number.
-                var dot = body.IndexOf('.');
-
-                if (dot >= 0)
+                // A trailing dot or a lone dot is not a number this language reads; treat it as
+                // zero rather than emitting something the lexer would refuse later, at load, with
+                // a message that names no condition.
+                if (body.Length == 0 || body == ".")
                 {
-                    body = body.Substring(0, dot);
+                    return "0";
                 }
 
-                if (body.Length == 0)
+                if (body.EndsWith(".", StringComparison.Ordinal))
                 {
-                    return 0;
+                    body = body + "0";
                 }
 
-                return int.TryParse(body, NumberStyles.None, CultureInfo.InvariantCulture, out value)
-                    ? value
-                    : 0;
+                return body;
             }
 
             public string ReadName()

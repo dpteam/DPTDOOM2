@@ -135,6 +135,26 @@ namespace DPTDOOM.Scripting
             target.Register("MomY", 0, call => ScriptValue.FromFixed(Current().MomY));
             target.Register("MomZ", 0, call => ScriptValue.FromFixed(Current().MomZ));
 
+            // Distance to the target, which is what DECORATE's A_JumpIfCloser asks. Answered as a
+            // fixed-point number, the same unit the engine's own geometry uses, so a condition can
+            // add to it or compare two of them without a conversion the modder cannot see.
+            target.Register("Distance", 0, call =>
+            {
+                var mobj = Current();
+                var target = mobj.Target;
+
+                if (target == null)
+                {
+                    // No target is infinitely far: a condition asking "is it close" must not be
+                    // true for a monster standing alone. A large number rather than a thrown
+                    // error, because the question is legitimate and the honest answer is "no".
+                    return ScriptValue.FromFixed(Fixed.MaxValue);
+                }
+
+                return ScriptValue.FromFixed(
+                    Geometry.AproxDistance(mobj.X - target.X, mobj.Y - target.Y));
+            });
+
             target.Register("X", 0, call => ScriptValue.FromFixed(Current().X));
             target.Register("Y", 0, call => ScriptValue.FromFixed(Current().Y));
             target.Register("Z", 0, call => ScriptValue.FromFixed(Current().Z));

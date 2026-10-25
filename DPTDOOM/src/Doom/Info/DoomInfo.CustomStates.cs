@@ -178,6 +178,27 @@ namespace DPTDOOM
         }
 
         /// <summary>
+        /// Replaces what a state does when it runs.
+        ///
+        /// Used by the sound attachment: DECORATE's A_PlaySound is an action, so a frame that plays
+        /// a sound needs an action that plays it - and the sound's name is only known once the file
+        /// has been read. The delegate closes over the name, so the state table needs no field for
+        /// it and the engine's own actions are untouched.
+        /// </summary>
+        public static bool SetStateAction(int number, Action<World, Mobj> action)
+        {
+            var table = States;
+
+            if (number < CustomStateFirst || number >= table.Length)
+            {
+                return false;
+            }
+
+            table[number].MobjAction = action;
+            return true;
+        }
+
+        /// <summary>
         /// Gives a state a **conditional** jump: leave for the target when the question is true.
         ///
         /// The chance is reset to nothing, because the two forms are different instructions and a

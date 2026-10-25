@@ -113,6 +113,18 @@ namespace DPTDOOM.Scripting
         /// when the question is true or taken on a chance.
         /// </summary>
         public string JumpCondition;
+
+        /// <summary>
+        /// Sound a frame plays when it runs, or null.
+        ///
+        /// DECORATE's A_PlaySound names a sound and this engine resolves that name through
+        /// SNDINFO, so the frame only has to remember which name. Emitted as its own call because
+        /// the sound is a piece of work, not a state argument - see EmitSounds.
+        /// </summary>
+        public string PlaySoundName;
+
+        /// <summary>Volume for <see cref="PlaySoundName"/>, 0 to 100.</summary>
+        public int PlaySoundVolume = 100;
     }
 
     /// <summary>
@@ -317,6 +329,11 @@ namespace DPTDOOM.Scripting
                 }
 
                 EmitStates(script, actor, problems);
+
+                // Sounds are attached to their frames as extra calls *inside* the definition: a
+                // sound is a piece of work the frame performs, not something the transition
+                // describes. They come after the frames exist, which is why this is a second pass.
+                EmitSounds(script, actor);
 
                 script.Append("}\n");
 
@@ -532,6 +549,36 @@ namespace DPTDOOM.Scripting
                 {
                     script.Append("    ").Append(property).Append("(\"")
                           .Append(FrameName(chain.Label, 1)).Append("\");\n");
+                }
+            }
+        }
+
+        /// <summary>
+        /// Attaches each frame's sound to that frame.
+        ///
+        /// A second call rather than a state argument, because a sound is something the frame
+        /// **does**: the transition describes where the actor goes, and this describes what it
+        /// plays on the way. The frame is addressed by the name it was created with, so the order
+        /// of emission cannot change which sound belongs to which frame.
+        /// </summary>
+        private static void EmitSounds(StringBuilder script, DecorateActor actor)
+        {
+            foreach (var chain in actor.Chains)
+            {
+                for (var i = 0; i < chain.Frames.Count; i++)
+                {
+                    var frame = chain.Frames[i];
+
+                    if (frame.PlaySoundName == null)
+                    {
+                        continue;
+                    }
+
+                    script.Append("    PlaySound(\"")
+                          .Append(FrameName(chain.Label, i + 1)).Append("\", \"")
+                          .Append(frame.PlaySoundName).Append("\", ")
+                          .Append(frame.PlaySoundVolume.ToString(CultureInfo.InvariantCulture))
+                          .Append(");\n");
                 }
             }
         }
@@ -1230,7 +1277,28 @@ namespace DPTDOOM.Scripting
             var isJump = string.Equals(frame.Action, "A_Jump", StringComparison.OrdinalIgnoreCase);
             var isJumpIf = string.Equals(frame.Action, "A_JumpIf", StringComparison.OrdinalIgnoreCase);
 
-            if (!isJump && !isJumpIf)
+            // Two more spellings of the same question. DECORATE has a small family of them, and
+            // they mean exactly what the equivalent A_JumpIf expression means - so they are
+            // translated into it rather than given a second mechanism. One jump implementation,
+            // several spellings of the question.
+            var isHealthLower =
+                string.Equals(frame.Action, "A_JumpIfHealthLower", StringComparison.OrdinalIgnoreCase);
+            var isCloser =
+                string.Equals(frame.Action, "A_JumpIfCloser", StringComparison.OrdinalIgnoreCase);
+
+            if (isJumpIf || isHealthLower || isCloser)
+            {
+                ReadConditionalJump(arguments, actor, frame, problems, isHealthLower, isCloser);
+                return;
+            }
+
+            if (string.Equals(frame.Action, "A_PlaySound", StringComparison.OrdinalIgnoreCase))
+            {
+                ReadPlaySound(arguments, actor, frame, problems);
+                return;
+            }
+
+            if (!isJump)
             {
                 problems.Add(actor.Name + " line " + frame.Line + ": '" + frame.Action +
                              "' takes no arguments in this engine, so they are ignored; " +
@@ -1240,66 +1308,170 @@ namespace DPTDOOM.Scripting
 
             if (arguments.Count != 2)
             {
-                problems.Add(actor.Name + " line " + frame.Line + ": '" + frame.Action +
-                             "' needs " +
-                             (isJump ? "a chance and a label" : "a condition and a label") +
-                             ", so the jump is dropped");
+                problems.Add(actor.Name + " line " + frame.Line + ": 'A_Jump' needs " +
+                             "a chance and a label, so the jump is dropped");
                 frame.Action = "";
                 return;
             }
 
-            var label = arguments[1];
+            var label = ReadLabel(arguments[1], actor, frame, problems);
 
-            // A relative offset is legal DECORATE ("skip two frames") and is deliberately not
-            // guessed at: the number counts states, not frames of this chain, and a wrong guess
-            // would move the actor to a frame the author never meant.
-            if (label.Count == 1 && label[0].IsNumber)
+            if (label == null)
             {
-                problems.Add(actor.Name + " line " + frame.Line + ": '" + frame.Action +
-                             "' by a frame count (" + label[0].Text +
-                             ") is not supported; name the label instead. The jump is dropped");
                 frame.Action = "";
                 return;
             }
 
-            if (label.Count != 1)
-            {
-                problems.Add(actor.Name + " line " + frame.Line + ": '" + frame.Action +
-                             "' ends with something that is not a single label; the jump is dropped");
-                frame.Action = "";
-                return;
-            }
-
-            frame.JumpLabel = label[0].Text;
+            frame.JumpLabel = label;
             frame.Action = "";
 
-            if (isJump)
-            {
-                var chance = arguments[0];
+            var chance = arguments[0];
 
-                if (chance.Count != 1 || !chance[0].IsNumber)
+            if (chance.Count != 1 || !chance[0].IsNumber)
+            {
+                problems.Add(actor.Name + " line " + frame.Line +
+                             ": 'A_Jump' needs a whole chance such as 128; the jump is dropped");
+                frame.JumpLabel = null;
+                return;
+            }
+
+            var value = chance[0].Number;
+            frame.JumpChance = value < 0 ? 0 : (value > 256 ? 256 : value);
+        }
+
+        /// <summary>
+        /// A_JumpIf and its relatives: a question and a label.
+        ///
+        /// The three spellings differ only in how the question is written, so they end up in the
+        /// same place: <see cref="StateFrame.JumpCondition"/> holds translated text, and the
+        /// runtime asks it when the frame ends.
+        /// </summary>
+        private static void ReadConditionalJump(List<List<Token>> arguments, DecorateActor actor,
+                                                StateFrame frame, IList<string> problems,
+                                                bool healthLower, bool closer)
+        {
+            if (arguments.Count != 2)
+            {
+                problems.Add(actor.Name + " line " + frame.Line + ": '" + frame.Action +
+                             "' needs a condition and a label, so the jump is dropped");
+                frame.Action = "";
+                return;
+            }
+
+            var label = ReadLabel(arguments[1], actor, frame, problems);
+
+            if (label == null)
+            {
+                frame.Action = "";
+                return;
+            }
+
+            string condition;
+
+            if (healthLower || closer)
+            {
+                // "(amount, label)": the question is the comparison, written by the file's own
+                // spelling. Built here rather than parsed, because there is nothing to parse - the
+                // first argument is a single number.
+                if (arguments[0].Count != 1 || !arguments[0][0].IsNumber)
                 {
-                    problems.Add(actor.Name + " line " + frame.Line +
-                                 ": 'A_Jump' needs a whole chance such as 128; the jump is dropped");
-                    frame.JumpLabel = null;
+                    problems.Add(actor.Name + " line " + frame.Line + ": '" + frame.Action +
+                                 "' needs a whole number and a label, so the jump is dropped");
+                    frame.Action = "";
                     return;
                 }
 
-                var value = chance[0].Number;
-                frame.JumpChance = value < 0 ? 0 : (value > 256 ? 256 : value);
+                condition = (healthLower ? "Health() < " : "Distance() < ") +
+                            arguments[0][0].Number.ToString(CultureInfo.InvariantCulture);
+            }
+            else
+            {
+                condition = DecorateCondition.Translate(
+                    JoinTokens(arguments[0]), actor.Name, frame.Line, problems);
+
+                if (condition == null)
+                {
+                    // Already reported. The frame keeps its animation and loses only the jump.
+                    frame.Action = "";
+                    return;
+                }
+            }
+
+            frame.JumpLabel = label;
+            frame.JumpCondition = condition;
+            frame.Action = "";
+        }
+
+        /// <summary>
+        /// The label an action jumps to, or null with the reason reported.
+        ///
+        /// A relative offset is legal DECORATE ("skip two frames") and is deliberately not guessed
+        /// at: the number counts states, not frames of this chain, and a wrong guess would move the
+        /// actor to a frame the author never meant.
+        /// </summary>
+        private static string ReadLabel(List<Token> tokens, DecorateActor actor, StateFrame frame,
+                                        IList<string> problems)
+        {
+            if (tokens.Count == 1 && tokens[0].IsNumber)
+            {
+                problems.Add(actor.Name + " line " + frame.Line + ": '" + frame.Action +
+                             "' by a frame count (" + tokens[0].Text +
+                             ") is not supported; name the label instead. The jump is dropped");
+                return null;
+            }
+
+            if (tokens.Count != 1)
+            {
+                problems.Add(actor.Name + " line " + frame.Line + ": '" + frame.Action +
+                             "' ends with something that is not a single label; the jump is dropped");
+                return null;
+            }
+
+            return tokens[0].Text;
+        }
+
+        /// <summary>
+        /// A_PlaySound: the sound a frame plays when it runs.
+        ///
+        /// The name is a **sound name**, resolved through SNDINFO when it is played, exactly like
+        /// the sounds an actor carries. `channel` is reported rather than honoured: this engine has
+        /// no looping sound channels, and accepting one would promise a sound that keeps playing.
+        /// </summary>
+        private static void ReadPlaySound(List<List<Token>> arguments, DecorateActor actor,
+                                          StateFrame frame, IList<string> problems)
+        {
+            if (arguments.Count < 1 || arguments[0].Count != 1)
+            {
+                problems.Add(actor.Name + " line " + frame.Line +
+                             ": 'A_PlaySound' needs a sound name, so the frame stays silent");
+                frame.Action = "";
                 return;
             }
 
-            // A_JumpIf: the condition is translated into this engine's own language. Translating
-            // rather than passing the text through is deliberate - an unknown word then names
-            // itself in the report instead of surfacing as a script error at load.
-            frame.JumpCondition = DecorateCondition.Translate(
-                JoinTokens(arguments[0]), actor.Name, frame.Line, problems);
+            frame.PlaySoundName = arguments[0][0].Text;
+            frame.Action = "";
 
-            if (frame.JumpCondition == null)
+            if (arguments.Count >= 2 && arguments[1].Count == 1 && arguments[1][0].IsNumber &&
+                arguments[1][0].Number != 0)
             {
-                // Already reported. The frame keeps its animation and loses only the jump.
-                frame.JumpLabel = null;
+                problems.Add(actor.Name + " line " + frame.Line + ": 'A_PlaySound' channel " +
+                             arguments[1][0].Number + " is ignored - this engine has no looping " +
+                             "sound channels; the sound plays once");
+            }
+
+            if (arguments.Count >= 3)
+            {
+                if (arguments[2].Count == 1 && arguments[2][0].IsNumber)
+                {
+                    var volume = arguments[2][0].Number;
+                    frame.PlaySoundVolume = volume < 0 ? 0 : (volume > 100 ? 100 : volume);
+                }
+                else
+                {
+                    problems.Add(actor.Name + " line " + frame.Line +
+                                 ": 'A_PlaySound' volume must be a whole number out of 100; the " +
+                                 "default is used");
+                }
             }
         }
 
