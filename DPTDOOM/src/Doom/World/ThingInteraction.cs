@@ -312,9 +312,11 @@ namespace DPTDOOM
 
 			thing.Flags &= ~MobjFlags.Missile;
 
-			if (thing.Info.DeathSound != 0)
+			if (thing.Info.DeathSound != 0 ||
+			    ActorSounds.Has((int)thing.Type, ActorSoundSlot.Death))
 			{
-				world.StartSound(thing, thing.Info.DeathSound, SfxType.Misc);
+				world.StartActorSound(thing, ActorSoundSlot.Death,
+				    thing.Info.DeathSound, SfxType.Misc);
 			}
 		}
 

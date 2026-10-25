@@ -48,6 +48,16 @@ namespace DPTDOOM.Scripting
         public readonly List<KeyValuePair<string, string>> Unsupported =
             new List<KeyValuePair<string, string>>();
 
+        /// <summary>
+        /// Text properties that **are** applied: the five sound names, already normalised to the
+        /// names this engine uses.
+        ///
+        /// Separate from <see cref="Numbers"/> because a sound is a name and not a number, and
+        /// separate from <see cref="Unsupported"/> because since named sounds exist these apply.
+        /// </summary>
+        public readonly List<KeyValuePair<string, string>> Sounds =
+            new List<KeyValuePair<string, string>>();
+
         /// <summary>The line each unsupported property was written on, parallel to it.</summary>
         public readonly List<int> UnsupportedLines = new List<int>();
 
@@ -169,6 +179,24 @@ namespace DPTDOOM.Scripting
         };
 
         /// <summary>
+        /// Sound properties.
+        ///
+        /// In DECORATE the value is a **sound name** from SNDINFO, not a lump: `SeeSound
+        /// "imp/sight"`. The engine's own actors hold an <see cref="Sfx"/>, and a name that is not
+        /// one is kept as a named sound for that slot - so both spellings convert, and the same
+        /// word means the same thing in the mod and in the engine.
+        /// </summary>
+        private static readonly Dictionary<string, string> SoundProperties =
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            { "seesound", "SeeSound" },
+            { "attacksound", "AttackSound" },
+            { "painsound", "PainSound" },
+            { "deathsound", "DeathSound" },
+            { "activesound", "ActiveSound" }
+        };
+
+        /// <summary>
         /// The DECORATE bundles, expanded to the flags this engine has.
         ///
         /// MONSTER and PROJECTILE are not flags but groups of them. The expansion is taken
@@ -227,7 +255,7 @@ namespace DPTDOOM.Scripting
                                  "engine's own states");
                 }
 
-                if (actor.Numbers.Count == 0 && actor.Flags.Count == 0)
+                if (actor.Numbers.Count == 0 && actor.Flags.Count == 0 && actor.Sounds.Count == 0)
                 {
                     // Nothing to say, so nothing is emitted. An empty patch would still be
                     // an entry in the report and would look like work.
@@ -240,6 +268,12 @@ namespace DPTDOOM.Scripting
                 {
                     script.Append("    ").Append(pair.Key).Append('(')
                           .Append(pair.Value.ToString(CultureInfo.InvariantCulture)).Append(");\n");
+                }
+
+                foreach (var pair in actor.Sounds)
+                {
+                    script.Append("    ").Append(pair.Key).Append("(\"")
+                          .Append(pair.Value).Append("\");\n");
                 }
 
                 foreach (var pair in actor.Flags)
@@ -718,6 +752,14 @@ namespace DPTDOOM.Scripting
                     }
 
                     actor.Numbers.Add(new KeyValuePair<string, int>(mapped, number));
+                    continue;
+                }
+
+                if (SoundProperties.TryGetValue(token.Text, out mapped))
+                {
+                    // A quoted name and a bare one are the same thing: DECORATE allows both, and
+                    // the reader strips the quotes already.
+                    actor.Sounds.Add(new KeyValuePair<string, string>(mapped, value.Text));
                     continue;
                 }
 

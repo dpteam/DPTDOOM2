@@ -375,6 +375,38 @@ namespace DPTDOOM
             options.Sound.StartSound(mobj, soundName, type, volume);
         }
 
+        /// <summary>
+        /// Plays one of an actor's own sounds, honouring a name a mod gave it.
+        ///
+        /// Called at the point where the sound is finally played, never earlier. That placement is
+        /// deliberate: the engine's variant picking for some monsters (three posses, two barons)
+        /// draws from the **world** random generator, so inserting the override before those draws
+        /// would change how many numbers the simulation uses - and a mod that changes a sound would
+        /// move the world. After them, the draws are exactly what vanilla makes and only what is
+        /// heard differs.
+        /// </summary>
+        public void StartActorSound(Mobj mobj, ActorSoundSlot slot, Sfx fallback,
+                                    SfxType type, int volume)
+        {
+            var name = ActorSounds.Get((int)mobj.Type, slot);
+
+            if (name != null)
+            {
+                // A named sound that does not resolve plays nothing. Falling back to the actor's
+                // own would hide the mod's mistake: it asked for a sound, and the report says
+                // which name was not found.
+                options.Sound.StartSound(mobj, name, type, volume);
+                return;
+            }
+
+            options.Sound.StartSound(mobj, fallback, type, volume);
+        }
+
+        public void StartActorSound(Mobj mobj, ActorSoundSlot slot, Sfx fallback, SfxType type)
+        {
+            StartActorSound(mobj, slot, fallback, type, 100);
+        }
+
         public void StopSound(Mobj mobj)
         {
             options.Sound.StopSound(mobj);

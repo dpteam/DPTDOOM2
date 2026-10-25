@@ -106,7 +106,9 @@ namespace DPTDOOM.Scripting
 
                 named++;
 
-                if (Find(table, doomEdNum) == null)
+                int type;
+
+                if (Find(table, doomEdNum, out type) == null)
                 {
                     problems.Add(source + " line " + function.Line + ": no actor with DoomEdNum " +
                                  doomEdNum + " (from '" + function.Name + "')");
@@ -166,7 +168,8 @@ namespace DPTDOOM.Scripting
                         continue;
                     }
 
-                    var info = Find(table, doomEdNum);
+                    int type;
+                    var info = Find(table, doomEdNum, out type);
 
                     if (info == null)
                     {
@@ -174,7 +177,7 @@ namespace DPTDOOM.Scripting
                     }
 
                     var host = new ScriptHost();
-                    var api = new ScriptActorApi(info);
+                    var api = new ScriptActorApi(info, type);
                     api.Register(host);
 
                     try
@@ -222,13 +225,23 @@ namespace DPTDOOM.Scripting
                    int.TryParse(number, NumberStyles.None, CultureInfo.InvariantCulture, out doomEdNum);
         }
 
-        private static MobjInfo Find(MobjInfo[] table, int doomEdNum)
+        /// <summary>
+        /// The actor a `fn Thing_&lt;number&gt;()` names, and its index in the table.
+        ///
+        /// The index is what a mod's sound override is keyed by, so it is returned from the same
+        /// search rather than looked up again: the table has one entry per type, and a second scan
+        /// that disagreed with the first would be a bug waiting to happen.
+        /// </summary>
+        private static MobjInfo Find(MobjInfo[] table, int doomEdNum, out int type)
         {
-            foreach (var info in table)
+            type = -1;
+
+            for (var index = 0; index < table.Length; index++)
             {
-                if (info.DoomEdNum == doomEdNum)
+                if (table[index].DoomEdNum == doomEdNum)
                 {
-                    return info;
+                    type = index;
+                    return table[index];
                 }
             }
 

@@ -421,9 +421,11 @@ namespace DPTDOOM
                 source.Y,
                 source.Z + Fixed.FromInt(32), type);
 
-            if (missile.Info.SeeSound != 0)
+            if (missile.Info.SeeSound != 0 ||
+                ActorSounds.Has((int)missile.Type, ActorSoundSlot.See))
             {
-                world.StartSound(missile, missile.Info.SeeSound, SfxType.Misc);
+                world.StartActorSound(missile, ActorSoundSlot.See,
+                    missile.Info.SeeSound, SfxType.Misc);
             }
 
             // Where it came from?
@@ -500,9 +502,11 @@ namespace DPTDOOM
 
             var missile = SpawnMobj(x, y, z, type);
 
-            if (missile.Info.SeeSound != 0)
+            if (missile.Info.SeeSound != 0 ||
+                ActorSounds.Has((int)missile.Type, ActorSoundSlot.See))
             {
-                world.StartSound(missile, missile.Info.SeeSound, SfxType.Misc);
+                world.StartActorSound(missile, ActorSoundSlot.See,
+                    missile.Info.SeeSound, SfxType.Misc);
             }
 
             missile.Target = source;

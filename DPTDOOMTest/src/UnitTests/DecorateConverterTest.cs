@@ -102,9 +102,14 @@ namespace DPTDOOMTest.UnitTests
             Assert.AreEqual(60, numbers["Health"]);
             Assert.AreEqual(9, numbers["Speed"], "the sound line must not swallow the next property");
 
-            Assert.AreEqual(1, actors[0].Unsupported.Count);
-            Assert.AreEqual("SeeSound", actors[0].Unsupported[0].Key);
-            Assert.AreEqual("demon/sight", actors[0].Unsupported[0].Value);
+            // A sound now converts rather than being refused: the value is a sound name from
+            // SNDINFO, and the engine resolves a name it does not recognise through SNDINFO at
+            // play time. The point of this assertion is that the quoted name stays whole.
+            Assert.AreEqual(0, actors[0].Unsupported.Count,
+                "a sound is no longer an unsupported property");
+            Assert.AreEqual(1, actors[0].Sounds.Count);
+            Assert.AreEqual("SeeSound", actors[0].Sounds[0].Key);
+            Assert.AreEqual("demon/sight", actors[0].Sounds[0].Value);
         }
 
         [TestMethod]

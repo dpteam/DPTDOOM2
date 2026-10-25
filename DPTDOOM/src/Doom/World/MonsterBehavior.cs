@@ -131,7 +131,7 @@ namespace DPTDOOM
 
             // Go into chase state.
             seeYou:
-            if (actor.Info.SeeSound != 0)
+            if (actor.Info.SeeSound != 0 || ActorSounds.Has((int)actor.Type, ActorSoundSlot.See))
             {
                 int sound;
 
@@ -153,14 +153,16 @@ namespace DPTDOOM
                         break;
                 }
 
+                // The override is applied here, after the variant draw, so a mod's sound cannot
+                // change how many numbers the world generator uses.
                 if (actor.Type == MobjType.Spider || actor.Type == MobjType.Cyborg)
                 {
                     // Full volume for boss monsters.
-                    world.StartSound(actor, (Sfx)sound, SfxType.Diffuse);
+                    world.StartActorSound(actor, ActorSoundSlot.See, (Sfx)sound, SfxType.Diffuse);
                 }
                 else
                 {
-                    world.StartSound(actor, (Sfx)sound, SfxType.Voice);
+                    world.StartActorSound(actor, ActorSoundSlot.See, (Sfx)sound, SfxType.Voice);
                 }
             }
 
@@ -629,9 +631,11 @@ namespace DPTDOOM
             // Check for melee attack.
             if (actor.Info.MeleeState != 0 && CheckMeleeRange(actor))
             {
-                if (actor.Info.AttackSound != 0)
+                if (actor.Info.AttackSound != 0 ||
+                    ActorSounds.Has((int)actor.Type, ActorSoundSlot.Attack))
                 {
-                    world.StartSound(actor, actor.Info.AttackSound, SfxType.Weapon);
+                    world.StartActorSound(actor, ActorSoundSlot.Attack,
+                        actor.Info.AttackSound, SfxType.Weapon);
                 }
 
                 actor.SetState(actor.Info.MeleeState);
@@ -680,9 +684,16 @@ namespace DPTDOOM
             }
 
             // Make active sound.
-            if (actor.Info.ActiveSound != 0 && world.Random.Next() < 3)
+            //
+            // The order of the two conditions is not cosmetic: `ActiveSound != 0` is evaluated
+            // first, so for every vanilla actor exactly as many world-random numbers are drawn as
+            // before, whether or not a mod named a sound.
+            if ((actor.Info.ActiveSound != 0 ||
+                 ActorSounds.Has((int)actor.Type, ActorSoundSlot.Active)) &&
+                world.Random.Next() < 3)
             {
-                world.StartSound(actor, actor.Info.ActiveSound, SfxType.Voice);
+                world.StartActorSound(actor, ActorSoundSlot.Active,
+                    actor.Info.ActiveSound, SfxType.Voice);
             }
         }
 
@@ -694,9 +705,11 @@ namespace DPTDOOM
 
         public void Pain(Mobj actor)
         {
-            if (actor.Info.PainSound != 0)
+            if (actor.Info.PainSound != 0 ||
+                ActorSounds.Has((int)actor.Type, ActorSoundSlot.Pain))
             {
-                world.StartSound(actor, actor.Info.PainSound, SfxType.Voice);
+                world.StartActorSound(actor, ActorSoundSlot.Pain,
+                    actor.Info.PainSound, SfxType.Voice);
             }
         }
 
@@ -707,7 +720,15 @@ namespace DPTDOOM
             switch (actor.Info.DeathSound)
             {
                 case 0:
-                    return;
+                    // No death sound of the actor's own. A mod may still have named one, and then
+                    // there is something to play - so this is not a plain return.
+                    if (!ActorSounds.Has((int)actor.Type, ActorSoundSlot.Death))
+                    {
+                        return;
+                    }
+
+                    sound = 0;
+                    break;
 
                 case Sfx.PODTH1:
                 case Sfx.PODTH2:
@@ -725,15 +746,16 @@ namespace DPTDOOM
                     break;
             }
 
-            // Check for bosses.
+            // After the variant draw, for the same reason as the see sound: a mod's sound must not
+            // move the world generator on by a different number of steps.
             if (actor.Type == MobjType.Spider || actor.Type == MobjType.Cyborg)
             {
                 // Full volume.
-                world.StartSound(actor, (Sfx)sound, SfxType.Diffuse);
+                world.StartActorSound(actor, ActorSoundSlot.Death, (Sfx)sound, SfxType.Diffuse);
             }
             else
             {
-                world.StartSound(actor, (Sfx)sound, SfxType.Voice);
+                world.StartActorSound(actor, ActorSoundSlot.Death, (Sfx)sound, SfxType.Voice);
             }
         }
 
@@ -963,7 +985,8 @@ namespace DPTDOOM
 
             actor.Flags |= MobjFlags.SkullFly;
 
-            world.StartSound(actor, actor.Info.AttackSound, SfxType.Voice);
+            world.StartActorSound(actor, ActorSoundSlot.Attack, actor.Info.AttackSound,
+                SfxType.Voice);
 
             FaceTarget(actor);
 

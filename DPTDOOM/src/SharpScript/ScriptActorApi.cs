@@ -42,9 +42,15 @@ namespace DPTDOOM.Scripting
     {
         private readonly MobjInfo info;
 
-        public ScriptActorApi(MobjInfo info)
+        /// <summary>
+        /// This actor's index in the table, which is what a sound override is keyed by.
+        /// </summary>
+        private readonly int type;
+
+        public ScriptActorApi(MobjInfo info, int type)
         {
             this.info = info;
+            this.type = type;
         }
 
         // ------------------------------------------------------------ states for a mod
@@ -389,11 +395,16 @@ namespace DPTDOOM.Scripting
             });
 
             // Sound names, so a script can replace one: "see", "pain", "death".
-            RegisterSfx(host, "SeeSound", () => info.SeeSound, value => info.SeeSound = value);
-            RegisterSfx(host, "AttackSound", () => info.AttackSound, value => info.AttackSound = value);
-            RegisterSfx(host, "PainSound", () => info.PainSound, value => info.PainSound = value);
-            RegisterSfx(host, "DeathSound", () => info.DeathSound, value => info.DeathSound = value);
-            RegisterSfx(host, "ActiveSound", () => info.ActiveSound, value => info.ActiveSound = value);
+            RegisterSfx(host, "SeeSound", ActorSoundSlot.See,
+                () => info.SeeSound, value => info.SeeSound = value);
+            RegisterSfx(host, "AttackSound", ActorSoundSlot.Attack,
+                () => info.AttackSound, value => info.AttackSound = value);
+            RegisterSfx(host, "PainSound", ActorSoundSlot.Pain,
+                () => info.PainSound, value => info.PainSound = value);
+            RegisterSfx(host, "DeathSound", ActorSoundSlot.Death,
+                () => info.DeathSound, value => info.DeathSound = value);
+            RegisterSfx(host, "ActiveSound", ActorSoundSlot.Active,
+                () => info.ActiveSound, value => info.ActiveSound = value);
 
             // Diagnostics: the only way a script can say something is wrong, since it
             // cannot throw. Collected by the library and reported with the line.
@@ -478,24 +489,54 @@ namespace DPTDOOM.Scripting
             });
         }
 
-        private static void RegisterSfx(ScriptHost host, string name, Func<Sfx> get, Action<Sfx> set)
+        /// <summary>
+        /// A property that can be read as a sound name and written as one.
+        ///
+        /// The write accepts two kinds of name, and the order matters:
+        ///
+        ///  - a name the engine's own enumeration knows (`POSIT1`) sets the actor's
+        ///    <see cref="Sfx"/>, which is what the table always held;
+        ///  - anything else is kept as a **named sound** for this slot, resolved through SNDINFO
+        ///    when it is played. That is the DECORATE case: `SeeSound "imp/sight"` names a sound
+        ///    the engine has never heard of.
+        ///
+        /// Setting an empty name removes the override and restores the actor's own sound, which is
+        /// what makes the two forms composable: a mod may set a name, then change its mind.
+        /// </summary>
+        private void RegisterSfx(ScriptHost host, string name, ActorSoundSlot slot,
+                                 Func<Sfx> get, Action<Sfx> set)
         {
             host.Register(name, 0, 1, call =>
             {
                 if (call.Count == 0)
                 {
-                    return ScriptValue.FromText(get().ToString());
+                    // Reading gives back the name that will actually be played, so a script that
+                    // reads and writes the property sees the same thing the game hears.
+                    var named = ActorSounds.Get(type, slot);
+
+                    return ScriptValue.FromText(named ?? get().ToString());
                 }
 
                 var soundName = call.AsText(0);
-                Sfx sound;
 
-                if (!TryParseSfx(soundName, out sound))
+                if (string.IsNullOrEmpty(soundName))
                 {
-                    throw call.Fail("no such sound '" + soundName + "'");
+                    ActorSounds.Set(type, slot, null);
+                    return ScriptValue.Void;
                 }
 
-                set(sound);
+                Sfx sound;
+
+                if (TryParseSfx(soundName, out sound))
+                {
+                    // An engine sound: clear any named override, or it would keep winning and the
+                    // write would appear to do nothing.
+                    ActorSounds.Set(type, slot, null);
+                    set(sound);
+                    return ScriptValue.Void;
+                }
+
+                ActorSounds.Set(type, slot, soundName);
                 return ScriptValue.Void;
             });
         }

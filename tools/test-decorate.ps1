@@ -232,6 +232,31 @@ ACTOR LumpImp 3001
     Assert-True ((State-Of $lumpLog) -eq $numbersState) `
         "and it produced the same world as passing the same text by path"
 
+    Write-Host "With sounds named by the file"
+    $sounds = Join-Path $work "sounds.dec"
+
+    # A sound is a *name*, and since names exist this converts instead of being reported as
+    # unsupported. That is what can be checked without a sound device: the file applies, the
+    # report has nothing to say about it, and the world is unchanged - a sound is presentation,
+    # and if it moved the world hash something would be wrong.
+    [System.IO.File]::WriteAllText($sounds, @"
+ACTOR SoundImp 3001
+{
+  SeeSound "imp/sight"
+  DeathSound "imp/death"
+  PainSound "imp/pain"
+}
+"@)
+
+    $soundLog = Run-Game "sounds" @('-decorate', $sounds)
+
+    Assert-True ($soundLog -like "*scripts: OK*") "the converted script loaded"
+    Assert-True ($soundLog -notlike "*has no counterpart*") `
+        "a sound is no longer refused"
+    Assert-True ($soundLog -like "*map MAP01: OK*") "the level loads"
+    Assert-True ((State-Of $soundLog) -eq $plainState) `
+        "and naming sounds did not move the world ($plainState vs $(State-Of $soundLog))"
+
     Write-Host "With a truncated file"
     $cutLog = Run-Game "cut" @('-decorate', $truncated)
 
