@@ -115,6 +115,12 @@ namespace DPTDOOM
 
             var archive = new ZipArchiveReader(fileName);
 
+            // GZDoom reads every `textures/*.txt` as a TEXTURES lump, and mods are written that
+            // way: one file per texture set, split for tidiness. They are joined into one lump
+            // here, because the texture builder wants one text and the split is not part of the
+            // format's meaning.
+            MemoryStream textureText = null;
+
             foreach (var entry in archive.Entries)
             {
                 var entryExtension = Path.GetExtension(entry.Name).ToLowerInvariant();
@@ -145,6 +151,22 @@ namespace DPTDOOM
                     continue;
                 }
 
+                if (IsTextureDefinition(entry.Name))
+                {
+                    if (textureText == null)
+                    {
+                        textureText = new MemoryStream();
+                    }
+
+                    var text = archive.ReadEntry(entry);
+                    textureText.Write(text, 0, text.Length);
+
+                    // A newline between files, so a definition that ended without one does not
+                    // run into the next file's first keyword.
+                    textureText.WriteByte((byte)'\n');
+                    continue;
+                }
+
                 var lumpName = Path.GetFileNameWithoutExtension(entry.Name).ToUpperInvariant();
 
                 if (lumpName.Length == 0 || lumpName.Length > 8)
@@ -164,6 +186,47 @@ namespace DPTDOOM
 
                 lumpInfos.Add(new LumpInfo(lumpName, lumpStream, 0, lumpData.Length));
             }
+
+            if (textureText != null)
+            {
+                var data = textureText.ToArray();
+
+                if (data.Length > 0)
+                {
+                    streams.Add(textureText);
+
+                    lumpInfos.Add(new LumpInfo("TEXTURES", textureText, 0, data.Length));
+                }
+            }
+        }
+
+        /// <summary>
+        /// True for a PK3 entry that carries ZDoom TEXTURES definitions: `textures/*.txt`, or a
+        /// file whose own name is TEXTURES.
+        /// </summary>
+        private static bool IsTextureDefinition(string path)
+        {
+            if (path == null)
+            {
+                return false;
+            }
+
+            var lower = path.Replace('\\', '/').ToLowerInvariant();
+
+            if (!lower.EndsWith(".txt"))
+            {
+                return false;
+            }
+
+            if (lower.StartsWith("textures/"))
+            {
+                return true;
+            }
+
+            var slash = lower.LastIndexOf('/');
+            var name = slash >= 0 ? lower.Substring(slash + 1) : lower;
+
+            return name == "textures.txt";
         }
 
         /// <summary>

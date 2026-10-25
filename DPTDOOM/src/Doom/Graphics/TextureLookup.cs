@@ -30,6 +30,7 @@ namespace DPTDOOM
 
         private int[] switchList;
         private int pk3Replaced;
+        private int textDefined;
 
         public TextureLookup(Wad wad) : this(wad, false)
         {
@@ -45,7 +46,8 @@ namespace DPTDOOM
                 InitSwitchList();
 
                 ConsoleUi.Ok(textures.Count + " textures" +
-                             (pk3Replaced > 0 ? ", " + pk3Replaced + " from PK3" : ""));
+                             (pk3Replaced > 0 ? ", " + pk3Replaced + " from PK3" : "") +
+                             (textDefined > 0 ? ", " + textDefined + " from TEXTURES" : ""));
             }
             catch (Exception e)
             {
@@ -83,6 +85,138 @@ namespace DPTDOOM
             }
 
             AddPk3Textures(wad);
+
+            // Last, so a text definition can use PNG patches from the PK3 and can override a
+            // texture the same PK3 shipped as a single PNG.
+            ApplyDefinitions(wad, patches);
+        }
+
+        /// <summary>
+        /// Applies a TEXTURES lump: textures composed of patches, described in text.
+        ///
+        /// This is the same thing TEXTURE1 does in binary, and it lands in the same table, so
+        /// the renderer, the switch list and the animation table all see a texture like any
+        /// other. What it adds is what the binary form cannot do: a texture built from pieces
+        /// that are not adjacent in the WAD, without a texture editor and without shipping a
+        /// whole TEXTURE1 lump.
+        ///
+        /// Width and height may be left out of a definition; then they are the extent of its
+        /// patches. That is not a convenience - a mod that writes only the patches should get
+        /// exactly the picture it described, not a cropped one.
+        /// </summary>
+        private void ApplyDefinitions(Wad wad, Patch[] patches)
+        {
+            var lump = wad.GetLumpNumber("TEXTURES");
+
+            if (lump == -1)
+            {
+                return;
+            }
+
+            var problems = new List<string>();
+
+            var definitions = TextureDefinitions.Parse(
+                System.Text.Encoding.UTF8.GetString(wad.ReadLump(lump)), "TEXTURES", problems);
+
+            foreach (var problem in problems)
+            {
+                LoadReport.Add("bad texture definition", problem,
+                    "that texture keeps the picture it had");
+            }
+
+            var byName = new Dictionary<string, Patch>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var patch in patches)
+            {
+                if (patch != null && !byName.ContainsKey(patch.Name))
+                {
+                    byName.Add(patch.Name, patch);
+                }
+            }
+
+            AddPk3Patches(wad, byName);
+
+            var applied = 0;
+
+            foreach (var definition in definitions)
+            {
+                var placed = new List<TexturePatch>();
+
+                // The extent is accumulated over every patch and only then compared with what the
+                // definition asked for. The first version guarded the accumulation with
+                // `if (width < 0)`, which stopped it after the first patch - so a definition that
+                // named only its patches got the size of the first one and the rest hung off the
+                // right edge, invisible.
+                var extentWidth = 0;
+                var extentHeight = 0;
+
+                foreach (var patchDefinition in definition.Patches)
+                {
+                    Patch patch;
+
+                    if (!byName.TryGetValue(patchDefinition.Name, out patch))
+                    {
+                        LoadReport.Add(
+                            "missing texture patch",
+                            patchDefinition.Name + " in texture '" + definition.Name + "'",
+                            "that patch is left out of the texture");
+
+                        continue;
+                    }
+
+                    placed.Add(new TexturePatch(patchDefinition.X, patchDefinition.Y, patch));
+
+                    extentWidth = Math.Max(extentWidth, patchDefinition.X + patch.Width);
+                    extentHeight = Math.Max(extentHeight, patchDefinition.Y + patch.Height);
+                }
+
+                var width = definition.Width >= 0 ? definition.Width : extentWidth;
+                var height = definition.Height >= 0 ? definition.Height : extentHeight;
+
+                if (placed.Count == 0)
+                {
+                    // Every patch was missing, so the texture would be an empty rectangle. The
+                    // map keeps whatever it had, which for a new name means the map's own
+                    // "unknown texture" handling rather than a hole in a wall.
+                    LoadReport.Add("bad texture definition",
+                        definition.Name + " (no patch of it is in this WAD)",
+                        "that texture keeps the picture it had");
+
+                    continue;
+                }
+
+                if (width <= 0 || height <= 0)
+                {
+                    LoadReport.Add("bad texture definition",
+                        definition.Name + " (" + width + "x" + height + ")",
+                        "that texture keeps the picture it had");
+
+                    continue;
+                }
+
+                var texture = new Texture(definition.Name, true, width, height, placed.ToArray());
+
+                int number;
+
+                if (nameToNumber.TryGetValue(definition.Name, out number))
+                {
+                    textures[number] = texture;
+                }
+                else
+                {
+                    number = textures.Count;
+                    textures.Add(texture);
+                    nameToNumber[definition.Name] = number;
+                }
+
+                nameToTexture[definition.Name] = texture;
+                applied++;
+            }
+
+            if (applied > 0)
+            {
+                textDefined = applied;
+            }
         }
 
         /// <summary>
@@ -159,6 +293,58 @@ namespace DPTDOOM
             }
 
             pk3Replaced = replaced;
+        }
+
+        /// <summary>
+        /// Adds `patches/NAME.png` from a PK3 to the patch table.
+        ///
+        /// A TEXTURES definition names its pieces, and in a PK3 those pieces are usually PNG
+        /// files rather than lumps in the WAD. Without this a definition that composes PK3
+        /// artwork would find no patches at all and be dropped, which is the whole point of
+        /// putting the definition in the PK3.
+        /// </summary>
+        private static void AddPk3Patches(Wad wad, Dictionary<string, Patch> byName)
+        {
+            if (wad.Graphics == null || wad.Graphics.Count == 0)
+            {
+                return;
+            }
+
+            byte[] playpal = null;
+
+            foreach (var graphic in wad.Graphics)
+            {
+                var path = graphic.Path == null ? "" : graphic.Path.ToLowerInvariant();
+
+                if (!path.StartsWith("patches/") || !path.EndsWith(".png"))
+                {
+                    continue;
+                }
+
+                var name = Pk3Graphics.LumpNameOf(graphic.Path);
+
+                if (name == null || byName.ContainsKey(name))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    if (playpal == null)
+                    {
+                        playpal = wad.ReadLump("PLAYPAL");
+                    }
+
+                    var image = PngImage.Decode(graphic.Data);
+                    byName[name] = Pk3Graphics.ToPatch(image, playpal, name, false);
+                }
+                catch (Exception e)
+                {
+                    // A broken PNG must not stop the game: the patch is simply not there, and the
+                    // definition that wanted it says so.
+                    ConsoleUi.Detail("skipping patch " + graphic.Path + ": " + e.Message);
+                }
+            }
         }
 
         private void InitSwitchList()

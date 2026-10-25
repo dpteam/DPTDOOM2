@@ -107,6 +107,7 @@ Internet Explorer. WebView2 на Windows XP не ставится, а MSHTML е�
 | [docs/SNDINFO.md](docs/SNDINFO.md) | SNDINFO: какой люмп играет звук по имени |
 | [docs/ANIMDEFS.md](docs/ANIMDEFS.md) | ANIMDEFS: анимация текстур и полов |
 | [docs/LOCKDEFS.md](docs/LOCKDEFS.md) | LOCKDEFS: что нужно замку с номером |
+| [docs/TEXTURES.md](docs/TEXTURES.md) | TEXTURES: составные текстуры из кусков |
 | [docs/DECORATE.md](docs/DECORATE.md) | DECORATE: что переносится в SharpScript, а что честно не переносится |
 | [docs/MASTER.md](docs/MASTER.md) · [docs/RELAY.md](docs/RELAY.md) | сервер списка сессий и relay |
 | [docs/LAUNCHER.md](docs/LAUNCHER.md) | лаунчер: страница, мост, темы |
