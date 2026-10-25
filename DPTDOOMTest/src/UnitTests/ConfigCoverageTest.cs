@@ -57,7 +57,13 @@ namespace DPTDOOMTest.UnitTests
                 { "audio_musicvolume",
                   "the 'MUSIC VOLUME' row drives it through the music backend" },
                 { "video_displaymessage",
-                  "the 'MESSAGES' row drives it through the renderer, which owns the message line" }
+                  "the 'MESSAGES' row drives it through the renderer, which owns the message line" },
+                { "rofl_mode",
+                  "ROFL mode is an easter egg: a row in the menu would be the hint the whole " +
+                  "thing is supposed to not have. It is turned on by the Konami code" },
+                { "rofl_set",
+                  "not a setting but a record of whether the player has ever chosen, so the " +
+                  "April 1 default stops applying once they have. Nothing to show a player" }
             };
 
         [TestMethod]

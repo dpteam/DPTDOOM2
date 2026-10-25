@@ -566,6 +566,13 @@ namespace DPTDOOM
         {
             if (active)
             {
+                if (e.Type == EventType.KeyDown && FeedKonami(e.Key))
+                {
+                    // Consumed: the key that completes the code should not also move the
+                    // cursor or activate the row under it.
+                    return true;
+                }
+
                 if (current.DoEvent(e))
                 {
                     return true;
@@ -611,6 +618,8 @@ namespace DPTDOOM
         {
             tics++;
 
+            konami.Update();
+
             if (current != null)
             {
                 current.Update();
@@ -620,6 +629,45 @@ namespace DPTDOOM
             {
                 doom.PauseGame();
             }
+        }
+
+        /// <summary>
+        /// The Konami-code watcher behind ROFL mode.
+        ///
+        /// Lives here rather than on one settings page so that the code works from anywhere in
+        /// the menus, which is how an easter egg is found: somebody hammering the arrow keys
+        /// out of boredom, not somebody who read the documentation. Nothing points at it.
+        /// </summary>
+        private readonly KonamiCode konami = new KonamiCode();
+
+        /// <summary>
+        /// Feeds one key to the code watcher and, when it completes, flips ROFL mode.
+        ///
+        /// Returns true when the key completed the code, so the caller can swallow it: the
+        /// final key must not also activate whatever row happens to be selected.
+        /// </summary>
+        private bool FeedKonami(DoomKey key)
+        {
+            if (!konami.Feed(key))
+            {
+                return false;
+            }
+
+            RoflMode.Toggle(doom.Config);
+
+            // Announced, because a secret nobody can tell they found is a bug report
+            // waiting to be written. The hint that it can be turned off the same way is
+            // deliberately absent - that is the game.
+            var world = doom.Game != null ? doom.Game.World : null;
+
+            if (world != null)
+            {
+                world.ConsolePlayer.SendMessage(RoflMode.Message(doom.Config.rofl_mode));
+                world.ConsolePlayer.MessageTime = 4 * GameConst.TicRate;
+            }
+
+            StartSound(doom.Config.rofl_mode ? Sfx.SWTCHN : Sfx.SWTCHX);
+            return true;
         }
 
         public void SetCurrent(MenuDef next)

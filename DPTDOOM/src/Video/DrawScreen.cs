@@ -613,5 +613,47 @@ namespace DPTDOOM.Video
         public int Width => width;
         public int Height => height;
         public byte[] Data => data;
+
+        /// <summary>
+        /// Flips a rectangle left to right, in place.
+        ///
+        /// Used by ROFL mode, which mirrors the view rather than the level - see
+        /// <see cref="RoflMode"/> for why that is the honest way to build the joke. The
+        /// rectangle is clamped to the screen, so a caller that asks for a view window at an
+        /// unusual size gets a correct flip of whatever part of it exists instead of an
+        /// exception in the middle of a frame.
+        ///
+        /// The buffer is **column-major** - index <c>x * height + y</c> - and that is not a
+        /// detail: reading it as rows produces a picture that is scrambled in a way that looks
+        /// almost like a mirror, which is exactly how this was written wrong the first time.
+        /// The renderer draws columns, so the buffer is stored the way it is drawn.
+        /// </summary>
+        public void MirrorRect(int x, int y, int w, int h)
+        {
+            var left = Math.Max(0, x);
+            var top = Math.Max(0, y);
+            var right = Math.Min(width, x + w);
+            var bottom = Math.Min(height, y + h);
+
+            if (right - left < 2 || bottom <= top)
+            {
+                return;
+            }
+
+            for (var column = left; column < left + (right - left) / 2; column++)
+            {
+                var opposite = right - 1 - (column - left);
+
+                for (var row = top; row < bottom; row++)
+                {
+                    var a = column * height + row;
+                    var b = opposite * height + row;
+
+                    var swap = data[a];
+                    data[a] = data[b];
+                    data[b] = swap;
+                }
+            }
+        }
     }
 }

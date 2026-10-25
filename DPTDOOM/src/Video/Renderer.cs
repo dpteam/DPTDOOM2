@@ -194,6 +194,7 @@ namespace DPTDOOM.Video
                 if (game.World.AutoMap.Visible || DebugSettings.MapOnly)
                 {
                     var hudStart = Profile.Stamp();
+                    autoMap.RoflMode = config.rofl_mode;
                     autoMap.Render(consolePlayer);
                     statusBar.Render(consolePlayer, true);
                     Profile.Add(RenderProfile.Section.Hud, Profile.Stamp() - hudStart);
@@ -204,6 +205,7 @@ namespace DPTDOOM.Video
                     threeD.CrosshairLight = config.hud_crosshair_light;
                     threeD.CrosshairDark = config.hud_crosshair_dark;
                     threeD.ProfilerLevel = config.hud_profiler;
+                    threeD.RoflMode = config.rofl_mode;
                     threeD.Stats = stats;
                     threeD.Render(displayPlayer, frameFrac, viewPitch);
 

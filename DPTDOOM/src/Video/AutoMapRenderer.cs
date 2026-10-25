@@ -87,6 +87,9 @@ namespace DPTDOOM.Video
         private int scale;
         private int amWidth;
         private int amHeight;
+
+        /// <summary>Whether to mirror the map left to right; see <see cref="RoflMode"/>.</summary>
+        public bool RoflMode { get; set; }
         private float ppu;
 
         private float minX;
@@ -240,6 +243,14 @@ namespace DPTDOOM.Video
                     amWidth / 2, amHeight / 2 - 2 * scale,
                     amWidth / 2, amHeight / 2 + 2 * scale,
                     grays);
+            }
+
+            // ROFL mode mirrors the map, not the label under it: a mirrored level name is
+            // unreadable rather than funny, and the same rule as the status bar applies -
+            // the world turns around, the text does not.
+            if (RoflMode)
+            {
+                screen.MirrorRect(0, 0, amWidth, amHeight);
             }
 
             screen.DrawText(

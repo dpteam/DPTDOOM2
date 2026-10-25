@@ -83,7 +83,16 @@ namespace DPTDOOM
 
         public static Config GetConfig()
         {
-            return new Config(GetConfigPath());
+            var config = new Config(GetConfigPath());
+
+            // The one place every front end goes through, which is why the April 1 default is
+            // applied here rather than in each of them: a default that only one of the two
+            // back ends honours is worse than none, because the mode would appear in the
+            // window and not in a headless run - and the tests would then disagree with what
+            // the player sees.
+            RoflMode.ApplyDefault(config, DateTime.Now);
+
+            return config;
         }
 
         public static string GetConfigPath()

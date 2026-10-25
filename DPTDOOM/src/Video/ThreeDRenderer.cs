@@ -886,6 +886,16 @@ namespace DPTDOOM.Video
 
             profile.Add(RenderProfile.Section.Sky, profile.Stamp() - phaseStart);
 
+            // ROFL mode flips the finished view before anything readable is drawn on top of
+            // it. That order is the whole trick: the world and the weapon come out mirrored,
+            // while the crosshair, the profiler, the status bar and the message line - all
+            // drawn afterwards - stay the right way round. A mirrored status bar would make
+            // the mode unreadable instead of funny.
+            if (roflMode)
+            {
+                screen.MirrorRect(windowX, windowY, windowWidth, windowHeight);
+            }
+
             // Last, so it sits over the weapon: the mark is what the player aims
             // with and must never be hidden behind their own gun.
             DrawCrosshair();
@@ -3484,6 +3494,20 @@ namespace DPTDOOM.Video
                 SetWindowSize(windowSize);
             }
         }
+
+        /// <summary>
+        /// Whether to mirror the finished view left to right.
+        ///
+        /// Set by the renderer from the config every frame, like the crosshair colours, so
+        /// that toggling it takes effect immediately rather than at the next level.
+        /// </summary>
+        public bool RoflMode
+        {
+            get { return roflMode; }
+            set { roflMode = value; }
+        }
+
+        private bool roflMode;
 
 
 

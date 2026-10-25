@@ -51,6 +51,7 @@ powershell -NoProfile -File tools\test-master-config.ps1
 powershell -NoProfile -File tools\test-scripts.ps1
 powershell -NoProfile -File tools\test-decorate.ps1
 powershell -NoProfile -File tools\test-jump.ps1
+powershell -NoProfile -File tools\test-rofl.ps1
 powershell -NoProfile -File tools\test-upnp.ps1
 powershell -NoProfile -File tools\test-reconnect.ps1
 powershell -NoProfile -File tools\test-profile.ps1
@@ -96,6 +97,15 @@ powershell -NoProfile -File tools\test-launcher.ps1
   набранный `iddqd` сработал бы читом, а цифра переключила размер вида. Команд,
   меняющих симуляцию, в таблице нет; `map` отказывается работать в сети и в демо.
   Проверка — `GameConsoleTest` и `tools/test-console.ps1`.
+- ROFL mode (`RoflMode`, `KonamiCode`, `Config.rofl_mode`) — **тоже не состояние игры**:
+  зеркалится готовый кадр (`DrawScreen.MirrorRect`), а не геометрия. Настоящее зеркало
+  потребовало бы согласовать вершины, узлы BSP, блокмап и текстурные смещения сегментов —
+  четыре источника, читаемых из WAD; зеркало кадра даёт то же ощущение и оставляет хеш мира
+  побитово прежним, поэтому демо воспроизводится, а lockstep о режиме не знает. Ввод
+  инвертируется **до** сборки `TicCmd`, чтобы записанная команда уже была правильной.
+  Буфер кадра **столбцовый** (`x * height + y`) — зеркалить его построчно значит получить
+  почти-зеркало; BMP пишется **снизу вверх**. Проверка — `KonamiCodeTest`, `RoflModeTest`,
+  `tools/test-rofl.ps1`.
 - P/Invoke: при `CharSet.Unicode` + `ExactSpelling = true` указывать `EntryPoint`
   с суффиксом `W` обязательно (`SendMessageW`, `DefWindowProcW`, `LoadIconW`).
   Без него рантайм ищет функцию без суффикса и падает в рантайме, а не при

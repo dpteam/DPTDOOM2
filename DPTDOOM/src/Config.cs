@@ -46,6 +46,24 @@ namespace DPTDOOM
         /// </summary>
         public KeyBinding key_jump;
 
+        /// <summary>
+        /// ROFL mode: the joke where the view is mirrored and the monsters are clowns.
+        ///
+        /// Not game state - it changes what is drawn and how input is read, never the world -
+        /// so it is safe in a demo and cannot desynchronise a session.
+        /// </summary>
+        public bool rofl_mode;
+
+        /// <summary>
+        /// Whether the player has ever made an explicit choice about ROFL mode.
+        ///
+        /// Needed for the April 1 default: without it there is no way to tell "off because
+        /// the player turned it off" from "off because nobody has touched it", and a mode
+        /// that switches itself on every April 1 whether or not the owner wants it is a prank
+        /// rather than an easter egg.
+        /// </summary>
+        public bool rofl_set;
+
         public int mouse_sensitivity;
         public bool mouse_disableyaxis;
 
@@ -260,6 +278,9 @@ namespace DPTDOOM
                 key_center = GetKeyBinding(dic, nameof(key_center), key_center);
                 key_jump = GetKeyBinding(dic, nameof(key_jump), key_jump);
 
+                rofl_mode = GetBool(dic, nameof(rofl_mode), rofl_mode);
+                rofl_set = GetBool(dic, nameof(rofl_set), rofl_set);
+
                 mouse_sensitivity = GetInt(dic, nameof(mouse_sensitivity), mouse_sensitivity);
                 mouse_disableyaxis = GetBool(dic, nameof(mouse_disableyaxis), mouse_disableyaxis);
 
@@ -314,6 +335,14 @@ namespace DPTDOOM
                 writer.WriteLine(nameof(key_lookdown) + " = " + key_lookdown);
                 writer.WriteLine(nameof(key_center) + " = " + key_center);
                 writer.WriteLine(nameof(key_jump) + " = " + key_jump);
+
+                // Written only when the player has chosen, so a fresh config stays silent
+                // about a mode that is supposed to be a secret.
+                if (rofl_set)
+                {
+                    writer.WriteLine(nameof(rofl_mode) + " = " + BoolToString(rofl_mode));
+                    writer.WriteLine(nameof(rofl_set) + " = " + BoolToString(rofl_set));
+                }
 
                     writer.WriteLine(nameof(mouse_sensitivity) + " = " + mouse_sensitivity);
                     writer.WriteLine(nameof(mouse_disableyaxis) + " = " + BoolToString(mouse_disableyaxis));

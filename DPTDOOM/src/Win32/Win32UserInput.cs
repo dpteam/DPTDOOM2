@@ -248,6 +248,21 @@ namespace DPTDOOM.Win32
             cmd.ForwardMove += (sbyte)forward;
             cmd.SideMove += (sbyte)side;
 
+            // ROFL mode mirrors the view, so turning and strafing are negated to match it.
+            //
+            // Done here, before the command is finished, and not in the renderer: the
+            // command is what a demo records and what the network carries, so a recording
+            // made in ROFL mode replays correctly with no knowledge of the mode at all. Had
+            // the negation happened after recording, the playback would turn the wrong way.
+            //
+            // Forward and back are left alone: "into the screen" is still into the screen
+            // after a mirror.
+            if (config.rofl_mode)
+            {
+                cmd.AngleTurn = (short)-cmd.AngleTurn;
+                cmd.SideMove = (sbyte)-cmd.SideMove;
+            }
+
             // Look keys, polled per tic and accumulated the same way as the mouse.
             // A tic is the finest granularity the key state is read at, and adding a
             // fixed step per tic makes the speed independent of the frame rate.
