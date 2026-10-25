@@ -71,7 +71,36 @@ namespace DPTDOOM.Win32
                 return;
             }
 
-            var lumpName = "D_" + DoomInfo.BgmNames[index].ToString().ToUpper();
+            PlayLump("D_" + DoomInfo.BgmNames[index].ToString().ToUpper(), loop);
+        }
+
+        /// <summary>
+        /// Plays a music lump by name, for MAPINFO.
+        ///
+        /// The "D_" prefix is optional here and added when missing, because both spellings appear
+        /// in MAPINFO files: ZDoom accepts "D_E1M2" and a bare "E1M2", and a mod author who wrote
+        /// one of them should not have to learn which this port wants.
+        /// </summary>
+        public void StartMusic(string lumpName, bool loop)
+        {
+            if (device == IntPtr.Zero || string.IsNullOrEmpty(lumpName))
+            {
+                Stop();
+                return;
+            }
+
+            var name = lumpName.ToUpperInvariant();
+
+            if (!name.StartsWith("D_", StringComparison.Ordinal))
+            {
+                name = "D_" + name;
+            }
+
+            PlayLump(name, loop);
+        }
+
+        private void PlayLump(string lumpName, bool loop)
+        {
             if (wad.GetLumpNumber(lumpName) == -1)
             {
                 Stop();

@@ -42,6 +42,14 @@ namespace DPTDOOM
 
         private Texture skyTexture;
 
+        /// <summary>
+        /// The music lump this map asked for, or null to use the engine's own choice.
+        ///
+        /// A lump name rather than a <see cref="Bgm"/>: a mod ships "D_MYSONG", which is not in
+        /// the engine's enumeration and never could be.
+        /// </summary>
+        private string mapInfoMusic;
+
         private string title;
 
         public Map(GameContent resorces, World world)
@@ -122,7 +130,47 @@ namespace DPTDOOM
                     title = DoomInfo.MapTitles.Doom[options.Episode - 1][options.Map - 1];
                 }
 
-                ConsoleUi.Ok("loaded");
+                // MAPINFO last, so a mod's own name and sky replace the engine's guess rather
+                // than being replaced by it. The entry is per map lump name, which is why this
+                // sits after the defaults are worked out: an entry that sets only the sky must
+                // not blank the title.
+                var info = MapInfo.For(name);
+
+                if (info != null)
+                {
+                    if (!string.IsNullOrEmpty(info.Title))
+                    {
+                        title = new DoomString(info.Title);
+                    }
+
+                    if (!string.IsNullOrEmpty(info.SkyTexture))
+                    {
+                        // GetNumber returns -1 for a name that is not a texture, and that is the
+                        // only safe way to ask: the indexer throws a KeyNotFoundException, which
+                        // would take the whole level down over a typo in a mod's sky name.
+                        var skyNumber = textures.GetNumber(info.SkyTexture);
+
+                        if (skyNumber >= 0)
+                        {
+                            skyTexture = textures[skyNumber];
+                        }
+                        else
+                        {
+                            LoadReport.Add(
+                                "unknown sky",
+                                info.SkyTexture + " for " + name,
+                                "the level keeps the engine's own sky");
+                        }
+                    }
+
+                    mapInfoMusic = info.MusicLump;
+                }
+
+                // The level's name, not the word "loaded": the line already says it succeeded, and
+                // which level it is happens to be the one fact the log was missing. It is also what
+                // makes MAPINFO verifiable from outside - a name that only reaches the automap
+                // cannot be checked by a headless run.
+                ConsoleUi.Ok(title.ToString());
             }
             catch (Exception e)
             {
@@ -240,6 +288,14 @@ namespace DPTDOOM
         public BlockMap BlockMap => blockMap;
         public Reject Reject => reject;
         public Texture SkyTexture => skyTexture;
+
+        /// <summary>
+        /// The music lump MAPINFO asked for, or null.
+        ///
+        /// The caller decides what to do with it, because playing a named lump is a property of
+        /// the music backend and not of the map.
+        /// </summary>
+        public string MapInfoMusic => mapInfoMusic;
         public int SkyFlatNumber => flats.SkyFlatNumber;
         public string Title => title;
 

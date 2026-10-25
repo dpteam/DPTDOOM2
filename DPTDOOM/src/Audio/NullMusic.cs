@@ -37,6 +37,10 @@ namespace DPTDOOM.Audio
         {
         }
 
+        public void StartMusic(string lumpName, bool loop)
+        {
+        }
+
         public int MaxVolume
         {
             get

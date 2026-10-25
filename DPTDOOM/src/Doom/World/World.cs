@@ -143,7 +143,16 @@ namespace DPTDOOM
             // content load, which happens before any map exists.
             LoadReport.Print();
 
-            options.Music.StartMusic(Map.GetMapBgm(options), true);
+            // MAPINFO's music first: a mod's own track is the reason the format exists, and the
+            // engine's own choice is only the fallback.
+            if (!string.IsNullOrEmpty(map.MapInfoMusic))
+            {
+                options.Music.StartMusic(map.MapInfoMusic, true);
+            }
+            else
+            {
+                options.Music.StartMusic(Map.GetMapBgm(options), true);
+            }
         }
 
         public UpdateResult Update()

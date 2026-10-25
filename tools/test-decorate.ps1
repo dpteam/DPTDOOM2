@@ -69,7 +69,12 @@ function State-Of([string]$log) {
 # and the format is four fields, so writing it is shorter than explaining why not to.
 function New-Pwad([string]$path, [string]$lumpName, [string]$content) {
     $data = [System.Text.Encoding]::ASCII.GetBytes($content)
-    $name = [System.Text.Encoding]::ASCII.GetBytes($lumpName.PadRight(8).Substring(0, 8))
+    # Null-padded, not space-padded: the WAD reader stops at the first zero, so a space-padded
+    # name keeps its trailing space and never matches a lookup. "DECORATE" happens to be exactly
+    # eight characters, which is why this was not caught here first.
+    $name = New-Object byte[] 8
+    $bytes = [System.Text.Encoding]::ASCII.GetBytes($lumpName.ToUpperInvariant())
+    [Array]::Copy($bytes, $name, [Math]::Min(8, $bytes.Length))
 
     $stream = New-Object System.IO.MemoryStream
     $writer = New-Object System.IO.BinaryWriter($stream)

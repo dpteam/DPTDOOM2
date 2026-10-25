@@ -53,6 +53,7 @@ powershell -NoProfile -File tools\test-decorate.ps1
 powershell -NoProfile -File tools\test-jump.ps1
 powershell -NoProfile -File tools\test-rofl.ps1
 powershell -NoProfile -File tools\test-actors.ps1
+powershell -NoProfile -File tools\test-mapinfo.ps1
 powershell -NoProfile -File tools\test-upnp.ps1
 powershell -NoProfile -File tools\test-reconnect.ps1
 powershell -NoProfile -File tools\test-profile.ps1
@@ -125,6 +126,15 @@ powershell -NoProfile -File tools\test-launcher.ps1
 - Меню окна — `src/Win32/GameMenu.cs`, обработка команд — `Win32Doom.Execute`.
   Новый пункт добавлять в оба места и в `tools/test-menu.ps1`. Проверять
   галочки через `UpdateMenuChecks`, а не выставлять их вручную.
+- MAPINFO (`MapInfo`, `docs/MAPINFO.md`) — **тоже не состояние игры**: название, небо и
+  музыка читаются при загрузке контента, до построения карты, и не попадают ни в `TicCmd`,
+  ни в демо, ни в хеш. Лампа `MAPINFO` — основной способ, ключ `-mapinfo` — для правки файла.
+  Неподдерживаемый ключ **называется в отчёте**, а не игнорируется молча. `textures[name]`
+  **бросает** `KeyNotFoundException`, поэтому существование текстуры проверяется через
+  `GetNumber(name) >= 0`, а не на null. Имена лампов в WAD дополняются **нулями**, не
+  пробелами. Строка загрузки уровня печатает **название**, а не слово «loaded»: иначе
+  MAPINFO нельзя проверить headless-прогоном. Проверка — `MapInfoTest`,
+  `MapInfoAppliedTest`, `tools/test-mapinfo.ps1`.
 - Отладочные переключатели — `DebugSettings`. Всё, что меняет симуляцию
   (заморозка, замедление), разрешено только в одиночной игре: демо или сеть
   разъедутся. Проверка — `DebugSettings.SimulationChangesAllowed`.

@@ -196,6 +196,15 @@ namespace DPTDOOM
         /// </summary>
         public readonly Arg nodata;
 
+        /// <summary>
+        /// MAPINFO files, by path, or read from a <c>MAPINFO</c> lump in the WAD.
+        ///
+        /// Levels, not actors: the title on the automap and intermission, the sky, and the music
+        /// track. Separate from scripts because it describes a level rather than a thing, and a
+        /// mod may ship either without the other.
+        /// </summary>
+        public readonly Arg<string[]> mapinfo;
+
         public CommandLineArgs(string[] args)
         {
             iwad = GetString(args, "-iwad");
@@ -294,6 +303,7 @@ namespace DPTDOOM
             nobotbrain = new Arg(args.Contains("-nobotbrain"));
             botbraindir = GetString(args, "-botbraindir");
             nodata = new Arg(args.Contains("-nodata"));
+            mapinfo = Check_mapinfo(args);
 
             // Check for drag & drop.
             if (args.Length > 0 && args.All(arg => arg.FirstOrDefault() != '-'))
@@ -396,6 +406,17 @@ namespace DPTDOOM
         private static Arg<string[]> Check_script(string[] args)
         {
             var values = GetValues(args, "-script");
+            if (values.Length >= 1)
+            {
+                return new Arg<string[]>(values);
+            }
+
+            return new Arg<string[]>();
+        }
+
+        private static Arg<string[]> Check_mapinfo(string[] args)
+        {
+            var values = GetValues(args, "-mapinfo");
             if (values.Length >= 1)
             {
                 return new Arg<string[]>(values);

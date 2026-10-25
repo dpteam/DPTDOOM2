@@ -23,6 +23,16 @@ namespace DPTDOOM.Audio
     {
         void StartMusic(Bgm bgm, bool loop);
 
+        /// <summary>
+        /// Plays a music lump by name, with or without the "D_" prefix.
+        ///
+        /// Separate from <see cref="StartMusic(Bgm, bool)"/> because a mod's track is not in the
+        /// engine's enumeration and never could be: the enum lists the tracks the IWAD ships.
+        /// A backend that cannot play arbitrary lumps may treat this as a request for silence,
+        /// which is what happens when the lump is missing anyway.
+        /// </summary>
+        void StartMusic(string lumpName, bool loop);
+
         public int MaxVolume { get; }
         public int Volume { get; set; }
     }

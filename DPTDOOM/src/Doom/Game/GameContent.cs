@@ -83,6 +83,9 @@ namespace DPTDOOM
             // to see the older one's result, which is what the author expects.
             InitializeScripts(args);
 
+            // Levels are described separately from actors, and read before any map exists.
+            InitializeMapInfo(args);
+
             // A blank line between the groups, so a startup log of a dozen lines can be
             // skimmed instead of read. Purely visual - the timestamps already say what
             // took how long.
@@ -199,6 +202,66 @@ namespace DPTDOOM
             else
             {
                 ConsoleUi.Ok(described + " actor(s)");
+            }
+        }
+
+        /// <summary>
+        /// Reads MAPINFO: the <c>MAPINFO</c> lump from the WAD, and any files named with
+        /// <c>-mapinfo</c>.
+        ///
+        /// A lump rather than a flag, for the same reason SCRIPTS and DECORATE are lumps: a mod
+        /// that needs instructions to work is a mod half of the people who download it will run
+        /// wrong. The flag exists for the case where somebody is editing a file and wants to try
+        /// it without rebuilding a PWAD.
+        /// </summary>
+        private void InitializeMapInfo(CommandLineArgs args)
+        {
+            var paths = args.mapinfo.Present ? args.mapinfo.Value : new string[0];
+            var lump = wad.GetLumpNumber("MAPINFO");
+
+            if (paths.Length == 0 && lump == -1)
+            {
+                return;
+            }
+
+            ConsoleUi.Begin("mapinfo");
+
+            var problems = new System.Collections.Generic.List<string>();
+
+            MapInfo.Clear();
+
+            foreach (var path in paths)
+            {
+                try
+                {
+                    MapInfo.Add(System.IO.File.ReadAllText(path),
+                        System.IO.Path.GetFileName(path), problems);
+                }
+                catch (Exception e)
+                {
+                    problems.Add(path + ": " + e.Message);
+                }
+            }
+
+            if (lump != -1)
+            {
+                MapInfo.Add(System.Text.Encoding.UTF8.GetString(wad.ReadLump(lump)),
+                    "MAPINFO lump", problems);
+            }
+
+            foreach (var problem in problems)
+            {
+                LoadReport.Add("mapinfo", problem,
+                    "that level keeps the engine's own name, sky and music");
+            }
+
+            if (problems.Count > 0)
+            {
+                ConsoleUi.Failed(problems.Count + " problem(s)");
+            }
+            else
+            {
+                ConsoleUi.Ok(MapInfo.Count + " map(s) described");
             }
         }
 

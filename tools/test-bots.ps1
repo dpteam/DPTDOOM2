@@ -112,7 +112,7 @@ foreach ($style in $styles) {
 # The bot must not stop after the first level: the run continues on the next map,
 # which is what the level-transition line proves.
 $output = & $Exe -headless -iwad $Iwad -bots -warp 1 -skill 3 -tics $TicLimit -botstyle 0 -botbraindir $brains 2>&1
-# The startup log names the map in its own label: "map MAP01: OK (loaded)". That is
+# The startup log names the map in its own label: "map MAP01: OK (level 1: entryway)". That is
 # the kernel-log shape the console uses now, and it keeps the map name greppable
 # without needing the message text.
 $maps = $output | Select-String -Pattern "map (MAP\d+|E\dM\d+):" | ForEach-Object { $_.Matches[0].Groups[1].Value }
