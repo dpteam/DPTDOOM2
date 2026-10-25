@@ -26,6 +26,19 @@ namespace DPTDOOM.Audio
         public void StartSound(Sfx sfx);
         public void StartSound(Mobj mobj, Sfx sfx, SfxType type);
         public void StartSound(Mobj mobj, Sfx sfx, SfxType type, int volume);
+
+        /// <summary>
+        /// Plays a lump by name, rather than one of the engine's own sounds.
+        ///
+        /// The engine's sounds are an enumeration because the game chooses them by meaning: a
+        /// door opening is <c>Sfx.DOROPN</c>, and SNDINFO only decides which lump that is. A mod
+        /// can go further and name a lump the engine has never heard of - a splash from TERRAIN,
+        /// say - and there is no enumeration member for that. This is the way in.
+        ///
+        /// The name is a WAD lump, already resolved: SNDINFO is not consulted, because a caller
+        /// that has a lump name has already decided what it wants to hear.
+        /// </summary>
+        public void StartSound(Mobj mobj, string lumpName, SfxType type, int volume);
         public void StopSound(Mobj mobj);
         public void Reset();
         public void Pause();

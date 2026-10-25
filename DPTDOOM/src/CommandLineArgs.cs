@@ -232,6 +232,15 @@ namespace DPTDOOM
         /// </summary>
         public readonly Arg<string[]> lockdefs;
 
+        /// <summary>
+        /// TERRAIN files, by path, or read from a <c>TERRAIN</c> lump in the WAD.
+        ///
+        /// What a floor does to whatever stands on it: damage, friction, and the thing played when
+        /// something lands in it. Bound to flats by name, so the same picture can be harmless in
+        /// one map and lethal in another.
+        /// </summary>
+        public readonly Arg<string[]> terrain;
+
         public CommandLineArgs(string[] args)
         {
             iwad = GetString(args, "-iwad");
@@ -334,6 +343,7 @@ namespace DPTDOOM
             sndinfo = Check_sndinfo(args);
             animdefs = Check_animdefs(args);
             lockdefs = Check_lockdefs(args);
+            terrain = Check_terrain(args);
 
             // Check for drag & drop.
             if (args.Length > 0 && args.All(arg => arg.FirstOrDefault() != '-'))
@@ -458,6 +468,17 @@ namespace DPTDOOM
         private static Arg<string[]> Check_sndinfo(string[] args)
         {
             var values = GetValues(args, "-sndinfo");
+            if (values.Length >= 1)
+            {
+                return new Arg<string[]>(values);
+            }
+
+            return new Arg<string[]>();
+        }
+
+        private static Arg<string[]> Check_terrain(string[] args)
+        {
+            var values = GetValues(args, "-terrain");
             if (values.Length >= 1)
             {
                 return new Arg<string[]>(values);

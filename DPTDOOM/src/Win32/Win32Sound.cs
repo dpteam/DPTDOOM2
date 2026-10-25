@@ -48,12 +48,22 @@ namespace DPTDOOM.Win32
         private const float Attenuator = ClipDist - CloseDist;
 
         private readonly Config config;
+
         // One or more samples per sound: SNDINFO's $random gives a name several lumps, and the whole
         // point of that directive is that the choice varies. A single sample per sound was the shape
         // before SNDINFO existed and cannot express it.
         private readonly SoundSample[][] samples;
         private readonly float[] amplitudes;
         private readonly DoomRandom random;
+
+        /// <summary>
+        /// Samples played by lump name rather than by <see cref="Sfx"/>.
+        ///
+        /// Lazy, because the names are not known until a mod asks for one: TERRAIN names its
+        /// splashes in the file, and a WAD may carry hundreds of sound lumps that are never
+        /// played.
+        /// </summary>
+        private readonly SoundLumpCache lumpSamples;
 
         private readonly ChannelInfo[] infos;
         private readonly SoundMixer mixer;
@@ -106,6 +116,7 @@ namespace DPTDOOM.Win32
         public Win32Sound(Config config, GameContent content)
         {
             this.config = config;
+            lumpSamples = new SoundLumpCache(content.Wad);
 
             config.audio_soundvolume = MathEx.Clamp(config.audio_soundvolume, 0, MaxVolume);
 
@@ -228,7 +239,7 @@ namespace DPTDOOM.Win32
             {
                 var info = infos[i];
 
-                if (info.Playing != Sfx.NONE)
+                if (info.Playing != Sfx.NONE || info.PlayingLump != null)
                 {
                     if (mixer.IsPlaying(i))
                     {
@@ -246,7 +257,8 @@ namespace DPTDOOM.Win32
                     else
                     {
                         info.Playing = Sfx.NONE;
-                        if (info.Reserved == Sfx.NONE)
+                        info.PlayingLump = null;
+                        if (info.Reserved == Sfx.NONE && info.ReservedLump == null)
                         {
                             info.Source = null;
                         }
@@ -263,6 +275,18 @@ namespace DPTDOOM.Win32
                     }
 
                     info.Reserved = Sfx.NONE;
+                }
+                else if (info.ReservedLump != null)
+                {
+                    var sample = GetLumpSample(info.ReservedLump);
+
+                    if (sample != null)
+                    {
+                        StartVoice(i, info, sample);
+                        info.PlayingLump = info.ReservedLump;
+                    }
+
+                    info.ReservedLump = null;
                 }
             }
 
@@ -326,6 +350,35 @@ namespace DPTDOOM.Win32
                 return;
             }
 
+            Queue(mobj, sfx, null, amplitudes[(int)sfx], type, volume);
+        }
+
+        public void StartSound(Mobj mobj, string lumpName, SfxType type, int volume)
+        {
+            var sample = GetLumpSample(lumpName);
+
+            if (sample == null)
+            {
+                return;
+            }
+
+            // The amplitude is measured rather than tabulated: this lump was never in the engine's
+            // table, so how loud it is has to come from the sample itself. Priority is compared
+            // against other sounds competing for a channel, and a quiet splash losing to a loud
+            // door is the right answer.
+            Queue(mobj, Sfx.NONE, lumpName, sample.GetAmplitude(), type, volume);
+        }
+
+        /// <summary>
+        /// Puts a sound on a channel: replaces the same object's sound of the same kind, else takes
+        /// a free channel, else steals the least important one if this is at least as important.
+        ///
+        /// One path for both kinds of sound, because the choice of channel is about priority and
+        /// distance and has nothing to do with where the sample came from. Splitting it would mean
+        /// two copies of these rules, and the copies would drift.
+        /// </summary>
+        private void Queue(Mobj mobj, Sfx sfx, string lump, float amplitude, SfxType type, int volume)
+        {
             var x = (mobj.X - listener.X).ToFloat();
             var y = (mobj.Y - listener.Y).ToFloat();
             var dist = MathF.Sqrt(x * x + y * y);
@@ -337,7 +390,7 @@ namespace DPTDOOM.Win32
             }
             else
             {
-                priority = amplitudes[(int)sfx] * GetDistanceDecay(dist) * volume;
+                priority = amplitude * GetDistanceDecay(dist) * volume;
             }
 
             // A sound already playing from this object replaces itself.
@@ -347,6 +400,7 @@ namespace DPTDOOM.Win32
                 if (info.Source == mobj && info.Type == type)
                 {
                     info.Reserved = sfx;
+                    info.ReservedLump = lump;
                     info.Priority = priority;
                     info.Volume = volume;
                     return;
@@ -357,13 +411,9 @@ namespace DPTDOOM.Win32
             for (var i = 0; i < infos.Length; i++)
             {
                 var info = infos[i];
-                if (info.Reserved == Sfx.NONE && info.Playing == Sfx.NONE)
+                if (!info.Busy)
                 {
-                    info.Reserved = sfx;
-                    info.Priority = priority;
-                    info.Source = mobj;
-                    info.Type = type;
-                    info.Volume = volume;
+                    Assign(info, mobj, sfx, lump, priority, type, volume);
                     return;
                 }
             }
@@ -385,13 +435,32 @@ namespace DPTDOOM.Win32
 
             if (priority >= minPriority && minChannel >= 0)
             {
-                var info = infos[minChannel];
-                info.Reserved = sfx;
-                info.Priority = priority;
-                info.Source = mobj;
-                info.Type = type;
-                info.Volume = volume;
+                Assign(infos[minChannel], mobj, sfx, lump, priority, type, volume);
             }
+        }
+
+        private static void Assign(ChannelInfo info, Mobj mobj, Sfx sfx, string lump,
+                                   float priority, SfxType type, int volume)
+        {
+            info.Reserved = sfx;
+            info.ReservedLump = lump;
+            info.Priority = priority;
+            info.Source = mobj;
+            info.Type = type;
+            info.Volume = volume;
+        }
+
+        /// <summary>
+        /// The sample for a sound lump, or null when the WAD has no such lump.
+        ///
+        /// A missing name is remembered by the cache, so a mod that named a splash it forgot to
+        /// ship does not cause a WAD lookup on every step into the liquid. The failure is reported
+        /// once, by the caller that asked for the name, not here - this method has no way to say
+        /// what the name was for.
+        /// </summary>
+        private SoundSample GetLumpSample(string lumpName)
+        {
+            return lumpSamples.Get(lumpName);
         }
 
         public void StopSound(Mobj mobj)
@@ -733,16 +802,36 @@ namespace DPTDOOM.Win32
             public Sfx Playing;
             public float Priority;
 
+            /// <summary>
+            /// The lump queued by name, when the sound is not one of the engine's own.
+            ///
+            /// Kept beside <see cref="Reserved"/> rather than instead of it: the engine's sounds
+            /// are still identified by their <see cref="Sfx"/> for pitch and for the "a sound from
+            /// this object replaces itself" rule, and a lump has neither.
+            /// </summary>
+            public string ReservedLump;
+
+            /// <summary>The lump currently playing, or null when it is an <see cref="Sfx"/>.</summary>
+            public string PlayingLump;
+
             public Mobj Source;
             public SfxType Type;
             public int Volume;
             public Fixed LastX;
             public Fixed LastY;
 
+            /// <summary>True when the channel has something queued or playing.</summary>
+            public bool Busy
+            {
+                get { return Reserved != Sfx.NONE || Playing != Sfx.NONE || ReservedLump != null || PlayingLump != null; }
+            }
+
             public void Clear()
             {
                 Reserved = Sfx.NONE;
                 Playing = Sfx.NONE;
+                ReservedLump = null;
+                PlayingLump = null;
                 Priority = 0;
                 Source = null;
                 Type = 0;

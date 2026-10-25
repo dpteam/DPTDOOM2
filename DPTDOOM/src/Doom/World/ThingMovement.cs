@@ -725,7 +725,50 @@ namespace DPTDOOM
             {
                 thing.MomX = thing.MomX * friction;
                 thing.MomY = thing.MomY * friction;
+
+                // A terrain can make a floor slippery or sticky. Applied after the engine's own
+                // friction rather than instead of it, so a factor of one is exactly the vanilla
+                // behaviour and a mod that only writes a damage amount does not change movement.
+                if (Terrain.Any)
+                {
+                    var terrain = Terrain.ForFlat(thing.Subsector.Sector.FloorFlat);
+
+                    if (terrain != null && terrain.HasFriction)
+                    {
+                        thing.MomX = thing.MomX * terrain.Friction;
+                        thing.MomY = thing.MomY * terrain.Friction;
+                    }
+                }
             }
+        }
+
+        /// <summary>
+        /// Plays the splash a liquid floor names, when something lands in it.
+        ///
+        /// Only the sound: the particles ZDoom spawns are actor types this port has no sprites
+        /// for, and an invisible splash is worse than none because the modder would go looking for
+        /// a mistake in the file. `liquid` is required as well as a splash definition, because a
+        /// splash on solid ground is a sound with no cause.
+        /// </summary>
+        private void StartTerrainSplash(Mobj thing)
+        {
+            var terrain = Terrain.ForFlat(thing.Subsector.Sector.FloorFlat);
+
+            if (terrain == null || !terrain.Liquid || terrain.Splash == null)
+            {
+                return;
+            }
+
+            var sound = terrain.Splash.Sound != null
+                ? terrain.Splash.Sound
+                : terrain.Splash.SmallSound;
+
+            if (sound == null)
+            {
+                return;
+            }
+
+            world.StartSound(thing, sound, SfxType.Misc, 100);
         }
 
         public void ZMovement(Mobj thing)
@@ -792,6 +835,16 @@ namespace DPTDOOM
                         thing.Player.DeltaViewHeight = (thing.MomZ >> 3);
                         world.StartSound(thing, Sfx.OOF, SfxType.Voice);
                     }
+
+                    // Landing in a liquid makes the sound the terrain names. A real fall is
+                    // required: stepping off a kerb would otherwise splash on every stair, and
+                    // the threshold is the same one the player's own grunt already uses a looser
+                    // form of - a landing, not a step down.
+                    if (Terrain.Any && thing.MomZ < -gravity * 2)
+                    {
+                        StartTerrainSplash(thing);
+                    }
+
                     thing.MomZ = Fixed.Zero;
                 }
                 thing.Z = thing.FloorZ;

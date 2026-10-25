@@ -97,6 +97,10 @@ namespace DPTDOOM
             // table is consulted the moment a player tries a door.
             InitializeLockDefs(args);
 
+            // What a floor does to whatever stands on it. Parsed here; bound to the flats once
+            // they are loaded, because a binding is by flat name.
+            InitializeTerrain(args);
+
             // A blank line between the groups, so a startup log of a dozen lines can be
             // skimmed instead of read. Purely visual - the timestamps already say what
             // took how long.
@@ -109,7 +113,29 @@ namespace DPTDOOM
             sprites = new SpriteLookup(wad);
             animation = new TextureAnimation(textures, flats);
 
+            // A terrain is bound to a flat by name, so the binding can only be resolved once the
+            // WAD's flat list exists. Doing it here rather than at parse time is what lets a
+            // missing flat be reported instead of silently applied to nothing.
+            ResolveTerrains();
+
             LoadReport.Print();
+        }
+
+        private void ResolveTerrains()
+        {
+            if (!Terrain.Any)
+            {
+                return;
+            }
+
+            var problems = new System.Collections.Generic.List<string>();
+
+            Terrain.Resolve(flats, problems);
+
+            foreach (var problem in problems)
+            {
+                LoadReport.Add("terrain", problem, "that terrain is not applied");
+            }
         }
 
         /// <summary>
@@ -451,6 +477,65 @@ namespace DPTDOOM
             else
             {
                 ConsoleUi.Ok(LockDefs.Count + " lock(s) defined");
+            }
+        }
+
+        /// <summary>
+        /// Reads TERRAIN: the <c>TERRAIN</c> lump from the WAD, and any files named with
+        /// <c>-terrain</c>.
+        ///
+        /// A map's flats say what a floor looks like; this says what it is. The parse happens
+        /// here, but the bindings are resolved later, in <see cref="ResolveTerrains"/>, because a
+        /// terrain is attached to a flat by name and the names only exist once the WAD's flat
+        /// list has been read.
+        /// </summary>
+        private void InitializeTerrain(CommandLineArgs args)
+        {
+            var paths = args.terrain.Present ? args.terrain.Value : new string[0];
+            var lump = wad.GetLumpNumber("TERRAIN");
+
+            if (paths.Length == 0 && lump == -1)
+            {
+                return;
+            }
+
+            ConsoleUi.Begin("terrain");
+
+            var problems = new System.Collections.Generic.List<string>();
+
+            Terrain.Clear();
+
+            foreach (var path in paths)
+            {
+                try
+                {
+                    Terrain.Add(System.IO.File.ReadAllText(path),
+                        System.IO.Path.GetFileName(path), problems);
+                }
+                catch (Exception e)
+                {
+                    problems.Add(path + ": " + e.Message);
+                }
+            }
+
+            if (lump != -1)
+            {
+                Terrain.Add(System.Text.Encoding.UTF8.GetString(wad.ReadLump(lump)),
+                    "TERRAIN lump", problems);
+            }
+
+            foreach (var problem in problems)
+            {
+                LoadReport.Add("terrain", problem, "that entry does nothing");
+            }
+
+            if (problems.Count > 0)
+            {
+                ConsoleUi.Failed(problems.Count + " problem(s)");
+            }
+            else
+            {
+                ConsoleUi.Ok(Terrain.Count + " terrain(s) defined");
             }
         }
 

@@ -53,6 +53,10 @@ namespace DPTDOOM.Audio
         {
         }
 
+        public void StartSound(Mobj mobj, string lumpName, SfxType type, int volume)
+        {
+        }
+
         public void StopSound(Mobj mobj)
         {
         }

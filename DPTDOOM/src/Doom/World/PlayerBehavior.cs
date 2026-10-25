@@ -111,6 +111,15 @@ namespace DPTDOOM
                 PlayerInSpecialSector(player);
             }
 
+            // Terrain is separate from sector specials: a floor can hurt because of what it is
+            // (nukage in a corridor with no sector special at all), and a map that uses a flat
+            // for decoration must be able to have it not hurt. The lookup is skipped entirely
+            // when no TERRAIN was loaded, so a vanilla WAD pays nothing.
+            if (Terrain.Any)
+            {
+                TerrainEffects(player);
+            }
+
             // Check for weapon change.
 
             // A special event has no other buttons.
@@ -390,6 +399,45 @@ namespace DPTDOOM
             player.Mobj.MomY += move * Trig.Sin(angle);
         }
 
+
+        /// <summary>
+        /// Applies the terrain of the floor the player stands on.
+        ///
+        /// Only damage lives here. Friction is applied where movement is slowed, because that is
+        /// the only place where it has a meaning - a damage tick is per player, a friction factor
+        /// is per thing moving across the floor.
+        /// </summary>
+        private void TerrainEffects(Player player)
+        {
+            var sector = player.Mobj.Subsector.Sector;
+            var terrain = Terrain.ForFlat(sector.FloorFlat);
+
+            if (terrain == null || terrain.DamageAmount <= 0)
+            {
+                return;
+            }
+
+            // Only while standing on it. A player in the air over a lava pit is not being burned,
+            // and the same rule makes the tic of leaving the floor harmless.
+            if (player.Mobj.Z != sector.FloorHeight)
+            {
+                return;
+            }
+
+            if (terrain.AllowProtection && player.Powers[(int)PowerType.IronFeet] != 0)
+            {
+                return;
+            }
+
+            var damage = terrain.DamageAt(world.LevelTime);
+
+            if (damage <= 0)
+            {
+                return;
+            }
+
+            world.ThingInteraction.DamageMobj(player.Mobj, null, null, damage);
+        }
 
         /// <summary>
         /// Called every tic frame that the player origin is in a special sector.
