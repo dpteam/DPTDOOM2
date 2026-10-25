@@ -85,6 +85,13 @@ namespace DPTDOOM
 
                 animations = list.ToArray();
 
+                // ANIMDEFS cycles, after the engine's own: a mod's explicit list replaces nothing and
+                // adds to what animates. The pictures are resolved to indices here, once, because a
+                // name lookup per frame per tic would be the one place this could get expensive.
+                AddAnimatedDefinitions(textures, flats, list);
+
+                animations = list.ToArray();
+
                 ConsoleUi.Ok(list.Count + " animated");
             }
             catch (Exception e)
@@ -95,5 +102,52 @@ namespace DPTDOOM
         }
 
         public TextureAnimationInfo[] Animations => animations;
+
+        /// <summary>
+        /// Turns ANIMDEFS cycles into animation entries.
+        ///
+        /// A name that is not in this WAD is reported rather than dropped: the cycle is what the mod
+        /// author wrote, and telling them which picture is missing is the difference between a
+        /// five-second fix and a hunt. A cycle where nothing resolves is skipped entirely, because an
+        /// animation with no frames would make the renderer index an empty array.
+        /// </summary>
+        private static void AddAnimatedDefinitions(ITextureLookup textures, IFlatLookup flats,
+                                                   List<TextureAnimationInfo> list)
+        {
+            foreach (var definition in AnimatedTexture.Definitions)
+            {
+                var frames = new List<int>();
+                var durations = new List<int>();
+
+                for (var i = 0; i < definition.Frames.Count; i++)
+                {
+                    var name = definition.Frames[i];
+                    var number = definition.IsTexture ? textures.GetNumber(name) : flats.GetNumber(name);
+
+                    if (number < 0)
+                    {
+                        LoadReport.Add(
+                            "missing animation frame",
+                            name + " in the cycle at line " + definition.Line,
+                            "that frame is skipped, so the cycle may look wrong");
+
+                        continue;
+                    }
+
+                    frames.Add(number);
+                    durations.Add(definition.Durations[i]);
+                }
+
+                if (frames.Count < 2)
+                {
+                    // Nothing left to animate. A cycle that lost one of two frames still animates; one
+                    // that lost all of them would make the renderer index an empty array.
+                    continue;
+                }
+
+                list.Add(new TextureAnimationInfo(definition.IsTexture, frames.ToArray(),
+                                                 durations.ToArray()));
+            }
+        }
     }
 }

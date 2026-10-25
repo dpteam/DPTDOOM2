@@ -89,6 +89,10 @@ namespace DPTDOOM
             // Sounds by name, so a mod can give a vanilla sound its own lump.
             InitializeSoundInfo(args);
 
+            // Which pictures animate. Parsed here, resolved against the texture tables below, and
+            // handed to the animation object when it is built.
+            InitializeAnimatedTextures(args);
+
             // A blank line between the groups, so a startup log of a dozen lines can be
             // skimmed instead of read. Purely visual - the timestamps already say what
             // took how long.
@@ -324,6 +328,65 @@ namespace DPTDOOM
             else
             {
                 ConsoleUi.Ok(SoundInfo.Count + " sound(s) described");
+            }
+        }
+
+        /// <summary>
+        /// Reads ANIMDEFS: the <c>ANIMDEFS</c> lump from the WAD, and any files named with
+        /// <c>-animdefs</c>.
+        ///
+        /// Parsed before the graphics are loaded, applied when the animation object is built: the
+        /// names in the file are resolved to picture indices once, and a lookup per frame per tic
+        /// would be the one place this could get expensive.
+        /// </summary>
+        private void InitializeAnimatedTextures(CommandLineArgs args)
+        {
+            var paths = args.animdefs.Present ? args.animdefs.Value : new string[0];
+            var lump = wad.GetLumpNumber("ANIMDEFS");
+
+            if (paths.Length == 0 && lump == -1)
+            {
+                return;
+            }
+
+            ConsoleUi.Begin("animdefs");
+
+            var problems = new System.Collections.Generic.List<string>();
+
+            AnimatedTexture.Clear();
+
+            foreach (var path in paths)
+            {
+                try
+                {
+                    AnimatedTexture.Add(System.IO.File.ReadAllText(path),
+                        System.IO.Path.GetFileName(path), problems);
+                }
+                catch (Exception e)
+                {
+                    problems.Add(path + ": " + e.Message);
+                }
+            }
+
+            if (lump != -1)
+            {
+                AnimatedTexture.Add(System.Text.Encoding.UTF8.GetString(wad.ReadLump(lump)),
+                    "ANIMDEFS lump", problems);
+            }
+
+            foreach (var problem in problems)
+            {
+                LoadReport.Add("animdefs", problem,
+                    "that cycle does not animate");
+            }
+
+            if (problems.Count > 0)
+            {
+                ConsoleUi.Failed(problems.Count + " problem(s)");
+            }
+            else
+            {
+                ConsoleUi.Ok(AnimatedTexture.Count + " cycle(s) described");
             }
         }
 

@@ -214,6 +214,15 @@ namespace DPTDOOM
         /// </summary>
         public readonly Arg<string[]> sndinfo;
 
+        /// <summary>
+        /// ANIMDEFS files, by path, or read from an <c>ANIMDEFS</c> lump in the WAD.
+        ///
+        /// Which pictures animate, in which order, for how long. The engine's own ANIMATED lump can
+        /// only describe a contiguous range at one speed; a mod's cycle is a list, and this is where it
+        /// is written.
+        /// </summary>
+        public readonly Arg<string[]> animdefs;
+
         public CommandLineArgs(string[] args)
         {
             iwad = GetString(args, "-iwad");
@@ -314,6 +323,7 @@ namespace DPTDOOM
             nodata = new Arg(args.Contains("-nodata"));
             mapinfo = Check_mapinfo(args);
             sndinfo = Check_sndinfo(args);
+            animdefs = Check_animdefs(args);
 
             // Check for drag & drop.
             if (args.Length > 0 && args.All(arg => arg.FirstOrDefault() != '-'))
@@ -438,6 +448,17 @@ namespace DPTDOOM
         private static Arg<string[]> Check_sndinfo(string[] args)
         {
             var values = GetValues(args, "-sndinfo");
+            if (values.Length >= 1)
+            {
+                return new Arg<string[]>(values);
+            }
+
+            return new Arg<string[]>();
+        }
+
+        private static Arg<string[]> Check_animdefs(string[] args)
+        {
+            var values = GetValues(args, "-animdefs");
             if (values.Length >= 1)
             {
                 return new Arg<string[]>(values);

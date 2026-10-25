@@ -768,16 +768,44 @@ namespace DPTDOOM
             for (var k = 0; k < animations.Length; k++)
             {
                 var anim = animations[k];
-                for (var i = anim.BasePic; i < anim.BasePic + anim.NumPics; i++)
+                var frames = anim.Frames;
+
+                if (frames == null)
                 {
-                    var pic = anim.BasePic + ((world.LevelTime / anim.Speed + i) % anim.NumPics);
+                    // The engine's own shape: a contiguous range, all at one speed. Every picture in
+                    // the range shows the one that is a step further round the cycle, which is what
+                    // makes the whole range animate in lockstep.
+                    for (var i = anim.BasePic; i < anim.BasePic + anim.NumPics; i++)
+                    {
+                        var pic = anim.BasePic + ((world.LevelTime / anim.Speed + i) % anim.NumPics);
+
+                        if (anim.IsTexture)
+                        {
+                            textureTranslation[i] = pic;
+                        }
+                        else
+                        {
+                            flatTranslation[i] = pic;
+                        }
+                    }
+
+                    continue;
+                }
+
+                // ANIMDEFS' shape: an explicit list, each frame with its own duration. The picture
+                // showing now is asked for once, and every frame of the cycle is pointed at it - so a
+                // wall textured with any frame of the cycle shows the current one.
+                var showing = anim.PictureAt(world.LevelTime);
+
+                foreach (var frame in frames)
+                {
                     if (anim.IsTexture)
                     {
-                        textureTranslation[i] = pic;
+                        textureTranslation[frame] = showing;
                     }
                     else
                     {
-                        flatTranslation[i] = pic;
+                        flatTranslation[frame] = showing;
                     }
                 }
             }
