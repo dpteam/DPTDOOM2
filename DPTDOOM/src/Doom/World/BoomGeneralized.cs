@@ -118,7 +118,6 @@ namespace DPTDOOM
         private const int LockedKind = 0x0020;
         private const int LockedSpeed = 0x0018;
 
-        private const int LockedNKeysShift = 9;
         private const int LockedKeyShift = 6;
         private const int LockedSpeedShift = 3;
 
@@ -197,8 +196,14 @@ namespace DPTDOOM
             /// <summary>Locked door: which key is needed.</summary>
             public int LockedKey;
 
-            /// <summary>Locked door: how many keys are needed.</summary>
-            public int LockedKeyCount;
+            /// <summary>
+            /// Locked door: whether skulls count as cards.
+            ///
+            /// Boom's macro is called `LockedNKeys`, which reads like a count and is not one:
+            /// the bit means "a skull opens a card lock". Naming it after the macro would make
+            /// every reader of this field reason about the wrong thing.
+            /// </summary>
+            public bool SkullsCountAsCards;
 
             /// <summary>Crusher: silent rather than noisy.</summary>
             public bool Silent;
@@ -315,7 +320,7 @@ namespace DPTDOOM
                     break;
 
                 case Family.LockedDoor:
-                    definition.LockedKeyCount = (value & LockedNKeys) >> LockedNKeysShift;
+                    definition.SkullsCountAsCards = (value & LockedNKeys) != 0;
                     definition.LockedKey = (value & LockedKey) >> LockedKeyShift;
                     definition.DoorKind = ((value & LockedKind) != 0) ? 1 : 0;
                     definition.Speed = (Speed)((value & LockedSpeed) >> LockedSpeedShift);

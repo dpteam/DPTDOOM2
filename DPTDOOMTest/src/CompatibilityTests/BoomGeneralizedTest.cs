@@ -209,9 +209,24 @@ namespace DPTDOOMTest.CompatibilityTests
             var definition = BoomGeneralized.Decode(special);
 
             Assert.AreEqual(BoomGeneralized.Family.LockedDoor, definition.Family);
-            Assert.AreEqual(1, definition.LockedKeyCount);
+            Assert.IsTrue(definition.SkullsCountAsCards, "the bit means skulls count as cards");
             Assert.AreEqual(1, definition.LockedKey);
             Assert.AreEqual(BoomGeneralized.Speed.Fast, definition.Speed);
+        }
+
+        [TestMethod]
+        public void TheSkullBitIsABitAndNotACount()
+        {
+            // Boom's macro is called LockedNKeys, which reads like a number of keys. It is not:
+            // it is a single bit meaning "a skull opens a card lock". Reading it as a count
+            // would make a one-key lock look like it wants one key of something.
+            var without = BoomGeneralized.Decode(BoomGeneralized.GenLockedBase | (2 << 6));
+            var with = BoomGeneralized.Decode(BoomGeneralized.GenLockedBase | (1 << 9) | (2 << 6));
+
+            Assert.IsFalse(without.SkullsCountAsCards);
+            Assert.IsTrue(with.SkullsCountAsCards);
+            Assert.AreEqual(2, without.LockedKey, "and the key itself is unchanged");
+            Assert.AreEqual(2, with.LockedKey);
         }
 
         [TestMethod]

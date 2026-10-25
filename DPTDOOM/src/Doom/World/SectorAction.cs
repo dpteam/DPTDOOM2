@@ -752,6 +752,38 @@ namespace DPTDOOM
 			return DoDoor(line, type);
 		}
 
+		/// <summary>
+		/// True when the thing may open a Boom generalized locked door, and says why not when it
+		/// may not.
+		///
+		/// Boom's generalized doors carry the key number in the line itself, so the check cannot
+		/// live next to the vanilla one - that one is a switch over the special number. The rule
+		/// is <see cref="GeneralizedLock"/>; this only supplies the player and the refusal.
+		/// </summary>
+		private bool CanUnlockGeneralizedDoor(LineDef line, BoomGeneralized.Definition definition,
+		                                      Mobj thing)
+		{
+			var player = thing.Player;
+
+			// Monsters cannot open locked doors, and neither can corpses.
+			if (player == null)
+			{
+				return false;
+			}
+
+			DoomString message;
+
+			if (GeneralizedLock.CanOpen(definition.LockedKey, definition.SkullsCountAsCards,
+			                            player.Cards, out message))
+			{
+				return true;
+			}
+
+			player.SendMessage(message);
+			world.StartSound(player.Mobj, Sfx.OOF, SfxType.Voice);
+			return false;
+		}
+
 
 
 		////////////////////////////////////////////////////////////
@@ -1300,7 +1332,7 @@ namespace DPTDOOM
 		/// field asks for a numeric model are treated as trigger models instead,
 		/// which is what most maps mean anyway.
 		/// </summary>
-		public bool DoGeneralized(LineDef line)
+		public bool DoGeneralized(LineDef line, Mobj thing)
 		{
 			var definition = BoomGeneralized.Decode((int)line.Special);
 
@@ -1318,7 +1350,17 @@ namespace DPTDOOM
 					return DoGeneralizedCeiling(line, definition);
 
 				case BoomGeneralized.Family.Door:
+					return DoGeneralizedDoor(line, definition);
+
 				case BoomGeneralized.Family.LockedDoor:
+					// The lock is checked here and not in the door builder: a locked door that
+					// opens without its key is the one failure of this family a player cannot
+					// tell from a map that was built without a lock at all.
+					if (!CanUnlockGeneralizedDoor(line, definition, thing))
+					{
+						return false;
+					}
+
 					return DoGeneralizedDoor(line, definition);
 
 				case BoomGeneralized.Family.Lift:

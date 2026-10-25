@@ -99,6 +99,15 @@ namespace DPTDOOM
             public static readonly DoomString PD_BLUEK = new DoomString("PD_BLUEK", "You need a blue key to open this door");
             public static readonly DoomString PD_REDK = new DoomString("PD_REDK", "You need a red key to open this door");
             public static readonly DoomString PD_YELLOWK = new DoomString("PD_YELLOWK", "You need a yellow key to open this door");
+            public static readonly DoomString PD_BLUEC = new DoomString("PD_BLUEC", "You need a blue card to open this door");
+            public static readonly DoomString PD_REDC = new DoomString("PD_REDC", "You need a red card to open this door");
+            public static readonly DoomString PD_YELLOWC = new DoomString("PD_YELLOWC", "You need a yellow card to open this door");
+            public static readonly DoomString PD_BLUES = new DoomString("PD_BLUES", "You need a blue skull to open this door");
+            public static readonly DoomString PD_REDS = new DoomString("PD_REDS", "You need a red skull to open this door");
+            public static readonly DoomString PD_YELLOWS = new DoomString("PD_YELLOWS", "You need a yellow skull to open this door");
+            public static readonly DoomString PD_ANY = new DoomString("PD_ANY", "Any key will open this door");
+            public static readonly DoomString PD_ALL3 = new DoomString("PD_ALL3", "You need all three keys to open this door");
+            public static readonly DoomString PD_ALL6 = new DoomString("PD_ALL6", "You need all six keys to open this door");
             public static readonly DoomString GGSAVED = new DoomString("GGSAVED", "game saved.");
             public static readonly DoomString HUSTR_E1M1 = new DoomString("HUSTR_E1M1", "E1M1: Hangar");
             public static readonly DoomString HUSTR_E1M2 = new DoomString("HUSTR_E1M2", "E1M2: Nuclear Plant");

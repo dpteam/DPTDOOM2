@@ -140,7 +140,7 @@ namespace DPTDOOM
 				}
 			}
 
-			var result = world.SectorAction.DoGeneralized(line);
+			var result = world.SectorAction.DoGeneralized(line, thing);
 
 			// A one-shot trigger becomes inert once it has fired, which is how Boom
 			// stops a walk-over line from repeating.
