@@ -57,13 +57,14 @@ namespace DPTDOOM.Win32
         private readonly DoomRandom random;
 
         /// <summary>
-        /// Samples played by lump name rather than by <see cref="Sfx"/>.
+        /// Samples played by sound name rather than by <see cref="Sfx"/>.
         ///
         /// Lazy, because the names are not known until a mod asks for one: TERRAIN names its
         /// splashes in the file, and a WAD may carry hundreds of sound lumps that are never
-        /// played.
+        /// played. Resolution goes through SNDINFO first, so a name the mod defined there means
+        /// what the mod says it means - including its several recordings.
         /// </summary>
-        private readonly SoundLumpCache lumpSamples;
+        private readonly NamedSounds namedSounds;
 
         private readonly ChannelInfo[] infos;
         private readonly SoundMixer mixer;
@@ -116,7 +117,7 @@ namespace DPTDOOM.Win32
         public Win32Sound(Config config, GameContent content)
         {
             this.config = config;
-            lumpSamples = new SoundLumpCache(content.Wad);
+            namedSounds = new NamedSounds(content.Wad);
 
             config.audio_soundvolume = MathEx.Clamp(config.audio_soundvolume, 0, MaxVolume);
 
@@ -239,7 +240,7 @@ namespace DPTDOOM.Win32
             {
                 var info = infos[i];
 
-                if (info.Playing != Sfx.NONE || info.PlayingLump != null)
+                if (info.Playing != Sfx.NONE || info.PlayingName != null)
                 {
                     if (mixer.IsPlaying(i))
                     {
@@ -257,8 +258,8 @@ namespace DPTDOOM.Win32
                     else
                     {
                         info.Playing = Sfx.NONE;
-                        info.PlayingLump = null;
-                        if (info.Reserved == Sfx.NONE && info.ReservedLump == null)
+                        info.PlayingName = null;
+                        if (info.Reserved == Sfx.NONE && info.ReservedName == null)
                         {
                             info.Source = null;
                         }
@@ -276,17 +277,17 @@ namespace DPTDOOM.Win32
 
                     info.Reserved = Sfx.NONE;
                 }
-                else if (info.ReservedLump != null)
+                else if (info.ReservedName != null)
                 {
-                    var sample = GetLumpSample(info.ReservedLump);
+                    var sample = Pick(namedSounds.Get(info.ReservedName));
 
                     if (sample != null)
                     {
                         StartVoice(i, info, sample);
-                        info.PlayingLump = info.ReservedLump;
+                        info.PlayingName = info.ReservedName;
                     }
 
-                    info.ReservedLump = null;
+                    info.ReservedName = null;
                 }
             }
 
@@ -353,20 +354,30 @@ namespace DPTDOOM.Win32
             Queue(mobj, sfx, null, amplitudes[(int)sfx], type, volume);
         }
 
-        public void StartSound(Mobj mobj, string lumpName, SfxType type, int volume)
+        public void StartSound(Mobj mobj, string soundName, SfxType type, int volume)
         {
-            var sample = GetLumpSample(lumpName);
+            var variants = namedSounds.Get(soundName);
 
-            if (sample == null)
+            if (variants.Length == 0)
             {
                 return;
             }
 
-            // The amplitude is measured rather than tabulated: this lump was never in the engine's
-            // table, so how loud it is has to come from the sample itself. Priority is compared
-            // against other sounds competing for a channel, and a quiet splash losing to a loud
-            // door is the right answer.
-            Queue(mobj, Sfx.NONE, lumpName, sample.GetAmplitude(), type, volume);
+            // How loud it is has to be measured: this name was never in the engine's table, so
+            // there is no tabulated amplitude. The loudest variant, for the same reason the
+            // engine's own sounds use the loudest: priority is compared against other sounds
+            // competing for a channel, and a quiet variant must not make the whole sound lose.
+            var amplitude = 0F;
+
+            foreach (var variant in variants)
+            {
+                if (variant.GetAmplitude() > amplitude)
+                {
+                    amplitude = variant.GetAmplitude();
+                }
+            }
+
+            Queue(mobj, Sfx.NONE, soundName, amplitude, type, volume);
         }
 
         /// <summary>
@@ -400,7 +411,7 @@ namespace DPTDOOM.Win32
                 if (info.Source == mobj && info.Type == type)
                 {
                     info.Reserved = sfx;
-                    info.ReservedLump = lump;
+                    info.ReservedName = lump;
                     info.Priority = priority;
                     info.Volume = volume;
                     return;
@@ -443,24 +454,11 @@ namespace DPTDOOM.Win32
                                    float priority, SfxType type, int volume)
         {
             info.Reserved = sfx;
-            info.ReservedLump = lump;
+            info.ReservedName = lump;
             info.Priority = priority;
             info.Source = mobj;
             info.Type = type;
             info.Volume = volume;
-        }
-
-        /// <summary>
-        /// The sample for a sound lump, or null when the WAD has no such lump.
-        ///
-        /// A missing name is remembered by the cache, so a mod that named a splash it forgot to
-        /// ship does not cause a WAD lookup on every step into the liquid. The failure is reported
-        /// once, by the caller that asked for the name, not here - this method has no way to say
-        /// what the name was for.
-        /// </summary>
-        private SoundSample GetLumpSample(string lumpName)
-        {
-            return lumpSamples.Get(lumpName);
         }
 
         public void StopSound(Mobj mobj)
@@ -809,10 +807,10 @@ namespace DPTDOOM.Win32
             /// are still identified by their <see cref="Sfx"/> for pitch and for the "a sound from
             /// this object replaces itself" rule, and a lump has neither.
             /// </summary>
-            public string ReservedLump;
+            public string ReservedName;
 
             /// <summary>The lump currently playing, or null when it is an <see cref="Sfx"/>.</summary>
-            public string PlayingLump;
+            public string PlayingName;
 
             public Mobj Source;
             public SfxType Type;
@@ -823,15 +821,15 @@ namespace DPTDOOM.Win32
             /// <summary>True when the channel has something queued or playing.</summary>
             public bool Busy
             {
-                get { return Reserved != Sfx.NONE || Playing != Sfx.NONE || ReservedLump != null || PlayingLump != null; }
+                get { return Reserved != Sfx.NONE || Playing != Sfx.NONE || ReservedName != null || PlayingName != null; }
             }
 
             public void Clear()
             {
                 Reserved = Sfx.NONE;
                 Playing = Sfx.NONE;
-                ReservedLump = null;
-                PlayingLump = null;
+                ReservedName = null;
+                PlayingName = null;
                 Priority = 0;
                 Source = null;
                 Type = 0;

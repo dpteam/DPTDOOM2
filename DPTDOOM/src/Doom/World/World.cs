@@ -365,14 +365,14 @@ namespace DPTDOOM
         }
 
         /// <summary>
-        /// Plays a sound by lump name, for a mod that named one the engine has no member for.
+        /// Plays a sound by name, for a mod that named one the engine has no member for.
         ///
-        /// TERRAIN's splashes are the case this exists for: the file says which lump to play, and
+        /// TERRAIN's splashes are the case this exists for: the file says which sound to play, and
         /// there is no <see cref="Sfx"/> that means "whatever this terrain said".
         /// </summary>
-        public void StartSound(Mobj mobj, string lumpName, SfxType type, int volume)
+        public void StartSound(Mobj mobj, string soundName, SfxType type, int volume)
         {
-            options.Sound.StartSound(mobj, lumpName, type, volume);
+            options.Sound.StartSound(mobj, soundName, type, volume);
         }
 
         public void StopSound(Mobj mobj)

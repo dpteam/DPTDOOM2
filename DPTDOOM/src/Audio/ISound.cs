@@ -28,17 +28,20 @@ namespace DPTDOOM.Audio
         public void StartSound(Mobj mobj, Sfx sfx, SfxType type, int volume);
 
         /// <summary>
-        /// Plays a lump by name, rather than one of the engine's own sounds.
+        /// Plays a sound by name, rather than one of the engine's own.
         ///
-        /// The engine's sounds are an enumeration because the game chooses them by meaning: a
-        /// door opening is <c>Sfx.DOROPN</c>, and SNDINFO only decides which lump that is. A mod
-        /// can go further and name a lump the engine has never heard of - a splash from TERRAIN,
-        /// say - and there is no enumeration member for that. This is the way in.
+        /// The engine's sounds are an enumeration because the game chooses them by meaning: a door
+        /// opening is <c>Sfx.DOROPN</c>, and SNDINFO only decides which lump that is. A mod can go
+        /// further and name a sound the engine has never heard of - a splash named in TERRAIN, or
+        /// an actor's own sound from DECORATE - and there is no enumeration member for that. This
+        /// is the way in.
         ///
-        /// The name is a WAD lump, already resolved: SNDINFO is not consulted, because a caller
-        /// that has a lump name has already decided what it wants to hear.
+        /// The name is a **sound name**: SNDINFO decides what it means, including the several
+        /// recordings <c>$random</c> can give it. Only when SNDINFO says nothing about the name is
+        /// it taken to be a lump. That order is why the same call serves both "the mod defined
+        /// this name" and "the mod wrote a DS-prefixed lump".
         /// </summary>
-        public void StartSound(Mobj mobj, string lumpName, SfxType type, int volume);
+        public void StartSound(Mobj mobj, string soundName, SfxType type, int volume);
         public void StopSound(Mobj mobj);
         public void Reset();
         public void Pause();
