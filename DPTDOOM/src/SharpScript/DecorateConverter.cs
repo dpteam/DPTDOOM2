@@ -93,6 +93,17 @@ namespace DPTDOOM.Scripting
         public int Tics;
         public string Action;
         public int Line;
+
+        /// <summary>
+        /// The label an <c>A_Jump</c> leaves for, or null.
+        ///
+        /// Kept apart from <see cref="Action"/> because a jump is not an action this engine has -
+        /// it is a property of the state's transition, which is exactly how DECORATE means it.
+        /// </summary>
+        public string JumpLabel;
+
+        /// <summary>Chance of the jump, out of 256.</summary>
+        public int JumpChance = 256;
     }
 
     /// <summary>
@@ -255,7 +266,8 @@ namespace DPTDOOM.Scripting
                                  "engine's own states");
                 }
 
-                if (actor.Numbers.Count == 0 && actor.Flags.Count == 0 && actor.Sounds.Count == 0)
+                if (actor.Numbers.Count == 0 && actor.Flags.Count == 0 && actor.Sounds.Count == 0 &&
+                    actor.Chains.Count == 0)
                 {
                     // Nothing to say, so nothing is emitted. An empty patch would still be
                     // an entry in the report and would look like work.
@@ -451,7 +463,8 @@ namespace DPTDOOM.Scripting
                         if (!DoomInfo.TryGetAction(frame.Action, out action))
                         {
                             // Named with the actions that exist, because the useful answer to
-                            // "A_Jump" is not "no" but "not here, and here is what there is".
+                            // "this action is missing" is not "no" but "not here, and here is
+                            // what there is".
                             problems.Add(actor.Name + " line " + frame.Line + ": no such action '" +
                                          frame.Action + "'; this frame's action is dropped. " +
                                          "This engine has: " +
@@ -465,7 +478,26 @@ namespace DPTDOOM.Scripting
                           .Append(frame.Letter).Append("\", ")
                           .Append(frame.Tics.ToString(CultureInfo.InvariantCulture)).Append(", \"")
                           .Append(frame.Action).Append("\", \"")
-                          .Append(next).Append("\");\n");
+                          .Append(next).Append("\"");
+
+                    if (frame.JumpLabel != null)
+                    {
+                        // The jump is a state argument, not an action: what the frame does instead
+                        // of continuing is a property of the transition.
+                        //
+                        // The target is this actor's own chain when it has one, and otherwise the
+                        // name as written - which the script layer resolves as an engine state, the
+                        // same way a "Goto See" does.
+                        var jumpTo = HasChain(actor, frame.JumpLabel)
+                            ? FrameName(frame.JumpLabel, 1)
+                            : frame.JumpLabel;
+
+                        script.Append(", \"")
+                              .Append(jumpTo).Append("\", ")
+                              .Append(frame.JumpChance.ToString(CultureInfo.InvariantCulture));
+                    }
+
+                    script.Append(");\n");
                 }
 
                 var property = StatePropertyFor(chain.Label);
@@ -481,6 +513,20 @@ namespace DPTDOOM.Scripting
         private static string FrameName(string label, int index)
         {
             return label + "#" + index.ToString(CultureInfo.InvariantCulture);
+        }
+
+        /// <summary>True when this actor describes a chain with that label.</summary>
+        private static bool HasChain(DecorateActor actor, string label)
+        {
+            foreach (var chain in actor.Chains)
+            {
+                if (string.Equals(chain.Label, label, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         /// <summary>
@@ -922,6 +968,12 @@ namespace DPTDOOM.Scripting
                 text = text.Substring(0, text.Length - 1);
             }
 
+            // Where this line's frames begin. Everything below applies to *these* frames only: a
+            // chain accumulates, and setting the tics or the action on every frame so far is how
+            // "TROO A 4 A_Look" followed by "TROO B 4 A_Chase" ended up with two A_Chases - a bug
+            // that stayed hidden until a chain with two actions in it was read.
+            var firstFrame = chain.Frames.Count;
+
             foreach (var letter in text)
             {
                 // Every letter in the run is its own frame, sharing the tics and action that
@@ -955,9 +1007,9 @@ namespace DPTDOOM.Scripting
             {
                 last.Tics = next.Number;
 
-                foreach (var frame in chain.Frames)
+                for (var i = firstFrame; i < chain.Frames.Count; i++)
                 {
-                    frame.Tics = next.Number;
+                    chain.Frames[i].Tics = next.Number;
                 }
 
                 next = reader.Next(ref line);
@@ -970,9 +1022,9 @@ namespace DPTDOOM.Scripting
 
             if (string.Equals(next.Text, "Bright", StringComparison.OrdinalIgnoreCase))
             {
-                foreach (var frame in chain.Frames)
+                for (var i = firstFrame; i < chain.Frames.Count; i++)
                 {
-                    frame.Letter = "+" + frame.Letter.TrimStart('+');
+                    chain.Frames[i].Letter = "+" + chain.Frames[i].Letter.TrimStart('+');
                 }
 
                 next = reader.Next(ref line);
@@ -985,9 +1037,24 @@ namespace DPTDOOM.Scripting
 
             if (IsActionName(next.Text))
             {
-                foreach (var frame in chain.Frames)
+                for (var i = firstFrame; i < chain.Frames.Count; i++)
                 {
-                    frame.Action = next.Text;
+                    chain.Frames[i].Action = next.Text;
+                }
+
+                last = chain.Frames[chain.Frames.Count - 1];
+
+                ReadActionArguments(reader, ref line, actor, last, problems);
+
+                if (last.JumpLabel != null)
+                {
+                    // A letter run shares one action, so the jump belongs to the last frame of the
+                    // run and the others must not keep "A_Jump" as an action name - the engine has
+                    // no action by that name, and they would each be reported.
+                    for (var i = firstFrame; i < chain.Frames.Count; i++)
+                    {
+                        chain.Frames[i].Action = "";
+                    }
                 }
             }
             else
@@ -996,6 +1063,101 @@ namespace DPTDOOM.Scripting
                 // sprite of the following frame. It goes back.
                 reader.PushBack(next, ref line);
             }
+        }
+
+        /// <summary>
+        /// Reads the parenthesised arguments after an action, and decides what they mean.
+        ///
+        /// Only <c>A_Jump</c> is honoured, because it is the one action whose arguments change what
+        /// the frame does rather than how: it names another state to leave for. Everything else this
+        /// engine can do takes no arguments, so a list after those is reported and dropped, frame
+        /// and action intact - which is the difference between a mod that animates wrongly and one
+        /// that does not animate at all.
+        /// </summary>
+        private static void ReadActionArguments(Reader reader, ref int line, DecorateActor actor,
+                                                StateFrame frame, IList<string> problems)
+        {
+            var open = reader.Next(ref line);
+
+            if (open == null)
+            {
+                return;
+            }
+
+            if (open.Text != "(")
+            {
+                reader.PushBack(open, ref line);
+                return;
+            }
+
+            var arguments = new List<Token>();
+
+            while (true)
+            {
+                var token = reader.Next(ref line);
+
+                if (token == null)
+                {
+                    problems.Add(actor.Name + " line " + frame.Line +
+                                 ": the argument list of '" + frame.Action + "' is not closed");
+                    return;
+                }
+
+                if (token.Text == ")")
+                {
+                    break;
+                }
+
+                if (token.Text != ",")
+                {
+                    arguments.Add(token);
+                }
+            }
+
+            var isJump = string.Equals(frame.Action, "A_Jump", StringComparison.OrdinalIgnoreCase);
+
+            if (!isJump)
+            {
+                problems.Add(actor.Name + " line " + frame.Line + ": '" + frame.Action +
+                             "' takes no arguments in this engine, so they are ignored; " +
+                             "the action itself still runs");
+                return;
+            }
+
+            // A_Jump(chance, "Label"). The chance is out of 256, as DECORATE writes it.
+            if (arguments.Count != 2)
+            {
+                problems.Add(actor.Name + " line " + frame.Line + ": 'A_Jump' needs a chance and a " +
+                             "label, so the jump is dropped");
+                frame.Action = "";
+                return;
+            }
+
+            if (!arguments[0].IsNumber)
+            {
+                problems.Add(actor.Name + " line " + frame.Line + ": 'A_Jump' needs a whole chance " +
+                             "such as 128, found '" + arguments[0].Text + "'; the jump is dropped");
+                frame.Action = "";
+                return;
+            }
+
+            var chance = arguments[0].Number;
+
+            // A relative offset is legal DECORATE ("skip two frames") and is deliberately not
+            // guessed at: the number counts states, not frames of this chain, and a wrong guess
+            // would move the actor to a frame the author never meant.
+            if (arguments[1].IsNumber)
+            {
+                problems.Add(actor.Name + " line " + frame.Line + ": 'A_Jump' by a frame count (" +
+                             arguments[1].Text + ") is not supported; name the label instead. " +
+                             "The jump is dropped");
+                frame.Action = "";
+                return;
+            }
+
+            frame.JumpLabel = arguments[1].Text;
+            frame.JumpChance = chance < 0 ? 0 : (chance > 256 ? 256 : chance);
+            frame.Action = "";
         }
 
 
@@ -1182,7 +1344,7 @@ namespace DPTDOOM.Scripting
 
                 var c = text[position];
 
-                if (c == '{' || c == '}' || c == ':')
+                if (c == '{' || c == '}' || c == ':' || c == '(' || c == ')' || c == ',')
                 {
                     position++;
                     token.Text = c.ToString();
@@ -1343,7 +1505,12 @@ namespace DPTDOOM.Scripting
 
             private static bool IsSeparator(char c)
             {
-                return char.IsWhiteSpace(c) || c == '{' || c == '}' || c == ':' || c == '"';
+                // Parentheses and the comma are separators so that `A_Jump(128, "See")` reads as
+                // an action name and its arguments rather than as one long word. Nothing else in
+                // DECORATE uses them outside a quoted string, and a quoted string is handled
+                // before this is consulted.
+                return char.IsWhiteSpace(c) || c == '{' || c == '}' || c == ':' || c == '"' ||
+                       c == '(' || c == ')' || c == ',';
             }
 
             private static bool IsDigitOrDot(char c)

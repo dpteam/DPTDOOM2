@@ -135,6 +135,15 @@ namespace DPTDOOM
         private MobjFlags flags;
         private int health;
 
+        /// <summary>
+        /// State an action asked to jump to, or -1.
+        ///
+        /// A field rather than a return value because the action's signature is shared with the
+        /// engine's own fifty actions, and changing it would touch every one of them for the sake
+        /// of the two that jump.
+        /// </summary>
+        private int requestedState = -1;
+
         // Movement direction, movement generation (zig-zagging).
         private Direction moveDir;
         private int moveCount; // When 0, select a new dir.
@@ -261,16 +270,41 @@ namespace DPTDOOM
 
         public bool SetState(MobjState state)
         {
-            do
+            return SetState(DoomInfo.States[(int)state], state == MobjState.Null);
+        }
+
+        /// <summary>
+        /// Moves to a state by number, which is how a mod's own frames are reached.
+        ///
+        /// The enum has no member for a state a script created, so a jump cannot go through
+        /// <see cref="MobjState"/>. A negative number does nothing, so a jump whose target could
+        /// not be resolved at load time cannot put the actor into a state that does not exist.
+        /// </summary>
+        public bool SetStateNumber(int number)
+        {
+            if (number < 0 || number >= DoomInfo.States.Length)
             {
-                if (state == MobjState.Null)
+                return false;
+            }
+
+            return SetState(DoomInfo.States[number], number == 0);
+        }
+
+        private bool SetState(MobjStateDef st, bool isNull)
+        {
+            // A while-true loop rather than do/while, and that is not style: `continue` inside a
+            // do/while jumps to the *condition*, so a jump that resolved to a state with tics left
+            // left the actor on the old one. The first version of this did exactly that, and the
+            // jump silently did nothing.
+            while (true)
+            {
+                if (isNull)
                 {
                     this.state = DoomInfo.States[(int)MobjState.Null];
                     world.ThingAllocation.RemoveMobj(this);
                     return false;
                 }
 
-                var st = DoomInfo.States[(int)state];
                 this.state = st;
                 tics = GetTics(st);
                 sprite = st.Sprite;
@@ -280,14 +314,68 @@ namespace DPTDOOM
                 // Call action functions when the state is set.
                 if (st.MobjAction != null)
                 {
+                    // A jump is a *redirect*: the action asks for a different next state, and this
+                    // loop carries on from there rather than the action recursing into SetState.
+                    // Recursion would run the target's action on top of this one, and a chain of
+                    // jumps would nest as deep as the chain is long.
+                    requestedState = -1;
+
                     st.MobjAction(world, this);
+
+                    if (requestedState >= 0)
+                    {
+                        if (requestedState >= DoomInfo.States.Length)
+                        {
+                            // A target outside the table: leave the actor where the action left it
+                            // rather than throwing in the middle of a tic.
+                            requestedState = -1;
+                        }
+                        else
+                        {
+                            st = DoomInfo.States[requestedState];
+                            isNull = requestedState == 0;
+                            requestedState = -1;
+                            continue;
+                        }
+                    }
                 }
 
-                state = st.Next;
-            }
-            while (tics == 0);
+                // A DECORATE jump: instead of continuing to Next, the frame may leave for another
+                // state, on a chance out of 256. The draw is the WORLD generator's, and it must
+                // be: every end of a session runs the same mod, so the same number of draws is
+                // what keeps their worlds together. This is simulation, not presentation.
+                if (st.JumpTarget >= 0 && st.JumpTarget < DoomInfo.States.Length &&
+                    world.Random.Next() < st.JumpChance)
+                {
+                    var target = st.JumpTarget;
 
-            return true;
+                    st = DoomInfo.States[target];
+                    isNull = target == 0;
+                    continue;
+                }
+
+                st = DoomInfo.States[(int)st.Next];
+                isNull = st.Next == MobjState.Null;
+
+                // A state with tics runs for that many, so the transition stops here. Zero means
+                // "no time at all", which is how Doom's own state tables express a frame that only
+                // exists to run its action - so the walk continues.
+                if (tics != 0)
+                {
+                    return true;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Asks the current transition to continue at another state instead of the next one.
+        ///
+        /// Called from an action. The request is consumed by <see cref="SetState(MobjStateDef,bool)"/>
+        /// after the action returns, so an action that does not jump costs one assignment.
+        /// </summary>
+        public void JumpToState(int number)
+        {
+            requestedState = number;
         }
 
         private int GetTics(MobjStateDef state)

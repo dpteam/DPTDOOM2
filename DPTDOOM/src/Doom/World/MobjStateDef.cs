@@ -31,6 +31,19 @@ namespace DPTDOOM
         private int misc1;
         private int misc2;
 
+        /// <summary>
+        /// State to jump to instead of <see cref="Next"/>, or -1 for none.
+        ///
+        /// A property of the state rather than an action, because that is what DECORATE's A_Jump
+        /// means: the frame's action is "leave this frame for that one", and the leaving is the
+        /// transition this class already describes. Making it an action would need the action
+        /// signature to carry arguments, which would touch all fifty of the engine's own.
+        /// </summary>
+        private int jumpTarget = -1;
+
+        /// <summary>How likely the jump is, as one chance in 256.</summary>
+        private int jumpChance;
+
         public MobjStateDef(
             int number,
             Sprite sprite,
@@ -105,6 +118,20 @@ namespace DPTDOOM
         {
             get => misc2;
             set => misc2 = value;
+        }
+
+        /// <summary>State to jump to instead of <see cref="Next"/>, or -1 for none.</summary>
+        public int JumpTarget
+        {
+            get => jumpTarget;
+            set => jumpTarget = value;
+        }
+
+        /// <summary>How likely the jump is, as one chance in 256.</summary>
+        public int JumpChance
+        {
+            get => jumpChance;
+            set => jumpChance = value;
         }
     }
 }

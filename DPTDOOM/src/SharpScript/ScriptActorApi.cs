@@ -74,6 +74,12 @@ namespace DPTDOOM.Scripting
         {
             public int Number;
             public string NextName;
+
+            /// <summary>Jump target by name, or null. Resolved with the successor.</summary>
+            public string JumpName;
+
+            /// <summary>Chance out of 256; 256 means always.</summary>
+            public int JumpChance;
         }
 
         /// <summary>
@@ -101,7 +107,7 @@ namespace DPTDOOM.Scripting
         /// </summary>
         private void RegisterStates(ScriptHost host)
         {
-            host.Register("State", 5, 6, call =>
+            host.Register("State", 5, 8, call =>
             {
                 var name = call.AsText(0);
 
@@ -168,6 +174,15 @@ namespace DPTDOOM.Scripting
                 var link = new PendingLink();
                 link.Number = number;
                 link.NextName = nextName;
+
+                // Optional 7th and 8th arguments: a jump target and its chance out of 256. Absent
+                // means "no jump", which is what every frame without A_Jump gets.
+                if (call.Count > 6)
+                {
+                    link.JumpName = call.AsText(6);
+                    link.JumpChance = call.Count > 7 ? call.AsInt(7) : 256;
+                }
+
                 pendingLinks.Add(link);
 
                 return ScriptValue.FromInt(number);
@@ -185,36 +200,71 @@ namespace DPTDOOM.Scripting
         {
             foreach (var link in pendingLinks)
             {
-                if (string.IsNullOrEmpty(link.NextName))
+                if (!string.IsNullOrEmpty(link.NextName))
                 {
-                    continue;
+                    int next;
+
+                    if (ResolveState(link.NextName, out next))
+                    {
+                        DoomInfo.SetStateNext(link.Number, (MobjState)next);
+                    }
+                    else
+                    {
+                        problems.Add(source + ": the state '" + NameOf(link.Number) +
+                                     "' continues to '" + link.NextName +
+                                     "', which is neither a state of this actor nor an engine state; " +
+                                     "the actor stops there");
+                    }
                 }
 
-                int next;
-
-                if (customStates.TryGetValue(link.NextName, out next))
+                if (!string.IsNullOrEmpty(link.JumpName))
                 {
-                    DoomInfo.SetStateNext(link.Number, (MobjState)next);
-                    continue;
+                    int target;
+
+                    if (ResolveState(link.JumpName, out target))
+                    {
+                        DoomInfo.SetStateJump(link.Number, target, link.JumpChance);
+                    }
+                    else
+                    {
+                        // The frame is kept without its jump rather than dropped: the animation is
+                        // still what the author wrote, and only the jump is missing.
+                        problems.Add(source + ": the state '" + NameOf(link.Number) +
+                                     "' jumps to '" + link.JumpName +
+                                     "', which is neither a state of this actor nor an engine state; " +
+                                     "the jump is dropped");
+                    }
                 }
-
-                // A name that is not one of this actor's own may still be a vanilla state,
-                // which is how "Goto See" reaches the engine's own state from a mod's chain.
-                MobjState engineState;
-
-                if (TryParseState(link.NextName, out engineState))
-                {
-                    DoomInfo.SetStateNext(link.Number, engineState);
-                    continue;
-                }
-
-                problems.Add(source + ": the state '" + NameOf(link.Number) +
-                             "' continues to '" + link.NextName +
-                             "', which is neither a state of this actor nor an engine state; " +
-                             "the actor stops there");
             }
 
             pendingLinks.Clear();
+        }
+
+        /// <summary>
+        /// A state name as a number: this actor's own first, then the engine's.
+        ///
+        /// The order matters. A mod that calls its own chain "See" must jump to its own, not to the
+        /// engine's, or the whole point of replacing a chain would be lost.
+        /// </summary>
+        private bool ResolveState(string name, out int number)
+        {
+            if (customStates.TryGetValue(name, out number))
+            {
+                return true;
+            }
+
+            // A name that is not one of this actor's own may still be a vanilla state, which is
+            // how "Goto See" reaches the engine's own state from a mod's chain.
+            MobjState engineState;
+
+            if (TryParseState(name, out engineState))
+            {
+                number = (int)engineState;
+                return true;
+            }
+
+            number = -1;
+            return false;
         }
 
         private string NameOf(int number)

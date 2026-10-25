@@ -156,6 +156,27 @@ namespace DPTDOOM
         }
 
         /// <summary>
+        /// Gives a state a jump: leave for <paramref name="target"/> on a chance out of 256.
+        ///
+        /// Separate from the successor for the same reason the successor is separate: the target is
+        /// a name that may not exist yet when the frame is created, so the link is made once every
+        /// chain has been read.
+        /// </summary>
+        public static bool SetStateJump(int number, int target, int chance)
+        {
+            var table = States;
+
+            if (number < CustomStateFirst || number >= table.Length)
+            {
+                return false;
+            }
+
+            table[number].JumpTarget = target;
+            table[number].JumpChance = chance < 0 ? 0 : (chance > 256 ? 256 : chance);
+            return true;
+        }
+
+        /// <summary>
         /// Action names by the spelling mods use, with the <c>A_</c> prefix.
         ///
         /// Built by reflection over <see cref="MobjActions"/> because every method there is

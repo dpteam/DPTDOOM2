@@ -257,6 +257,75 @@ ACTOR SoundImp 3001
     Assert-True ((State-Of $soundLog) -eq $plainState) `
         "and naming sounds did not move the world ($plainState vs $(State-Of $soundLog))"
 
+    Write-Host "With an A_Jump this engine can take"
+    $jumpWith = Join-Path $work "jump.dec"
+    $jumpWithout = Join-Path $work "nojump.dec"
+
+    # Two files that differ in exactly one thing: whether the second Spawn frame jumps. Comparing
+    # them is what makes the check mean something - comparing against vanilla would only prove
+    # that replacing a chain changes the world, which it does with or without a jump.
+    [System.IO.File]::WriteAllText($jumpWith, @"
+ACTOR JumpingImp 3001
+{
+  States
+  {
+  Spawn:
+    TROO A 4 A_Look
+    TROO B 4 A_Jump(256, "See")
+  See:
+    TROO C 4 A_Chase
+    Goto See
+  }
+}
+"@)
+
+    [System.IO.File]::WriteAllText($jumpWithout, @"
+ACTOR JumpingImp 3001
+{
+  States
+  {
+  Spawn:
+    TROO A 4 A_Look
+    TROO B 4
+  See:
+    TROO C 4 A_Chase
+    Goto See
+  }
+}
+"@)
+
+    $jumpLog = Run-Game "jump" @('-decorate', $jumpWith)
+    $noJumpLog = Run-Game "nojump" @('-decorate', $jumpWithout)
+
+    Assert-True ($jumpLog -like "*scripts: OK*") "the converted script loaded"
+    Assert-True ($jumpLog -notlike "*no such action*") "A_Jump is no longer a missing action"
+    Assert-True ($jumpLog -like "*map MAP01: OK*") "the level loads"
+    Assert-True ($noJumpLog -like "*map MAP01: OK*") "and so does the same file without the jump"
+
+    Assert-True ((State-Of $jumpLog) -ne (State-Of $noJumpLog)) `
+        ("the jump moved the world: with $(State-Of $jumpLog), without $(State-Of $noJumpLog)")
+
+    Write-Host "With an A_Jump by frame count"
+    $jumpByCount = Join-Path $work "jumpcount.dec"
+
+    [System.IO.File]::WriteAllText($jumpByCount, @"
+ACTOR CountingImp 3001
+{
+  States
+  {
+  See:
+    TROO A 4 A_Jump(128, 2)
+    TROO B 4
+    Loop
+  }
+}
+"@)
+
+    $countLog = Run-Game "jumpcount" @('-decorate', $jumpByCount)
+
+    Assert-True ($countLog -like "*frame count*") "a jump by frame count is named"
+    Assert-True ($countLog -like "*map MAP01: OK*") "and the level still loads"
+
     Write-Host "With a truncated file"
     $cutLog = Run-Game "cut" @('-decorate', $truncated)
 
