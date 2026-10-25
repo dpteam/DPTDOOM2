@@ -53,32 +53,20 @@ namespace DPTDOOM.Scripting
             RegisterActorFunctions(host);
         }
 
-        /// <summary>The function this condition calls, for a report.</summary>
-        public string Function
-        {
-            get { return function; }
-        }
-
-        /// <summary>Reports the failures this condition has hit, and clears the flag.</summary>
-        public bool TakeReport()
-        {
-            if (!reported)
-            {
-                return false;
-            }
-
-            reported = false;
-            return true;
-        }
-
         /// <summary>
-        /// Asks the question. Never throws: a condition that fails is false.
+        /// Asks the question. Never throws: a condition that fails is false, and the failure is
+        /// said out loud once.
         ///
         /// Throwing here would abort the tic in the middle of a state transition, with the actor
         /// half moved - the worst place in the engine for an exception, because the world would then
         /// be neither in the old state nor the new one and lockstep would have nothing to agree on.
         /// A false answer leaves the actor where the frame's successor says, which is a visible
         /// behaviour rather than a corrupted world.
+        ///
+        /// Saying it out loud matters as much as not throwing. A condition that silently answers
+        /// false for ever looks like a mod whose jump never fires, and the modder has no way to tell
+        /// that from a condition that is simply never true. One line, once, names the function and
+        /// the file.
         /// </summary>
         public bool Evaluate(World world, Mobj mobj)
         {
@@ -91,18 +79,37 @@ namespace DPTDOOM.Scripting
 
                 return value.AsBool();
             }
-            catch (ScriptException)
+            catch (ScriptException e)
             {
-                // A mistake in the mod's own expression. Reported once by the caller, which knows
-                // which frame it was on.
-                reported = true;
+                Report(e.Message);
                 return false;
             }
-            catch (Exception)
+            catch (Exception e)
             {
-                reported = true;
+                Report(e.Message);
                 return false;
             }
+        }
+
+        /// <summary>
+        /// Tells the player, once per condition, which is the most a broken script can get.
+        ///
+        /// A warning rather than a load-report entry, because this happens during play: the load
+        /// report was printed before the first tic, and a condition is only asked when a frame ends.
+        /// Once, because the same condition is asked several times a second per actor and a
+        /// repeated warning is a warning nobody reads.
+        /// </summary>
+        private void Report(string message)
+        {
+            if (reported)
+            {
+                return;
+            }
+
+            reported = true;
+
+            ConsoleUi.Warn("condition '" + function + "' in " + source + " failed: " + message +
+                           "; it now answers false");
         }
 
         /// <summary>

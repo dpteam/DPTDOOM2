@@ -237,5 +237,70 @@ namespace DPTDOOMTest.CompatibilityTests
             StringAssert.Contains(script, "State(\"See#1\"");
             Assert.IsFalse(script.Contains("Cond_BadCond"), "no condition function was written");
         }
+        [TestMethod]
+        public void ABrokenConditionAnswersFalseInsteadOfThrowing()
+        {
+            // The worst place in the engine for an exception is the middle of a state transition:
+            // the actor is neither in the old state nor the new one, and lockstep has nothing to
+            // agree on. So a condition that fails answers false, and the tic finishes.
+            using (var content = GameContent.CreateDummy(WadPath.Doom2))
+            {
+                var library = new ScriptLibrary();
+
+                // Fail() is the script language's own way to raise an error, which makes this the
+                // realistic case: a mod's condition that calls something with a bad argument.
+                library.Add(
+                    "fn Thing_3001() {\n" +
+                    "    State(\"See#1\", \"TROO\", \"A\", 4, \"\", \"See#1\", \"See#2\", 0, \"Ask\");\n" +
+                    "    State(\"See#2\", \"TROO\", \"B\", 4, \"\", \"See#1\");\n" +
+                    "    SeeState(\"See#1\");\n" +
+                    "}\n" +
+                    "fn Ask() {\n" +
+                    "    Fail(\"this condition is broken\");\n" +
+                    "    return 1;\n" +
+                    "}\n", "test", DoomInfo.MobjInfos);
+
+                library.ApplyTo(DoomInfo.MobjInfos);
+
+                Assert.AreEqual(0, library.Problems.Count,
+                    string.Join("; ", new List<string>(library.Problems).ToArray()));
+
+                var game = NewGame(content, out var cmds);
+                var world = game.World;
+
+                Mobj imp = null;
+
+                foreach (var thinker in world.Thinkers)
+                {
+                    var mobj = thinker as Mobj;
+
+                    if (mobj != null && mobj.Type == MobjType.Troop)
+                    {
+                        imp = mobj;
+                        break;
+                    }
+                }
+
+                Assert.IsNotNull(imp, "MAP01 has an imp");
+
+                var start = DoomInfo.MobjInfos[(int)MobjType.Troop].SeeState;
+                var target = DoomInfo.States[(int)start].JumpTarget;
+
+                imp.ThinkerState = ThinkerState.Active;
+                imp.SetState(start);
+
+                // Twenty tics: enough for the frame to end several times. The point is that this
+                // does not throw, and that the actor stays on the first frame because the answer is
+                // false.
+                for (var tic = 0; tic < 20; tic++)
+                {
+                    game.Update(cmds);
+                }
+
+                Assert.AreEqual((int)start, imp.State.Number,
+                    "the question failed, so the frame loops rather than jumping");
+                Assert.AreNotEqual(target, imp.State.Number);
+            }
+        }
     }
 }
