@@ -94,7 +94,7 @@ namespace DPTDOOM.Net
         void SendChat(string text);
 
         /// <summary>Takes one received chat line, if any is waiting.</summary>
-        bool TryTakeChat(out string text);
+        bool TryTakeChat(out NetChatMessage message);
     }
 
     public sealed class NetDriver : INetDriver
@@ -460,9 +460,9 @@ namespace DPTDOOM.Net
             session.SendChat(session.LocalPlayer, text);
         }
 
-        public bool TryTakeChat(out string text)
+        public bool TryTakeChat(out NetChatMessage message)
         {
-            return session.TryTakeChat(out text);
+            return session.TryTakeChat(out message);
         }
         public bool Faulted => session.Faulted;
         public string FaultReason => session.FaultReason;

@@ -24,7 +24,7 @@ namespace DPTDOOMTest.UnitTests
     {
         private const int Port = 5351;
 
-        private static bool WaitFor(NetSession session, TimeSpan timeout, out string text)
+        private static bool WaitFor(NetSession session, TimeSpan timeout, out DPTDOOM.NetChatMessage text)
         {
             var watch = Stopwatch.StartNew();
 
@@ -38,7 +38,7 @@ namespace DPTDOOMTest.UnitTests
                 Thread.Sleep(20);
             }
 
-            text = null;
+            text = default(DPTDOOM.NetChatMessage);
             return false;
         }
 
@@ -62,10 +62,11 @@ namespace DPTDOOMTest.UnitTests
 
                     guest.SendChat(guest.LocalPlayer, "hello host");
 
-                    string text;
+                    DPTDOOM.NetChatMessage text;
                     Assert.IsTrue(WaitFor(host, TimeSpan.FromSeconds(5), out text),
                         "the host received the guest's message");
-                    Assert.AreEqual("guestname: hello host", text);
+                    Assert.AreEqual("guestname", text.Name);
+                    Assert.AreEqual("hello host", text.Text);
                 }
             }
         }
@@ -86,10 +87,11 @@ namespace DPTDOOMTest.UnitTests
 
                     host.SendChat(0, "hello guest");
 
-                    string text;
+                    DPTDOOM.NetChatMessage text;
                     Assert.IsTrue(WaitFor(guest, TimeSpan.FromSeconds(5), out text),
                         "the guest received the host's message");
-                    Assert.AreEqual("hostname: hello guest", text);
+                    Assert.AreEqual("hostname", text.Name);
+                    Assert.AreEqual("hello guest", text.Text);
                 }
             }
         }
@@ -114,7 +116,7 @@ namespace DPTDOOMTest.UnitTests
                     host.SendChat(0, "only once");
                     Thread.Sleep(400);
 
-                    string text;
+                    DPTDOOM.NetChatMessage text;
                     Assert.IsFalse(host.TryTakeChat(out text),
                         "the host must not receive its own message back");
                 }
@@ -151,10 +153,11 @@ namespace DPTDOOMTest.UnitTests
 
                         first.SendChat(first.LocalPlayer, "to the others");
 
-                        string text;
+                        DPTDOOM.NetChatMessage text;
                         Assert.IsTrue(WaitFor(second, TimeSpan.FromSeconds(5), out text),
                             "the second guest received a message from the first");
-                        Assert.AreEqual("first: to the others", text);
+                        Assert.AreEqual("first", text.Name);
+                        Assert.AreEqual("to the others", text.Text);
                     }
                 }
             }
@@ -176,12 +179,12 @@ namespace DPTDOOMTest.UnitTests
 
                     guest.SendChat(guest.LocalPlayer, new string('x', 500));
 
-                    string text;
+                    DPTDOOM.NetChatMessage text;
                     Assert.IsTrue(WaitFor(host, TimeSpan.FromSeconds(5), out text),
                         "an overlong message still arrives");
 
-                    // "guestname: " plus at most Chat.MaxLength characters.
-                    Assert.IsTrue(text.Length <= "guestname: ".Length + DPTDOOM.Chat.MaxLength,
+                    // The name plus at most Chat.MaxLength characters of text.
+                    Assert.IsTrue(text.Text.Length <= DPTDOOM.Chat.MaxLength,
                         "the message was truncated to the framing limit, not forwarded whole");
                 }
             }

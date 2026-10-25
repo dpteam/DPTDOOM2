@@ -64,6 +64,15 @@ namespace DPTDOOM
         private readonly Chat chat = new Chat();
 
         /// <summary>
+        /// The last few chat lines, with their own timers.
+        ///
+        /// Kept apart from the message line on purpose: a pickup message overwrites the message
+        /// line, and a chat message must survive a medikit. Client-side state, like the input
+        /// above: nothing here is in a tic, a demo or the world hash.
+        /// </summary>
+        private readonly ChatLog chatLog = new ChatLog();
+
+        /// <summary>
         /// The drop-down console, opened with the key above Tab.
         ///
         /// Like the chat, it is not game state: a console that could change the
@@ -120,6 +129,15 @@ namespace DPTDOOM
         /// the rest of the input. Internal: it is not part of what the game offers.
         /// </summary>
         internal Chat ChatInput => chat;
+
+        /// <summary>
+        /// The chat log, exposed so the renderer can draw it.
+        ///
+        /// Public rather than internal because the renderer lives in another assembly and has no
+        /// other way to learn about the lines. It is read-only in practice: nothing outside the game
+        /// adds to it except a received message.
+        /// </summary>
+        public ChatLog ChatLines => chatLog;
 
         /// <summary>The command table, for tests and for the Windows menu.</summary>
         public ConsoleCommands ConsoleCommands => commands;
@@ -1021,51 +1039,42 @@ namespace DPTDOOM
 
             netDriver.SendChat(text);
 
-            ShowChat("You: " + text);
+            ShowChat("You", text);
         }
 
         /// <summary>
-        /// Displays a chat line the way a pickup message appears.
+        /// Adds a chat line to the log the player can still read a few seconds later.
         ///
-        /// Reusing the message line rather than adding a new HUD element is the
-        /// smallest change that is still readable, and it inherits the existing
-        /// font, scaling and positioning - which is the part that would otherwise
-        /// have to be written and tested from scratch.
+        /// It used to go through the pickup message line, which has two consequences the owner
+        /// would have noticed: the next "picked up a medikit" erased the message, and after eight
+        /// seconds there was no sign a message had ever arrived. A conversation needs both of those
+        /// fixed, so chat has a log of its own and the message line goes back to being about pickups.
         /// </summary>
-        private void ShowChat(string text)
+        private void ShowChat(string name, string text)
         {
-            if (game == null || game.World == null)
-            {
-                return;
-            }
-
-            var player = game.World.ConsolePlayer;
-
-            player.SendMessage(text);
-
-            // Longer than a pickup message: 4 seconds is enough for a medikit and
-            // too short to read a sentence.
-            player.MessageTime = 8 * GameConst.TicRate;
+            // Not game state, so the log does not care whether a world exists yet - a message that
+            // arrives during the level-start wipe is still a message.
+            chatLog.Add(0, name, text);
         }
 
         private void PumpChat()
         {
-            if (netDriver == null || game == null || game.World == null)
+            if (netDriver == null)
             {
                 return;
             }
 
-            string text;
+            NetChatMessage message;
 
-            while (netDriver.TryTakeChat(out text))
+            while (netDriver.TryTakeChat(out message))
             {
-                ShowChat(text);
+                ShowChat(message.Name, message.Text);
             }
 
-            // Show what is being typed. Doing it here, once per tic, keeps the
-            // message line honest: the alternative is an overlay element that has
-            // to be cleared on every path out of chat mode.
-            if (chat.Active && game.World != null)
+            // Show what is being typed. Doing it here, once per tic, keeps the message line honest:
+            // the alternative is an overlay element that has to be cleared on every path out of chat
+            // mode.
+            if (chat.Active && game != null && game.World != null)
             {
                 var player = game.World.ConsolePlayer;
 
@@ -2159,6 +2168,11 @@ namespace DPTDOOM
                             var netResult = game.Update(cmds);
                             netDriver.Commit();
 
+                            // Aged once per tic, not once per frame: rendering may run several
+                            // times per tic, and ageing there would make a line's lifetime depend
+                            // on the frame rate.
+                            chatLog.Update();
+
                             if (netResult == UpdateResult.NeedWipe)
                             {
                                 StartWipe();
@@ -2196,6 +2210,9 @@ namespace DPTDOOM
                         }
 
                         var gameResult = game.Update(cmds);
+
+                        // Aged once per tic - see the network path above.
+                        chatLog.Update();
 
                         if (botTrace != null)
                         {

@@ -236,7 +236,7 @@ namespace DPTDOOM.Net
         private readonly List<Peer> peers = new List<Peer>();
         private readonly Dictionary<int, Dictionary<int, NetTic>> incoming = new Dictionary<int, Dictionary<int, NetTic>>();
         private readonly List<string> names = new List<string>();
-        private readonly Queue<string> chatIncoming = new Queue<string>();
+        private readonly Queue<NetChatMessage> chatIncoming = new Queue<NetChatMessage>();
 
         /// <summary>
         /// The last commands this machine originated, kept so a resumed peer can
@@ -2819,21 +2819,26 @@ namespace DPTDOOM.Net
         /// <summary>
         /// Takes one received chat line, already formatted as "Name: text".
         ///
-        /// Formatted here rather than by the caller so that both ends show the
+        /// Resolved here rather than by the caller so that both ends show the
         /// same thing: the name comes from the session's own name table, which is
         /// the only place that knows the mapping from a player index to a person.
+        ///
+        /// The name and the text leave separately rather than glued into "name: text".
+        /// A caller that wants to colour the speaker, or place it differently, would
+        /// otherwise have to find the separator again - and a name containing it would
+        /// split in the wrong place.
         /// </summary>
-        public bool TryTakeChat(out string text)
+        public bool TryTakeChat(out NetChatMessage message)
         {
             lock (sync)
             {
                 if (chatIncoming.Count == 0)
                 {
-                    text = null;
+                    message = default(NetChatMessage);
                     return false;
                 }
 
-                text = chatIncoming.Dequeue();
+                message = chatIncoming.Dequeue();
                 return true;
             }
         }
@@ -2864,7 +2869,7 @@ namespace DPTDOOM.Net
             lock (sync)
             {
                 name = player < names.Count ? names[player] : "player " + (player + 1);
-                chatIncoming.Enqueue(name + ": " + body);
+                chatIncoming.Enqueue(new NetChatMessage { Name = name, Text = body });
             }
 
             // The host is the hub: a guest's line has to reach the other guests,

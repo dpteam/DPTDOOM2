@@ -122,7 +122,7 @@ namespace DPTDOOM.Video
             }
             else if (doom.State == DoomState.Game)
             {
-                RenderGame(doom.Game, frameFrac, doom.ViewPitch);
+                RenderGame(doom.Game, frameFrac, doom.ViewPitch, doom.ChatLines);
             }
 
             if (!doom.Menu.Active)
@@ -173,7 +173,7 @@ namespace DPTDOOM.Video
             }
         }
 
-        public void RenderGame(DoomGame game, Fixed frameFrac, Fixed viewPitch)
+        public void RenderGame(DoomGame game, Fixed frameFrac, Fixed viewPitch, ChatLog chatLines = null)
         {
             if (game.Paused)
             {
@@ -222,6 +222,23 @@ namespace DPTDOOM.Video
                     Profile.Add(RenderProfile.Section.Hud, Profile.Stamp() - hudStart);
                 }
 
+                var messageScale = screen.Width / 320;
+                var messageBottom = screen.Height - StatusBarRenderer.Height * messageScale;
+
+                // Chat first, at the top, because it is the thing a player missed while fighting
+                // and needs to be able to look up and read. It has its own log now: a pickup
+                // message used to overwrite the last chat line, and eight seconds was the whole
+                // memory of the conversation.
+                var chatStart = Profile.Stamp();
+
+                var drawnChatLines = ChatLogRenderer.Render(screen,
+                                                           chatLines == null
+                                                               ? null
+                                                               : chatLines.Entries,
+                                                           messageScale, messageBottom);
+
+                Profile.Add(RenderProfile.Section.Hud, Profile.Stamp() - chatStart);
+
                 if (config.video_displaymessage ||
                     consolePlayer.MessageAlwaysShown ||
                     ReferenceEquals(consolePlayer.Message, (string)DoomInfo.Strings.MSGOFF))
@@ -229,18 +246,23 @@ namespace DPTDOOM.Video
                     if (consolePlayer.MessageTime > 0)
                     {
                         var hudStart = Profile.Stamp();
-                        var scale = screen.Width / 320;
 
-                        // Wrapped, because a chat message may be ninety-six characters and the
-                        // screen holds about forty per line. Drawing it as one line silently cut
-                        // the rest off at the right edge.
+                        // Below the chat log, so the two do not sit on top of each other. While
+                        // typing, this line is "Say: ..." and the log above it is the conversation.
+                        var messageY = drawnChatLines > 0
+                            ? (ChatLogRenderer.TopMargin + drawnChatLines * 8 + 2) * messageScale
+                            : 7 * messageScale;
+
+                        // Wrapped, because a message may be ninety-six characters and the screen
+                        // holds about forty per line. Drawing it as one line silently cut the rest
+                        // off at the right edge.
                         //
                         // The bottom is the top of the status bar, not the bottom of the screen.
                         // The bar is drawn before this, so a message long enough to reach it would
                         // be painted on top of the health and ammo - which reads as a rendering
                         // fault rather than as a long message.
-                        screen.DrawTextWrapped(consolePlayer.Message, 0, 7 * scale, scale,
-                                               screen.Height - StatusBarRenderer.Height * scale);
+                        screen.DrawTextWrapped(consolePlayer.Message, 0, messageY, messageScale,
+                                               messageBottom);
 
                         Profile.Add(RenderProfile.Section.Hud, Profile.Stamp() - hudStart);
                     }
