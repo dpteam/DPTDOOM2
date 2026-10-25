@@ -259,6 +259,11 @@ namespace DPTDOOM
             // Do not let the player control movement if not onground.
             onGround = (player.Mobj.Z <= player.Mobj.FloorZ);
 
+            if (cmd.Jump != 0 && onGround)
+            {
+                Jump(player);
+            }
+
             if (cmd.ForwardMove != 0 && onGround)
             {
                 Thrust(player, player.Mobj.Angle, new Fixed(cmd.ForwardMove * 2048));
@@ -276,6 +281,32 @@ namespace DPTDOOM
             }
         }
 
+
+        /// <summary>
+        /// Lifts the player off the floor.
+        ///
+        /// Doom has no jump, so this is the one place where the port adds to the simulation
+        /// rather than reproducing it - and the value is chosen so that it adds as little as
+        /// possible: eight units per tic against the engine's own gravity of one per tic
+        /// gives an apex of about thirty-two units, roughly half a player's height. Enough
+        /// to reach a crate or a low ledge, not enough to leave a map or skip a lift.
+        ///
+        /// Momentum is **set**, not added. On the ground `MomZ` is either zero or the small
+        /// downward push the movement code keeps applying to hold the player down, and
+        /// adding to that would make the jump depend on how long the player had been
+        /// standing still - a difference a demo would faithfully record and a second player
+        /// would never reproduce.
+        ///
+        /// Only from the ground: <see cref="MovePlayer"/> checks `onGround` before calling
+        /// this, which is what stops a held button from climbing through the air.
+        /// </summary>
+        private static void Jump(Player player)
+        {
+            player.Mobj.MomZ = JumpMomentum;
+        }
+
+        /// <summary>Upward momentum of a jump: eight units per tic.</summary>
+        private static readonly Fixed JumpMomentum = Fixed.FromInt(8);
 
         /// <summary>
         /// Calculate the walking / running height adjustment.

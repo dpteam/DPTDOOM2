@@ -104,12 +104,16 @@ namespace DPTDOOM.Net
         public short AngleTurn;
         public byte Buttons;
 
+        /// <summary>Whether the player asked to jump this tic.</summary>
+        public byte Jump;
+
         public void CopyTo(TicCmd cmd)
         {
             cmd.ForwardMove = (sbyte)Forward;
             cmd.SideMove = (sbyte)Side;
             cmd.AngleTurn = AngleTurn;
             cmd.Buttons = Buttons;
+            cmd.Jump = Jump;
         }
 
         public static NetTic From(TicCmd cmd)
@@ -119,7 +123,8 @@ namespace DPTDOOM.Net
                 Forward = (byte)cmd.ForwardMove,
                 Side = (byte)cmd.SideMove,
                 AngleTurn = cmd.AngleTurn,
-                Buttons = cmd.Buttons
+                Buttons = cmd.Buttons,
+                Jump = cmd.Jump
             };
         }
     }
@@ -2650,6 +2655,7 @@ namespace DPTDOOM.Net
             tic.Side = payload[6];
             tic.AngleTurn = (short)(payload[7] | (payload[8] << 8));
             tic.Buttons = payload.Length > 9 ? payload[9] : (byte)0;
+            tic.Jump = payload.Length > 10 ? payload[10] : (byte)0;
 
             if (player >= NetProtocol.MaxPlayers)
             {
@@ -2741,7 +2747,11 @@ namespace DPTDOOM.Net
 
         private static byte[] EncodeTic(int player, NetTic tic)
         {
-            var payload = new byte[10];
+            // Eleven bytes, not ten: the jump was added without changing the layout of the
+            // first ten, so an older peer still reads a tic correctly and simply cannot
+            // jump. Both sides check the length before reading the tail, which is why this
+            // did not need a protocol version.
+            var payload = new byte[11];
             NetProtocol.WriteUInt32(payload, 0, (uint)tic.Number);
             payload[4] = (byte)player;
             payload[5] = tic.Forward;
@@ -2749,6 +2759,7 @@ namespace DPTDOOM.Net
             payload[7] = (byte)(tic.AngleTurn & 0xFF);
             payload[8] = (byte)((tic.AngleTurn >> 8) & 0xFF);
             payload[9] = tic.Buttons;
+            payload[10] = tic.Jump;
             return payload;
         }
 

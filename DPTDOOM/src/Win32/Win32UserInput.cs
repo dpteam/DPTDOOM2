@@ -177,6 +177,11 @@ namespace DPTDOOM.Win32
                 cmd.Buttons |= TicCmdButtons.Use;
             }
 
+            if (IsPressed(config.key_jump))
+            {
+                cmd.Jump = 1;
+            }
+
             for (var i = 0; i < weaponKeys.Length; i++)
             {
                 if (weaponKeys[i])

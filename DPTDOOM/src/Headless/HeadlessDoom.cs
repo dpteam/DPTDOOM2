@@ -296,6 +296,11 @@ namespace DPTDOOM.Headless
 
                     doom.FlushBotTrace();
 
+                    // The recording is finished here rather than on the way out of the
+                    // windowed loop, which a headless run never reaches: without this,
+                    // -record in headless wrote no file at all.
+                    doom.StopRecording();
+
                     // The number of tics that were actually simulated, not the number of loop
                     // iterations. They differ when the run stops early - a paused game,
                     // or the safety net - and reporting the iterations made a stalled

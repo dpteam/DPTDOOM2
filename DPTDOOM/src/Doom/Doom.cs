@@ -2214,15 +2214,31 @@ namespace DPTDOOM
 
                         if (gameResult == UpdateResult.NeedWipe)
                         {
-                            // The level is over. Let the bots learn from it
-                            // before the world is thrown away.
+                            // The wipe at the start of a level is not the end of it. The
+                            // world asks for one on its very first tic, and treating that as
+                            // "the level is over" stopped the recording after a single
+                            // command - which is why -record used to produce a one-tic demo.
+                            //
+                            // The distinction is the number of commands already recorded.
+                            // A recording with one command in it has not finished a level;
+                            // anything more means a new level is beginning.
+                            var levelFinished = recorder == null || recorder.TicCount > 1;
+
+                            // Learning and the trace are about the bots, not about the
+                            // recording, and they must not be skipped because no -record was
+                            // asked for. Putting them behind the recorder's check is what
+                            // silently stopped the bots learning at all.
                             RecordBotRuns();
 
                             FlushBotTrace();
 
-                            // A demo covers one level; the next one starts a new
-                            // recording rather than concatenating levels.
-                            StopRecording();
+                            if (levelFinished && recorder != null)
+                            {
+                                // A demo covers one level; the next one starts a new
+                                // recording rather than concatenating levels.
+                                StopRecording();
+                            }
+
                             StartWipe();
                         }
                         break;
@@ -2403,7 +2419,14 @@ namespace DPTDOOM
         /// <summary>
         /// Finishes and writes the current demo recording, if any.
         /// </summary>
-        private void StopRecording()
+        /// <summary>
+        /// Finishes the demo recording, if one is running, and writes it.
+        ///
+        /// Public because a headless run ends by leaving its loop rather than by quitting:
+        /// without this, -record in headless wrote nothing at all, and the same call used to
+        /// be reached only through the windowed exit path.
+        /// </summary>
+        public void StopRecording()
         {
             if (recorder == null)
             {

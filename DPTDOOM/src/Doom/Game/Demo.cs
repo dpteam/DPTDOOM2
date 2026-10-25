@@ -29,14 +29,25 @@ namespace DPTDOOM
 
         private int playerCount;
 
+        /// <summary>Whether this demo carries a jump byte per player per tic.</summary>
+        private readonly bool jumpByte;
+
         public Demo(byte[] data)
         {
             p = 0;
 
-            if (data[p++] != 109)
+            var version = data[p++];
+
+            if (version != 109 && version != 110)
             {
                 throw new Exception("Demo is from a different game version!");
             }
+
+            // Version 109 is vanilla Doom 1.9: four bytes per player per tic. Version 110 is
+            // this port's own, and adds one byte - the jump. Reading both is what lets an old
+            // demo still play, which matters because the compatibility tests pin world hashes
+            // to recordings made before jump existed.
+            jumpByte = version >= 110;
 
             this.data = data;
 
@@ -87,7 +98,9 @@ namespace DPTDOOM
                 return false;
             }
 
-            if (p + 4 * playerCount > data.Length)
+            var recordSize = jumpByte ? 5 : 4;
+
+            if (p + recordSize * playerCount > data.Length)
             {
                 return false;
             }
@@ -102,6 +115,11 @@ namespace DPTDOOM
                     cmd.SideMove = (sbyte)data[p++];
                     cmd.AngleTurn = (short)(data[p++] << 8);
                     cmd.Buttons = data[p++];
+
+                    if (jumpByte)
+                    {
+                        cmd.Jump = data[p++];
+                    }
                 }
             }
 

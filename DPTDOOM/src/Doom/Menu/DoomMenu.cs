@@ -384,6 +384,10 @@ namespace DPTDOOM
                     () => config.key_use, value => config.key_use = value,
                     "Open doors and press switches."),
 
+                new KeyBindingTextItem("JUMP",
+                    () => config.key_jump, value => config.key_jump = value,
+                    "Jump. This port adds it; Doom itself has no jump."),
+
                 new SectionTextItem("LOOK"),
 
                 new KeyBindingTextItem("LOOK UP",

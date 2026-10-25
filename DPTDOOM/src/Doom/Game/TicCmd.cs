@@ -26,12 +26,28 @@ namespace DPTDOOM
         private short angleTurn;
         private byte buttons;
 
+        /// <summary>
+        /// Whether the player asked to jump this tic.
+        ///
+        /// A field of its own rather than a bit in <see cref="Buttons"/>, and that is a
+        /// decision with consequences: `Buttons` has one free bit left and it belongs to
+        /// "this player has left", which travels over the network. Jump has to travel in a
+        /// demo as well, so it needs a byte of its own in the demo format - see
+        /// <see cref="DemoRecorder"/> for how the old format is still written when nobody
+        /// jumped.
+        ///
+        /// It is a byte rather than a bool because it is stored in a byte on the wire and in
+        /// a demo, and pretending otherwise would mean converting in three places.
+        /// </summary>
+        private byte jump;
+
         public void Clear()
         {
             forwardMove = 0;
             sideMove = 0;
             angleTurn = 0;
             buttons = 0;
+            jump = 0;
         }
 
         public void CopyFrom(TicCmd cmd)
@@ -40,6 +56,7 @@ namespace DPTDOOM
             sideMove = cmd.sideMove;
             angleTurn = cmd.angleTurn;
             buttons = cmd.buttons;
+            jump = cmd.jump;
         }
 
         public sbyte ForwardMove
@@ -64,6 +81,12 @@ namespace DPTDOOM
         {
             get => buttons;
             set => buttons = value;
+        }
+
+        public byte Jump
+        {
+            get => jump;
+            set => jump = value;
         }
     }
 }

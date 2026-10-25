@@ -37,6 +37,15 @@ namespace DPTDOOM
         public KeyBinding key_lookdown;
         public KeyBinding key_center;
 
+        /// <summary>
+        /// Jump.
+        ///
+        /// <c>F</c> rather than Space, because Space is Use and has been since Doom: taking
+        /// it would break the muscle memory of everyone who has ever opened a door. F is what
+        /// a player coming from Quake or from a modern port reaches for anyway.
+        /// </summary>
+        public KeyBinding key_jump;
+
         public int mouse_sensitivity;
         public bool mouse_disableyaxis;
 
@@ -183,6 +192,11 @@ namespace DPTDOOM
                 {
                     DoomKey.End
                 });
+            key_jump = new KeyBinding(
+                new DoomKey[]
+                {
+                    DoomKey.F
+                });
 
             mouse_sensitivity = 8;
             mouse_disableyaxis = false;
@@ -244,6 +258,7 @@ namespace DPTDOOM
                 key_lookup = GetKeyBinding(dic, nameof(key_lookup), key_lookup);
                 key_lookdown = GetKeyBinding(dic, nameof(key_lookdown), key_lookdown);
                 key_center = GetKeyBinding(dic, nameof(key_center), key_center);
+                key_jump = GetKeyBinding(dic, nameof(key_jump), key_jump);
 
                 mouse_sensitivity = GetInt(dic, nameof(mouse_sensitivity), mouse_sensitivity);
                 mouse_disableyaxis = GetBool(dic, nameof(mouse_disableyaxis), mouse_disableyaxis);
@@ -298,6 +313,7 @@ namespace DPTDOOM
                 writer.WriteLine(nameof(key_lookup) + " = " + key_lookup);
                 writer.WriteLine(nameof(key_lookdown) + " = " + key_lookdown);
                 writer.WriteLine(nameof(key_center) + " = " + key_center);
+                writer.WriteLine(nameof(key_jump) + " = " + key_jump);
 
                     writer.WriteLine(nameof(mouse_sensitivity) + " = " + mouse_sensitivity);
                     writer.WriteLine(nameof(mouse_disableyaxis) + " = " + BoolToString(mouse_disableyaxis));
