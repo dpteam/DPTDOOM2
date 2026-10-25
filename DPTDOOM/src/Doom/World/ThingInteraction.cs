@@ -276,10 +276,10 @@ namespace DPTDOOM
 			}
 
 			// The random draw happens first and unconditionally, before the flag is consulted:
-			// a monster with Painless must not change how many numbers the world generator uses,
-			// or a mod that adds the flag would move the world on every hit.
+			// skipping it for one actor would shift every later draw in the level, so a mod adding
+			// +NOPAIN to one monster would change more than that monster.
 			if ((world.Random.Next() < target.Info.PainChance) &&
-				(target.Flags & MobjFlags.Painless) == 0 &&
+				(target.Flags & MobjFlags.NoPain) == 0 &&
 				(target.Flags & MobjFlags.SkullFly) == 0)
 			{
 				// Fight back!
@@ -294,9 +294,16 @@ namespace DPTDOOM
 			if ((target.Threshold == 0 || target.Type == MobjType.Vile) &&
 				source != null &&
 				source != target &&
-				source.Type != MobjType.Vile)
+				source.Type != MobjType.Vile &&
+				(source.Flags & MobjFlags.NoTarget) == 0)
 			{
 				// If not intent on another player, chase after this one.
+				//
+				// The NoTarget check is ZDoom's OkayToSwitchTarget: "This actor not targetted
+				// when it hurts something else". It is about retaliation only - the monster
+				// above still woke up and still has its ReactionTime cleared, it just does not
+				// take this actor as its chase target. NeverTarget is the flag that stops it
+				// being a target at all.
 				target.Target = source;
 				target.Threshold = baseThreshold;
 				if (target.State == DoomInfo.States[(int)target.Info.SpawnState] &&

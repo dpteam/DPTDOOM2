@@ -139,30 +139,54 @@ namespace DPTDOOM
         // ---------------------------------------------------------------
 
         /// <summary>
-        /// Does not enter its pain state, and plays no pain sound.
+        /// Never enters its pain state, and plays no pain sound.
         ///
-        /// DECORATE's +PAINLESS. The engine already had PainChance, which is a
-        /// probability; this is the certainty, and a mod means it - a boss that
-        /// shrugs off every hit is a design decision, not a small chance.
+        /// DECORATE's +NOPAIN, and ZDoom's MF5_NOPAIN: "If set the pain state won't
+        /// be entered". The engine already had PainChance, which is a probability;
+        /// this is the certainty, and a mod means it - a boss that shrugs off every
+        /// hit is a design decision, not a small chance.
+        ///
+        /// Named NoPain, not Painless, on purpose. ZDoom has both, and they are
+        /// different: MF5_PAINLESS is about the actor as an *attacker* - "Actor
+        /// always inflicts painless damage" - and a mod asking for +PAINLESS would
+        /// get the wrong behaviour from a flag named after it. +PAINLESS stays
+        /// unsupported and is named in the report instead of being guessed at.
         /// </summary>
-        Painless = 0x10000000,
+        NoPain = 0x10000000,
 
         /// <summary>
         /// Cannot be killed: damage takes it down to one point of health and stops.
         ///
-        /// DECORATE's +BUDDHA. Distinct from invulnerability, which a player gets
-        /// from a powerup and which refuses all damage: this one still flinches,
-        /// still shows damage, and simply will not die.
+        /// DECORATE's +BUDDHA, ZDoom's MF7_BUDDHA: "Behaves just like the buddha
+        /// cheat", which sets health to 1 rather than refusing the damage. Distinct
+        /// from invulnerability, which a player gets from a powerup: this one still
+        /// flinches, still shows damage, and simply will not die.
         /// </summary>
         Buddha = 0x20000000,
 
         /// <summary>
-        /// Monsters do not pick it as a target, and a monster that has it does not
-        /// look for one.
+        /// Is never picked as a target at all.
         ///
-        /// DECORATE's +NOTARGET. Not the same as Ambush, which only stops the
-        /// monster noticing a sound.
+        /// DECORATE's +NEVERTARGET, ZDoom's MF7_NEVERTARGET: "can not be targetted
+        /// at all". Not the same as Ambush, which only stops a monster noticing a
+        /// sound, and not the same as NoTarget below, which is only about switching.
         /// </summary>
-        NoTarget = 0x40000000
+        NeverTarget = 0x40000000,
+
+        /// <summary>
+        /// A monster that this actor hurts does not switch its target to it.
+        ///
+        /// DECORATE's +NOTARGET, ZDoom's MF3_NOTARGET: "This actor not targetted
+        /// when it hurts something else". It is about retaliation, not about being
+        /// seen: the monster still notices the actor by sight or sound and still
+        /// fights back - it just does not make it its chase target. NeverTarget is
+        /// the one that stops it being a target at all.
+        ///
+        /// The sign bit, and written with unchecked on purpose: bits 28 to 30 are
+        /// the three above, and this is the last free bit in an int-backed enum.
+        /// Nothing reads Flags as a signed number - it goes into the world hash and
+        /// into save files as raw bits - so the negative value is only cosmetic.
+        /// </summary>
+        NoTarget = unchecked((int)0x80000000)
     }
 }

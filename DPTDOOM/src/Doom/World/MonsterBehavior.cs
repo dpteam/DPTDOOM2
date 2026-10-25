@@ -66,13 +66,14 @@ namespace DPTDOOM
                     continue;
                 }
 
-                if ((player.Mobj.Flags & MobjFlags.NoTarget) != 0)
+                if ((player.Mobj.Flags & MobjFlags.NeverTarget) != 0)
                 {
-                    // DECORATE's +NOTARGET: this actor is not picked as a target. Distinct from
-                    // Ambush, which is about the monster doing the looking and only stops it
-                    // noticing a sound. Checked after the dead-player skip and before the sight
-                    // check, so the number of sight checks does not change for anybody who does
-                    // not use the flag.
+                    // DECORATE's +NEVERTARGET: this actor is not picked as a target at all.
+                    // Distinct from Ambush, which is about the monster doing the looking and only
+                    // stops it noticing a sound, and from +NOTARGET, which is only about a monster
+                    // refusing to switch its target to whoever hurt it. Checked after the
+                    // dead-player skip and before the sight check, so the number of sight checks
+                    // does not change for anybody who does not use the flag.
                     continue;
                 }
 
@@ -119,7 +120,7 @@ namespace DPTDOOM
 
             if (target != null &&
                 (target.Flags & MobjFlags.Shootable) != 0 &&
-                (target.Flags & MobjFlags.NoTarget) == 0)
+                (target.Flags & MobjFlags.NeverTarget) == 0)
             {
                 actor.Target = target;
 
@@ -717,9 +718,9 @@ namespace DPTDOOM
 
         public void Pain(Mobj actor)
         {
-            if ((actor.Flags & MobjFlags.Painless) != 0)
+            if ((actor.Flags & MobjFlags.NoPain) != 0)
             {
-                // DECORATE's +PAINLESS. The pain state is never entered from damage, so this
+                // DECORATE's +NOPAIN. The pain state is never entered from damage, so this
                 // action normally cannot run - but a mod's own chain may reach it directly, and a
                 // silent monster that still cries out is not what the flag means.
                 return;
