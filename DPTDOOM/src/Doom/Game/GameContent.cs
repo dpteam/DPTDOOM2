@@ -60,6 +60,19 @@ namespace DPTDOOM
 
             DeHackEd.Initialize(args, wad);
 
+            // The built-in actor table, written out as SharpScript on first run so it can be
+            // read and copied. Placed here, after DeHackEd, because what gets written is the
+            // table as it now stands - a reference to the vanilla numbers is more useful than
+            // one that silently includes somebody's patch.
+            //
+            // Only when the player did not ask for a clean run: a test that unpacks files into
+            // the data directory is a test that writes to the machine, and a headless run on a
+            // build machine should leave nothing behind.
+            if (!args.nodata.Present)
+            {
+                UnpackActorReference(args);
+            }
+
             // Scripts after DeHackEd, deliberately: a script may read what a patch wrote,
             // and the reverse is not true. A mod that ships both gets the newer tool able
             // to see the older one's result, which is what the author expects.
@@ -79,6 +92,46 @@ namespace DPTDOOM
 
             LoadReport.Print();
         }
+
+        /// <summary>
+        /// Writes the actor reference into the data directory, once.
+        ///
+        /// Never overwrites and never fails the load: the folder is a convenience for a modder,
+        /// and a read-only data directory must not stop the game. Problems go to the load
+        /// report, which is where a player already looks when something is missing.
+        /// </summary>
+        private void UnpackActorReference(CommandLineArgs args)
+        {
+            var written = ActorTemplateWriter.UnpackIfMissing(
+                ConfigUtilities.GetDataDirectory(), DoomInfo.MobjInfos, actorReferenceProblems);
+
+            if (written.Count == 0)
+            {
+                return;
+            }
+
+            ConsoleUi.Begin("actors");
+
+            foreach (var problem in actorReferenceProblems)
+            {
+                LoadReport.Add("actor reference", problem, "that file was not written");
+            }
+
+            if (actorReferenceProblems.Count > 0)
+            {
+                ConsoleUi.Failed(actorReferenceProblems.Count + " problem(s)");
+            }
+            else
+            {
+                // Said once, on the run that creates it, and never again - a line on every
+                // start about a folder that has not changed would be noise.
+                ConsoleUi.Ok(written.Count + " file(s) in " +
+                             ActorTemplateWriter.FolderName + "/actors");
+            }
+        }
+
+        private readonly System.Collections.Generic.List<string> actorReferenceProblems =
+            new System.Collections.Generic.List<string>();
 
         public static GameContent CreateDummy(params string[] wadPaths)
         {

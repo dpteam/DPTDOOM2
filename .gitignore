@@ -629,6 +629,11 @@ user/
 # player's own runs, so it never belongs in the repository.
 bots/
 
+# The actor reference the game writes on first run: the built-in table as
+# SharpScript. Generated from this build, so a copy in the repository would go
+# stale the moment an actor changed.
+dptdoom-data/
+
 # OS noise
 Thumbs.db
 desktop.ini

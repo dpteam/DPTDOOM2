@@ -187,6 +187,15 @@ namespace DPTDOOM
         /// </summary>
         public readonly Arg<string> botbraindir;
 
+        /// <summary>
+        /// Do not write the actor reference into the data directory.
+        ///
+        /// Exists for tests and for build machines: a run that unpacks files writes to the
+        /// machine, and a check that leaves artefacts behind is a check that has to be cleaned
+        /// up by hand.
+        /// </summary>
+        public readonly Arg nodata;
+
         public CommandLineArgs(string[] args)
         {
             iwad = GetString(args, "-iwad");
@@ -284,6 +293,7 @@ namespace DPTDOOM
             botstyle = GetInt(args, "-botstyle");
             nobotbrain = new Arg(args.Contains("-nobotbrain"));
             botbraindir = GetString(args, "-botbraindir");
+            nodata = new Arg(args.Contains("-nodata"));
 
             // Check for drag & drop.
             if (args.Length > 0 && args.All(arg => arg.FirstOrDefault() != '-'))

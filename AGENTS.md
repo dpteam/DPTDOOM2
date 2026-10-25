@@ -52,6 +52,7 @@ powershell -NoProfile -File tools\test-scripts.ps1
 powershell -NoProfile -File tools\test-decorate.ps1
 powershell -NoProfile -File tools\test-jump.ps1
 powershell -NoProfile -File tools\test-rofl.ps1
+powershell -NoProfile -File tools\test-actors.ps1
 powershell -NoProfile -File tools\test-upnp.ps1
 powershell -NoProfile -File tools\test-reconnect.ps1
 powershell -NoProfile -File tools\test-profile.ps1
@@ -331,6 +332,13 @@ powershell -NoProfile -File tools\test-launcher.ps1
 - Определения скриптов применяются **до** построения мира и **после** DeHackEd, один
   раз: всякое интересное определение — «прочитать и записать», второй проход молча
   удвоил бы эффект. Повторное применение — ошибка, а не молчание.
+- Справочник акторов (dptdoom-data/actors, ActorTemplateWriter) выкладывается при
+  первом запуске как **патч, воспроизводящий таблицу точно** — проверяется применением к
+  чистой таблице и сравнением поле за полем, а не «на вид». Он **не подгружается сам**:
+  скрипты идут после DeHackEd, и файл, выставляющий ванильные значения, отменил бы патч
+  рядом. Папка **никогда не перезаписывается** (иначе правка теряется), -nodata её
+  отключает. Составные флаги (Translation) генератор пропускает: Flag их отвергает.
+  Проверка - ActorTemplateTest, tools/test-actors.ps1.
 - Битый скрипт стоит **своего актёра**, не файла и не игры: остальные функции из того
   же файла применяются, уровень грузится, отчёт называет файл и строку.
 - Бюджет 100000 шагов на вызов и глубина 32 — не «на всякий случай»: в языке есть
