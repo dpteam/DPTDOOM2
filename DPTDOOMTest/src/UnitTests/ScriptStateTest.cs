@@ -235,8 +235,9 @@ namespace DPTDOOMTest.UnitTests
         {
             // A throw while the definition runs costs the whole actor block - states
             // included - and reports itself as a script problem when the modder wrote
-            // DECORATE. So the converter checks the name and skips just it. +PAINLESS is the
-            // realistic case: it exists in ZDoom and ACE and not in this engine.
+            // DECORATE. So the converter checks the name and skips just it. +BUDDHA used to be
+            // the realistic case; it is supported now, so the example is +FOILINVUL, which
+            // exists in ZDoom and still has no counterpart here.
             using (var content = GameContent.CreateDummy(WadPath.Doom2))
             {
                 var table = DoomInfo.MobjInfos;
@@ -250,16 +251,16 @@ namespace DPTDOOMTest.UnitTests
                     "ACTOR TestImp 3001\n" +
                     "{\n" +
                     "  Health 250\n" +
-                    "  +PAINLESS\n" +
+                    "  +FOILINVUL\n" +
                     "  States { See: TROO A 3 A_Look Loop }\n" +
                     "}", table, problems);
 
                 var text = string.Join("; ", problems.ToArray());
 
-                StringAssert.Contains(text, "Painless");
+                StringAssert.Contains(text, "Foilinvul");
                 StringAssert.Contains(text, "no flag");
 
-                Assert.IsFalse(script.Contains("PAINLESS"), "the unknown flag is not emitted");
+                Assert.IsFalse(script.Contains("FOILINVUL"), "the unknown flag is not emitted");
                 StringAssert.Contains(script, "Health(250)", "the rest of the block survives");
                 StringAssert.Contains(script, "SeeState(", "and so do the states");
 

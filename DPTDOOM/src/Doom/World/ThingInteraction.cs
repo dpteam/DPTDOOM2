@@ -261,11 +261,25 @@ namespace DPTDOOM
 			target.Health -= damage;
 			if (target.Health <= 0)
 			{
-				KillMobj(source, target);
-				return;
+				if ((target.Flags & MobjFlags.Buddha) != 0)
+				{
+					// DECORATE's +BUDDHA: down to one point and no further. Distinct from
+					// invulnerability, which refuses the damage outright - this one flinches,
+					// shows the damage and simply will not die.
+					target.Health = 1;
+				}
+				else
+				{
+					KillMobj(source, target);
+					return;
+				}
 			}
 
+			// The random draw happens first and unconditionally, before the flag is consulted:
+			// a monster with Painless must not change how many numbers the world generator uses,
+			// or a mod that adds the flag would move the world on every hit.
 			if ((world.Random.Next() < target.Info.PainChance) &&
+				(target.Flags & MobjFlags.Painless) == 0 &&
 				(target.Flags & MobjFlags.SkullFly) == 0)
 			{
 				// Fight back!

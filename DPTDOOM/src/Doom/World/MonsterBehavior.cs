@@ -66,6 +66,16 @@ namespace DPTDOOM
                     continue;
                 }
 
+                if ((player.Mobj.Flags & MobjFlags.NoTarget) != 0)
+                {
+                    // DECORATE's +NOTARGET: this actor is not picked as a target. Distinct from
+                    // Ambush, which is about the monster doing the looking and only stops it
+                    // noticing a sound. Checked after the dead-player skip and before the sight
+                    // check, so the number of sight checks does not change for anybody who does
+                    // not use the flag.
+                    continue;
+                }
+
                 if (!world.VisibilityCheck.CheckSight(actor, player.Mobj))
                 {
                     // Out of sight.
@@ -107,7 +117,9 @@ namespace DPTDOOM
 
             var target = actor.Subsector.Sector.SoundTarget;
 
-            if (target != null && (target.Flags & MobjFlags.Shootable) != 0)
+            if (target != null &&
+                (target.Flags & MobjFlags.Shootable) != 0 &&
+                (target.Flags & MobjFlags.NoTarget) == 0)
             {
                 actor.Target = target;
 
@@ -705,6 +717,14 @@ namespace DPTDOOM
 
         public void Pain(Mobj actor)
         {
+            if ((actor.Flags & MobjFlags.Painless) != 0)
+            {
+                // DECORATE's +PAINLESS. The pain state is never entered from damage, so this
+                // action normally cannot run - but a mod's own chain may reach it directly, and a
+                // silent monster that still cries out is not what the flag means.
+                return;
+            }
+
             if (actor.Info.PainSound != 0 ||
                 ActorSounds.Has((int)actor.Type, ActorSoundSlot.Pain))
             {

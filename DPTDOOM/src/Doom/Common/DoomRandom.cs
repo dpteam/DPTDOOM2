@@ -62,6 +62,18 @@ namespace DPTDOOM
             return table[index];
         }
 
+        /// <summary>
+        /// How far round the table this generator has walked.
+        ///
+        /// Exposed because "how many draws did the world make" is a real question: anything that
+        /// short-circuits before a draw changes the world for every player in a session, and that is
+        /// invisible without a way to count. Read-only; it cannot be used to steer the generator.
+        /// </summary>
+        public int Index
+        {
+            get { return index; }
+        }
+
         public void Clear()
         {
             index = 0;

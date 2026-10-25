@@ -124,6 +124,45 @@ namespace DPTDOOM
         Translation = 0xc000000,
 
         // Hmm ???.
-        TransShift = 26
+        TransShift = 26,
+
+        // ---------------------------------------------------------------
+        // Flags this engine did not have before DECORATE needed them.
+        //
+        // Appended after Translation, which occupies bits 26 and 27, so these
+        // start at 28. The order above is vanilla Doom's and is left alone: the
+        // numbers go into save files and into the world hash, and moving one
+        // would make an old save describe a different creature.
+        //
+        // A vanilla actor has these bits clear, so the world is bit for bit what
+        // it was - that is what makes adding them safe.
+        // ---------------------------------------------------------------
+
+        /// <summary>
+        /// Does not enter its pain state, and plays no pain sound.
+        ///
+        /// DECORATE's +PAINLESS. The engine already had PainChance, which is a
+        /// probability; this is the certainty, and a mod means it - a boss that
+        /// shrugs off every hit is a design decision, not a small chance.
+        /// </summary>
+        Painless = 0x10000000,
+
+        /// <summary>
+        /// Cannot be killed: damage takes it down to one point of health and stops.
+        ///
+        /// DECORATE's +BUDDHA. Distinct from invulnerability, which a player gets
+        /// from a powerup and which refuses all damage: this one still flinches,
+        /// still shows damage, and simply will not die.
+        /// </summary>
+        Buddha = 0x20000000,
+
+        /// <summary>
+        /// Monsters do not pick it as a target, and a monster that has it does not
+        /// look for one.
+        ///
+        /// DECORATE's +NOTARGET. Not the same as Ambush, which only stops the
+        /// monster noticing a sound.
+        /// </summary>
+        NoTarget = 0x40000000
     }
 }
