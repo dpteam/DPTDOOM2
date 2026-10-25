@@ -223,6 +223,15 @@ namespace DPTDOOM
         /// </summary>
         public readonly Arg<string[]> animdefs;
 
+        /// <summary>
+        /// LOCKDEFS files, by path, or read from a <c>LOCKDEFS</c> lump in the WAD.
+        ///
+        /// What a numbered lock needs, says and plays. The numbers are the ones a map carries,
+        /// and in this engine the only such number is Boom's key number on a generalized locked
+        /// door, so a file overrides the built-in Boom rules for those numbers.
+        /// </summary>
+        public readonly Arg<string[]> lockdefs;
+
         public CommandLineArgs(string[] args)
         {
             iwad = GetString(args, "-iwad");
@@ -324,6 +333,7 @@ namespace DPTDOOM
             mapinfo = Check_mapinfo(args);
             sndinfo = Check_sndinfo(args);
             animdefs = Check_animdefs(args);
+            lockdefs = Check_lockdefs(args);
 
             // Check for drag & drop.
             if (args.Length > 0 && args.All(arg => arg.FirstOrDefault() != '-'))
@@ -448,6 +458,17 @@ namespace DPTDOOM
         private static Arg<string[]> Check_sndinfo(string[] args)
         {
             var values = GetValues(args, "-sndinfo");
+            if (values.Length >= 1)
+            {
+                return new Arg<string[]>(values);
+            }
+
+            return new Arg<string[]>();
+        }
+
+        private static Arg<string[]> Check_lockdefs(string[] args)
+        {
+            var values = GetValues(args, "-lockdefs");
             if (values.Length >= 1)
             {
                 return new Arg<string[]>(values);

@@ -93,6 +93,10 @@ namespace DPTDOOM
             // handed to the animation object when it is built.
             InitializeAnimatedTextures(args);
 
+            // What a numbered lock needs, says and plays. Before the world is built, because the
+            // table is consulted the moment a player tries a door.
+            InitializeLockDefs(args);
+
             // A blank line between the groups, so a startup log of a dozen lines can be
             // skimmed instead of read. Purely visual - the timestamps already say what
             // took how long.
@@ -387,6 +391,66 @@ namespace DPTDOOM
             else
             {
                 ConsoleUi.Ok(AnimatedTexture.Count + " cycle(s) described");
+            }
+        }
+
+        /// <summary>
+        /// Reads LOCKDEFS: the <c>LOCKDEFS</c> lump from the WAD, and any files named with
+        /// <c>-lockdefs</c>.
+        ///
+        /// A numbered lock is what a Boom generalized locked door carries in its linedef, and
+        /// without a file the built-in Boom rules apply. The file overrides them, which is the
+        /// only way to ask for something Boom cannot express - "a blue card or a red skull" -
+        /// or to change the refusal line and its sound.
+        /// </summary>
+        private void InitializeLockDefs(CommandLineArgs args)
+        {
+            var paths = args.lockdefs.Present ? args.lockdefs.Value : new string[0];
+            var lump = wad.GetLumpNumber("LOCKDEFS");
+
+            if (paths.Length == 0 && lump == -1)
+            {
+                return;
+            }
+
+            ConsoleUi.Begin("lockdefs");
+
+            var problems = new System.Collections.Generic.List<string>();
+
+            LockDefs.Clear();
+
+            foreach (var path in paths)
+            {
+                try
+                {
+                    LockDefs.Add(System.IO.File.ReadAllText(path),
+                        System.IO.Path.GetFileName(path), problems);
+                }
+                catch (Exception e)
+                {
+                    problems.Add(path + ": " + e.Message);
+                }
+            }
+
+            if (lump != -1)
+            {
+                LockDefs.Add(System.Text.Encoding.UTF8.GetString(wad.ReadLump(lump)),
+                    "LOCKDEFS lump", problems);
+            }
+
+            foreach (var problem in problems)
+            {
+                LoadReport.Add("lockdefs", problem,
+                    "that lock keeps the definition it had");
+            }
+
+            if (problems.Count > 0)
+            {
+                ConsoleUi.Failed(problems.Count + " problem(s)");
+            }
+            else
+            {
+                ConsoleUi.Ok(LockDefs.Count + " lock(s) defined");
             }
         }
 

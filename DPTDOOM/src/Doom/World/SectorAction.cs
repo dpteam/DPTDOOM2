@@ -771,16 +771,16 @@ namespace DPTDOOM
 				return false;
 			}
 
-			DoomString message;
+			var verdict = GeneralizedLock.Check(definition.LockedKey,
+			                                    definition.SkullsCountAsCards, player.Cards);
 
-			if (GeneralizedLock.CanOpen(definition.LockedKey, definition.SkullsCountAsCards,
-			                            player.Cards, out message))
+			if (verdict.Open)
 			{
 				return true;
 			}
 
-			player.SendMessage(message);
-			world.StartSound(player.Mobj, Sfx.OOF, SfxType.Voice);
+			player.SendMessage(verdict.Message);
+			world.StartSound(player.Mobj, verdict.Sound, SfxType.Voice);
 			return false;
 		}
 

@@ -24,6 +24,18 @@ namespace DPTDOOMTest.CompatibilityTests
     [TestClass]
     public class GeneralizedLockTest
     {
+        [TestInitialize]
+        public void Before()
+        {
+            LockDefs.Clear();
+        }
+
+        [TestCleanup]
+        public void After()
+        {
+            LockDefs.Clear();
+        }
+
         private static bool[] NoKeys()
         {
             return new bool[(int)CardType.Count];
@@ -41,26 +53,24 @@ namespace DPTDOOMTest.CompatibilityTests
             return cards;
         }
 
-        private static DoomString Message(int key, bool skullsCountAsCards, bool[] cards)
+        private static string Message(int key, bool skullsCountAsCards, bool[] cards)
         {
-            DoomString message;
-            var open = GeneralizedLock.CanOpen(key, skullsCountAsCards, cards, out message);
+            var verdict = GeneralizedLock.Check(key, skullsCountAsCards, cards);
 
-            if (open)
+            if (verdict.Open)
             {
-                Assert.IsNull(message, "an open door has nothing to say");
+                Assert.IsNull(verdict.Message, "an open door has nothing to say");
                 return null;
             }
 
-            Assert.IsNotNull(message, "a refusal always says why");
-            return message;
+            Assert.IsNotNull(verdict.Message, "a refusal always says why");
+            return verdict.Message;
         }
 
         [TestMethod]
         public void AnyKeyOpensWithAnySingleKey()
         {
-            Assert.IsFalse(GeneralizedLock.CanOpen(GeneralizedLock.AnyKey, false, NoKeys(),
-                out _));
+            Assert.IsFalse(GeneralizedLock.Check(GeneralizedLock.AnyKey, false, NoKeys()).Open);
 
             foreach (CardType kind in Enum.GetValues(typeof(CardType)))
             {
@@ -69,11 +79,11 @@ namespace DPTDOOMTest.CompatibilityTests
                     continue;
                 }
 
-                Assert.IsTrue(GeneralizedLock.CanOpen(GeneralizedLock.AnyKey, false,
-                    Keys(kind), out _), kind + " should open an any-key lock");
+                Assert.IsTrue(GeneralizedLock.Check(GeneralizedLock.AnyKey, false, Keys(kind)).Open,
+                    kind + " should open an any-key lock");
             }
 
-            Assert.AreEqual(DoomInfo.Strings.PD_ANY,
+            Assert.AreEqual((string)DoomInfo.Strings.PD_ANY,
                 Message(GeneralizedLock.AnyKey, false, NoKeys()));
         }
 
@@ -81,13 +91,13 @@ namespace DPTDOOMTest.CompatibilityTests
         public void ACardLockWantsTheCardWhenTheTypeMatters()
         {
             // Without the skull bit, a red skull is not a red card.
-            Assert.IsTrue(GeneralizedLock.CanOpen(GeneralizedLock.RedCard, false,
-                Keys(CardType.RedCard), out _));
+            Assert.IsTrue(GeneralizedLock.Check(GeneralizedLock.RedCard, false,
+                Keys(CardType.RedCard)).Open);
 
-            Assert.IsFalse(GeneralizedLock.CanOpen(GeneralizedLock.RedCard, false,
-                Keys(CardType.RedSkull), out _), "a skull is not the card");
+            Assert.IsFalse(GeneralizedLock.Check(GeneralizedLock.RedCard, false,
+                Keys(CardType.RedSkull)).Open, "a skull is not the card");
 
-            Assert.AreEqual(DoomInfo.Strings.PD_REDC,
+            Assert.AreEqual((string)DoomInfo.Strings.PD_REDC,
                 Message(GeneralizedLock.RedCard, false, Keys(CardType.RedSkull)));
         }
 
@@ -95,27 +105,27 @@ namespace DPTDOOMTest.CompatibilityTests
         public void ACardLockAcceptsASkullWhenTheTypeDoesNotMatter()
         {
             // This is what the LockedNKeys bit means: skulls count as cards.
-            Assert.IsTrue(GeneralizedLock.CanOpen(GeneralizedLock.RedCard, true,
-                Keys(CardType.RedSkull), out _));
+            Assert.IsTrue(GeneralizedLock.Check(GeneralizedLock.RedCard, true,
+                Keys(CardType.RedSkull)).Open);
 
             // And the refusal no longer names the card, because either would do.
-            Assert.AreEqual(DoomInfo.Strings.PD_REDK,
+            Assert.AreEqual((string)DoomInfo.Strings.PD_REDK,
                 Message(GeneralizedLock.RedCard, true, NoKeys()));
         }
 
         [TestMethod]
         public void ASkullLockIsTheMirrorImage()
         {
-            Assert.IsTrue(GeneralizedLock.CanOpen(GeneralizedLock.RedSkull, false,
-                Keys(CardType.RedSkull), out _));
+            Assert.IsTrue(GeneralizedLock.Check(GeneralizedLock.RedSkull, false,
+                Keys(CardType.RedSkull)).Open);
 
-            Assert.IsFalse(GeneralizedLock.CanOpen(GeneralizedLock.RedSkull, false,
-                Keys(CardType.RedCard), out _), "a card is not the skull");
+            Assert.IsFalse(GeneralizedLock.Check(GeneralizedLock.RedSkull, false,
+                Keys(CardType.RedCard)).Open, "a card is not the skull");
 
-            Assert.AreEqual(DoomInfo.Strings.PD_REDS,
+            Assert.AreEqual((string)DoomInfo.Strings.PD_REDS,
                 Message(GeneralizedLock.RedSkull, false, Keys(CardType.RedCard)));
 
-            Assert.AreEqual(DoomInfo.Strings.PD_REDK,
+            Assert.AreEqual((string)DoomInfo.Strings.PD_REDK,
                 Message(GeneralizedLock.RedSkull, true, NoKeys()));
         }
 
@@ -124,13 +134,13 @@ namespace DPTDOOMTest.CompatibilityTests
         {
             // Blue, yellow and red are separate locks; a table that shared one line would
             // send the player looking for the wrong colour.
-            Assert.AreEqual(DoomInfo.Strings.PD_BLUEC,
+            Assert.AreEqual((string)DoomInfo.Strings.PD_BLUEC,
                 Message(GeneralizedLock.BlueCard, false, NoKeys()));
-            Assert.AreEqual(DoomInfo.Strings.PD_YELLOWC,
+            Assert.AreEqual((string)DoomInfo.Strings.PD_YELLOWC,
                 Message(GeneralizedLock.YellowCard, false, NoKeys()));
-            Assert.AreEqual(DoomInfo.Strings.PD_BLUES,
+            Assert.AreEqual((string)DoomInfo.Strings.PD_BLUES,
                 Message(GeneralizedLock.BlueSkull, false, NoKeys()));
-            Assert.AreEqual(DoomInfo.Strings.PD_YELLOWS,
+            Assert.AreEqual((string)DoomInfo.Strings.PD_YELLOWS,
                 Message(GeneralizedLock.YellowSkull, false, NoKeys()));
         }
 
@@ -140,15 +150,14 @@ namespace DPTDOOMTest.CompatibilityTests
             var allSix = Keys(CardType.BlueCard, CardType.YellowCard, CardType.RedCard,
                               CardType.BlueSkull, CardType.YellowSkull, CardType.RedSkull);
 
-            Assert.IsTrue(GeneralizedLock.CanOpen(GeneralizedLock.AllKeys, false, allSix, out _));
+            Assert.IsTrue(GeneralizedLock.Check(GeneralizedLock.AllKeys, false, allSix).Open);
 
             // Three cards and no skulls is not enough.
             var threeCards = Keys(CardType.BlueCard, CardType.YellowCard, CardType.RedCard);
 
-            Assert.IsFalse(GeneralizedLock.CanOpen(GeneralizedLock.AllKeys, false, threeCards,
-                out _));
+            Assert.IsFalse(GeneralizedLock.Check(GeneralizedLock.AllKeys, false, threeCards).Open);
 
-            Assert.AreEqual(DoomInfo.Strings.PD_ALL6,
+            Assert.AreEqual((string)DoomInfo.Strings.PD_ALL6,
                 Message(GeneralizedLock.AllKeys, false, threeCards));
         }
 
@@ -159,14 +168,13 @@ namespace DPTDOOMTest.CompatibilityTests
             // cards, one red, one blue and one yellow is the whole set.
             var oneEach = Keys(CardType.BlueCard, CardType.YellowSkull, CardType.RedCard);
 
-            Assert.IsTrue(GeneralizedLock.CanOpen(GeneralizedLock.AllKeys, true, oneEach, out _));
+            Assert.IsTrue(GeneralizedLock.Check(GeneralizedLock.AllKeys, true, oneEach).Open);
 
             var twoColours = Keys(CardType.BlueCard, CardType.RedCard);
 
-            Assert.IsFalse(GeneralizedLock.CanOpen(GeneralizedLock.AllKeys, true, twoColours,
-                out _));
+            Assert.IsFalse(GeneralizedLock.Check(GeneralizedLock.AllKeys, true, twoColours).Open);
 
-            Assert.AreEqual(DoomInfo.Strings.PD_ALL3,
+            Assert.AreEqual((string)DoomInfo.Strings.PD_ALL3,
                 Message(GeneralizedLock.AllKeys, true, twoColours));
         }
 
@@ -178,8 +186,10 @@ namespace DPTDOOMTest.CompatibilityTests
             var allSix = Keys(CardType.BlueCard, CardType.YellowCard, CardType.RedCard,
                               CardType.BlueSkull, CardType.YellowSkull, CardType.RedSkull);
 
-            Assert.IsFalse(GeneralizedLock.CanOpen(8, true, allSix, out var message));
-            Assert.IsNotNull(message);
+            var verdict = GeneralizedLock.Check(8, true, allSix);
+
+            Assert.IsFalse(verdict.Open);
+            Assert.IsNotNull(verdict.Message);
         }
 
         [TestMethod]
@@ -195,6 +205,75 @@ namespace DPTDOOMTest.CompatibilityTests
             Assert.AreEqual(5, GeneralizedLock.BlueSkull);
             Assert.AreEqual(6, GeneralizedLock.YellowSkull);
             Assert.AreEqual(7, GeneralizedLock.AllKeys);
+        }
+
+        [TestMethod]
+        public void AFileDefinitionWinsOverTheBuiltIn()
+        {
+            // The reason LOCKDEFS exists: Boom's eight shapes cannot say "a blue card or a
+            // red skull", and a mod that wants that must be able to say it.
+            var problems = new System.Collections.Generic.List<string>();
+
+            LockDefs.Add(
+                "lock 1\n" +
+                "{\n" +
+                "    any { bluecard redskull }\n" +
+                "    message \"Find a blue card or a red skull\"\n" +
+                "}", "test", problems);
+
+            Assert.AreEqual(0, problems.Count, string.Join("; ", problems.ToArray()));
+
+            var verdict = GeneralizedLock.Check(GeneralizedLock.RedCard, false,
+                Keys(CardType.RedSkull));
+
+            Assert.IsTrue(verdict.Open, "the file said a red skull would do");
+
+            Assert.IsTrue(GeneralizedLock.Check(GeneralizedLock.RedCard, false,
+                Keys(CardType.BlueCard)).Open, "and so would a blue card");
+
+            Assert.IsFalse(GeneralizedLock.Check(GeneralizedLock.RedCard, false,
+                Keys(CardType.RedCard)).Open,
+                "but a red card is neither, so Boom's own answer is overridden");
+
+            // The message comes from the file, not from Boom.
+            var refused = GeneralizedLock.Check(GeneralizedLock.RedCard, false, NoKeys());
+
+            Assert.IsFalse(refused.Open);
+            Assert.AreEqual("Find a blue card or a red skull", refused.Message);
+        }
+
+        [TestMethod]
+        public void ADefinitionWithoutAMessageUsesTheGenericLine()
+        {
+            var problems = new System.Collections.Generic.List<string>();
+
+            LockDefs.Add("lock 2 { anyblue }", "test", problems);
+
+            Assert.AreEqual(0, problems.Count, string.Join("; ", problems.ToArray()));
+
+            var verdict = GeneralizedLock.Check(GeneralizedLock.BlueCard, false, NoKeys());
+
+            Assert.IsFalse(verdict.Open);
+            Assert.AreEqual((string)DoomInfo.Strings.PD_LOCKED, verdict.Message);
+        }
+
+        [TestMethod]
+        public void ClearlocksLeavesAnUndefinedLockOpen()
+        {
+            // The choice, stated as a test: refusing would make the door impassable for
+            // ever, and a door that does not lock is the lesser harm. The loader says so
+            // once instead of leaving the player to guess.
+            var problems = new System.Collections.Generic.List<string>();
+
+            LockDefs.Add("clearlocks\nlock 3 { bluecard }", "test", problems);
+
+            Assert.AreEqual(0, problems.Count, string.Join("; ", problems.ToArray()));
+
+            Assert.IsTrue(GeneralizedLock.Check(GeneralizedLock.RedCard, false, NoKeys()).Open,
+                "lock 1 has no definition any more");
+
+            Assert.IsFalse(GeneralizedLock.Check(GeneralizedLock.YellowCard, false, NoKeys()).Open,
+                "but lock 3 does");
         }
     }
 }

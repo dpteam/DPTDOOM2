@@ -108,6 +108,7 @@ namespace DPTDOOM
             public static readonly DoomString PD_ANY = new DoomString("PD_ANY", "Any key will open this door");
             public static readonly DoomString PD_ALL3 = new DoomString("PD_ALL3", "You need all three keys to open this door");
             public static readonly DoomString PD_ALL6 = new DoomString("PD_ALL6", "You need all six keys to open this door");
+            public static readonly DoomString PD_LOCKED = new DoomString("PD_LOCKED", "You need a key to open this door");
             public static readonly DoomString GGSAVED = new DoomString("GGSAVED", "game saved.");
             public static readonly DoomString HUSTR_E1M1 = new DoomString("HUSTR_E1M1", "E1M1: Hangar");
             public static readonly DoomString HUSTR_E1M2 = new DoomString("HUSTR_E1M2", "E1M2: Nuclear Plant");
