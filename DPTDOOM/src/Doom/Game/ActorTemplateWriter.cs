@@ -58,6 +58,18 @@ namespace DPTDOOM
         public const string FolderName = "dptdoom-data";
 
         /// <summary>
+        /// Names of the files that hold actor definitions, in the order they are applied.
+        ///
+        /// Order does not matter between them - the three buckets do not overlap - but a fixed
+        /// order makes the load reproducible, and a load that varies between machines is the one
+        /// thing this project cannot afford.
+        /// </summary>
+        public static readonly string[] ActorFiles =
+        {
+            "monsters.dpts", "items.dpts", "decorations.dpts"
+        };
+
+        /// <summary>
         /// Builds the files without touching the disk.
         ///
         /// Separated from writing so the content can be tested: a test that compares the written
@@ -122,9 +134,10 @@ namespace DPTDOOM
 
             var files = new List<ActorTemplateFile>();
 
-            files.Add(File("monsters.dpts", monsters));
-            files.Add(File("items.dpts", items));
-            files.Add(File("decorations.dpts", decorations));
+            files.Add(File(ActorFiles[0], monsters));
+            files.Add(File(ActorFiles[1], items));
+            files.Add(File(ActorFiles[2], decorations));
+
             var readme = new ActorTemplateFile();
             readme.Name = "README.txt";
 
@@ -132,10 +145,41 @@ namespace DPTDOOM
             // reserve, and reporting that as "types in the engine" overstated it by 32.
             var total = monsterCount + itemCount + decorationCount + skipped;
 
-            readme.Content = Readme(total, monsterCount, itemCount, decorationCount, skipped);
+            var fingerprint = FingerprintOf(files);
+
+            readme.Content = Readme(total, monsterCount, itemCount, decorationCount, skipped,
+                                    fingerprint);
             files.Add(readme);
 
             return files;
+        }
+
+        /// <summary>
+        /// A short marker for "which build's table this folder was written from".
+        ///
+        /// FNV-1a rather than anything cryptographic, and deliberately: this is not a security
+        /// hash, it answers one question - has the engine's actor table changed since these files
+        /// were written - and a 32-bit answer is plenty for that. Calling SHA-256 here would
+        /// suggest the value protects something.
+        /// </summary>
+        private static string FingerprintOf(IList<ActorTemplateFile> files)
+        {
+            var hash = 2166136261u;
+
+            foreach (var file in files)
+            {
+                if (!file.Name.EndsWith(".dpts", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                foreach (var c in file.Content)
+                {
+                    hash = unchecked((hash ^ c) * 16777619u);
+                }
+            }
+
+            return hash.ToString("x8", CultureInfo.InvariantCulture);
         }
 
         /// <summary>
@@ -184,6 +228,107 @@ namespace DPTDOOM
             }
 
             return written;
+        }
+
+        /// <summary>
+        /// Reads the fingerprint recorded in the folder's README, or null when there is none.
+        ///
+        /// Absent is not a failure: a folder from before fingerprints existed, or one a person
+        /// made by hand, has no marker and is still perfectly loadable. The caller decides what
+        /// to say about it.
+        /// </summary>
+        public static string TryReadFingerprint(string dataDirectory)
+        {
+            var path = System.IO.Path.Combine(dataDirectory, FolderName, "actors", "README.txt");
+
+            try
+            {
+                if (!System.IO.File.Exists(path))
+                {
+                    return null;
+                }
+
+                foreach (var line in System.IO.File.ReadAllLines(path))
+                {
+                    if (line.StartsWith("Fingerprint:", StringComparison.Ordinal))
+                    {
+                        return line.Substring("Fingerprint:".Length).Trim();
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                // Unreadable README: treat as unmarked rather than as an error, since the actor
+                // files themselves may still be fine.
+            }
+
+            return null;
+        }
+
+        /// <summary>The fingerprint this build would write for its own table.</summary>
+        public static string CurrentFingerprint(MobjInfo[] table)
+        {
+            return FingerprintOf(Build(table));
+        }
+
+        /// <summary>
+        /// Applies the actor files from the folder, if it has any.
+        ///
+        /// Called **before** DeHackEd, and that order is the whole design: a script applied after
+        /// a patch would set the fields back to the values written here and quietly undo the
+        /// patch. Before it, the patch wins, which is what somebody loading both expects.
+        ///
+        /// A folder with no files is not an error - it is a machine that has never run the game
+        /// with this feature, and the compiled table is already correct for it.
+        ///
+        /// Returns the number of actors described, so the caller can say something only when
+        /// there is something to say.
+        /// </summary>
+        public static int Load(string dataDirectory, MobjInfo[] table, IList<string> problems)
+        {
+            var folder = System.IO.Path.Combine(dataDirectory, FolderName, "actors");
+
+            if (!System.IO.Directory.Exists(folder))
+            {
+                return 0;
+            }
+
+            var library = new Scripting.ScriptLibrary();
+            var any = false;
+
+            foreach (var name in ActorFiles)
+            {
+                var path = System.IO.Path.Combine(folder, name);
+
+                try
+                {
+                    if (!System.IO.File.Exists(path))
+                    {
+                        continue;
+                    }
+
+                    library.Add(System.IO.File.ReadAllText(path), name, table);
+                    any = true;
+                }
+                catch (Exception e)
+                {
+                    problems.Add(name + ": " + e.Message);
+                }
+            }
+
+            if (!any)
+            {
+                return 0;
+            }
+
+            library.ApplyTo(table);
+
+            foreach (var problem in library.Problems)
+            {
+                problems.Add(problem);
+            }
+
+            return library.Patches.Count;
         }
 
         private static ActorTemplateFile File(string name, StringBuilder content)
@@ -331,28 +476,39 @@ namespace DPTDOOM
         private static string Header()
         {
             return
-                "// Built-in actors, written out as SharpScript.\n" +
+                "// Built-in actors, as SharpScript.\n" +
                 "//\n" +
-                "// This file is a REFERENCE. Editing it does nothing by itself: the engine uses\n" +
-                "// its compiled table, and a file that set every field to its vanilla value would\n" +
-                "// undo a DeHackEd patch loaded alongside it. To use an edited copy, pass it:\n" +
+                "// This file IS loaded, and it is loaded BEFORE DeHackEd, so a .deh patch still\n" +
+                "// wins over it. Edit a number here and the game changes; delete the folder and\n" +
+                "// the engine's own values come back.\n" +
                 "//\n" +
-                "//     dptdoom.exe -iwad doom2.wad -script myactors.dpts\n" +
-                "//\n" +
-                "// Or copy one function into a mod of your own, which is what these files are for:\n" +
-                "// a working starting point for an actor, instead of guessing at every field.\n";
+                "// Delete this file and its two neighbours to start from the built-in table again:\n" +
+                "// the folder is regenerated on the next run and never overwritten otherwise, so\n" +
+                "// your edits survive.\n";
         }
 
         private static string Readme(int total, int monsters, int items, int decorations,
-                                     int skipped)
+                                     int skipped, string fingerprint)
         {
             var text = new StringBuilder();
 
             text.Append("dptdoom-data/actors\n");
             text.Append("===================\n\n");
-            text.Append("The engine's built-in actor table, written out as SharpScript so it can\n");
-            text.Append("be read and copied. Generated on first run; this folder is never\n");
-            text.Append("overwritten afterwards, so edits and copies survive.\n\n");
+            text.Append("The engine's actor table, written out as SharpScript.\n");
+            text.Append("Generated on first run, never overwritten afterwards, so edits survive.\n");
+            text.Append("Fingerprint: ").Append(fingerprint).Append("\n\n");
+
+            text.Append("These files are LOADED\n");
+            text.Append("----------------------\n\n");
+            text.Append("They are applied before DeHackEd, which means:\n\n");
+            text.Append("  - editing a number here changes the game, with no recompiling;\n");
+            text.Append("  - a .deh patch loaded with -deh still wins, because it is applied after;\n");
+            text.Append("  - deleting the folder brings the built-in values back on the next run.\n\n");
+            text.Append("The fingerprint above is the build that wrote them. If it differs from\n");
+            text.Append("the fingerprint this build would write, the engine says so at startup:\n");
+            text.Append("the values here were taken from an older table and may be stale. Delete\n");
+            text.Append("the folder to regenerate, or keep it - an old reference is not an error,\n");
+            text.Append("it is a choice.\n\n");
 
             text.Append("Files\n");
             text.Append("-----\n\n");
@@ -362,25 +518,25 @@ namespace DPTDOOM
             text.Append("Total: ").Append(total).Append(" types in the engine, of which ")
                 .Append(skipped).Append(" are not here:\n");
             text.Append("they have no map number (the player, tracers, puffs), and the script\n");
-            text.Append("API names actors by map number.\n\n");
+            text.Append("API names actors by map number. Their values stay in the engine.\n\n");
 
-            text.Append("Using one\n");
-            text.Append("---------\n\n");
-            text.Append("An actor's definition looks like this:\n\n");
+            text.Append("What an entry looks like\n");
+            text.Append("-----------------------\n\n");
             text.Append("    fn Thing_3004() {\n");
             text.Append("        Health(20);\n");
             text.Append("        Speed(8);\n");
+            text.Append("        SpawnState(\"PossStnd\");\n");
+            text.Append("        Flag(\"Solid\", true);\n");
             text.Append("        ...\n");
             text.Append("    }\n\n");
-            text.Append("Copy the function into a .dpts file of your own and edit the numbers.\n");
-            text.Append("A file is applied by name, and files ending in .dpts are picked up from\n");
-            text.Append("the command line without a flag:\n\n");
-            text.Append("    dptdoom.exe -iwad doom2.wad mymod.dpts\n\n");
+            text.Append("The function name is the map number: 3004 is the zombieman. Change a\n");
+            text.Append("number and that is what the actor gets. Add a function for a number that\n");
+            text.Append("does not exist yet and the actor is created, copying the parent named in\n");
+            text.Append("DECORATE - see docs/DECORATE.md.\n\n");
 
-            text.Append("These files themselves are not loaded. That is deliberate: they set every\n");
-            text.Append("field to the value it already has, so applying them changes nothing, and\n");
-            text.Append("applying them after a DeHackEd patch would undo that patch. They are here\n");
-            text.Append("to be read.\n\n");
+            text.Append("A broken entry costs that actor, not the file and not the game: the rest\n");
+            text.Append("of the file is applied, the level loads, and the startup log names the\n");
+            text.Append("file and the line.\n\n");
 
             text.Append("Language reference\n");
             text.Append("------------------\n\n");

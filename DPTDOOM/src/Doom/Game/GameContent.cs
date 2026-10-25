@@ -58,20 +58,25 @@ namespace DPTDOOM
             // in the middle of it is noise.
             LoadReport.Clear();
 
-            DeHackEd.Initialize(args, wad);
-
-            // The built-in actor table, written out as SharpScript on first run so it can be
-            // read and copied. Placed here, after DeHackEd, because what gets written is the
-            // table as it now stands - a reference to the vanilla numbers is more useful than
-            // one that silently includes somebody's patch.
+            // The actor table as text, before anything else touches it.
             //
-            // Only when the player did not ask for a clean run: a test that unpacks files into
-            // the data directory is a test that writes to the machine, and a headless run on a
-            // build machine should leave nothing behind.
+            // The order here is the whole design, and getting it backwards is silent:
+            //
+            //   1. unpack - writes the table as SharpScript, if the folder is not there yet;
+            //   2. load    - applies that folder to the table, so an edit takes effect;
+            //   3. DeHackEd - a patch applied after the text wins over it, which is what
+            //                 somebody loading both expects;
+            //   4. scripts - a mod's own script runs last, so it can read the patch's result.
+            //
+            // Applying the text after DeHackEd would set every field back to the value written
+            // in the file and quietly undo the patch. That is why step 2 is here and not below.
             if (!args.nodata.Present)
             {
                 UnpackActorReference(args);
+                LoadActorReference();
             }
+
+            DeHackEd.Initialize(args, wad);
 
             // Scripts after DeHackEd, deliberately: a script may read what a patch wrote,
             // and the reverse is not true. A mod that ships both gets the newer tool able
@@ -132,6 +137,70 @@ namespace DPTDOOM
 
         private readonly System.Collections.Generic.List<string> actorReferenceProblems =
             new System.Collections.Generic.List<string>();
+
+        /// <summary>
+        /// Applies the actor folder to the table, and says what happened.
+        ///
+        /// Two things are worth a line in the load report and nothing else is:
+        ///
+        ///  - a file that does not parse, or names a state that does not exist, costs that actor
+        ///    and is reported with the file and the line;
+        ///  - a folder written by a different build is reported as possibly stale. Not an error:
+        ///    keeping an older reference is a legitimate choice, and deleting it regenerates.
+        ///
+        /// A folder that matches this build says nothing at all, which is the case on almost
+        /// every run and is why the message has to be reserved for the two above.
+        /// </summary>
+        private void LoadActorReference()
+        {
+            var problems = new System.Collections.Generic.List<string>();
+
+            var recorded = ActorTemplateWriter.TryReadFingerprint(ConfigUtilities.GetDataDirectory());
+
+            // Read before the folder is applied, and that is not a detail: the fingerprint
+            // describes the table this build was compiled with, and applying the folder changes
+            // the table. Taking it afterwards would compare the folder's own values against
+            // themselves, so every edited folder would claim to be stale.
+            var current = ActorTemplateWriter.CurrentFingerprint(DoomInfo.MobjInfos);
+
+            var described = ActorTemplateWriter.Load(
+                ConfigUtilities.GetDataDirectory(), DoomInfo.MobjInfos, problems);
+
+            foreach (var problem in problems)
+            {
+                LoadReport.Add("actor folder", problem,
+                    "that actor keeps its built-in values");
+            }
+
+            if (described == 0)
+            {
+                return;
+            }
+
+            ConsoleUi.Begin("actors");
+
+            if (recorded != null && recorded != current)
+            {
+                LoadReport.Add("actor folder",
+                    "written by a different build (fingerprint " + recorded + ", this build " +
+                    current + ")",
+                    "the values there may be stale; delete " +
+                    ActorTemplateWriter.FolderName + "/actors to regenerate");
+            }
+
+            if (problems.Count > 0)
+            {
+                ConsoleUi.Failed(problems.Count + " problem(s)");
+            }
+            else if (recorded != null && recorded != current)
+            {
+                ConsoleUi.Ok(described + " actor(s), from an older table");
+            }
+            else
+            {
+                ConsoleUi.Ok(described + " actor(s)");
+            }
+        }
 
         public static GameContent CreateDummy(params string[] wadPaths)
         {

@@ -1,19 +1,19 @@
-# Checks the actor reference that the game unpacks on first run.
+# Checks the actor folder: written on first run, loaded on every run, and editable.
 #
 #   powershell -NoProfile -File tools/test-actors.ps1
 #
-# The feature has one job: write the built-in actor table out as SharpScript so a modder can read
-# it and copy a working actor instead of guessing at every field. That makes three claims worth
-# checking from outside the process:
+# The feature has one job now, and it is bigger than when it started: the built-in actor table is
+# text on disk, and that text is what the game uses. So the claims are:
 #
-#   - the files appear on the first run, and only then;
-#   - a second run does not overwrite them, because the whole point is that they can be edited;
-#   - the file, fed back in with -script, is a no-op. That is the claim that makes it a
-#     reference rather than a guess: if the generated patch did not reproduce the table exactly,
-#     a modder would copy it, change one number, and get a result they could not explain.
+#   - the folder appears on the first run and is announced once;
+#   - it is loaded on every run after that, before DeHackEd, so a patch still wins;
+#   - editing a number in it changes the game, with no recompiling;
+#   - it is never overwritten, because the whole point is that it can be edited;
+#   - -nodata neither writes nor loads it, which is what a build machine wants.
 #
-# The last one is checked by the world hash, not by comparing text: the same run with and without
-# the generated file must reach the same state.
+# The last check is the one that matters most: an unchanged folder must produce the same world as
+# no folder at all. If it did not, the text would disagree with the engine it was generated from,
+# and every modder copying it would start from a lie.
 
 param(
     [string]$Iwad = "refs\iwads\doom2.wad",
@@ -36,7 +36,7 @@ function Assert-True([bool]$condition, [string]$message) {
 }
 
 if (-not (Test-Path $Iwad)) {
-    Write-Host "Actor reference test skipped: $Iwad not found."
+    Write-Host "Actor folder test skipped: $Iwad not found."
     exit 0
 }
 
@@ -63,12 +63,41 @@ function Run-Game([string]$name, [string[]]$extra) {
     }
 }
 
+# The world state line, which is the honest observable: two runs that agree here simulated the
+# same world, whatever the log says.
+function State-Of([string]$text) {
+    $match = [regex]::Match($text, 'State: mobj=\S+ sector=\S+ tic=\d+')
+    Assert-True $match.Success "the run produced a world state"
+    return $match.Value
+}
+
+# Replaces one line inside one actor's function, and nothing else.
+#
+# A blanket replace would also hit whatever else shares the text - "Health(20)" appears for more
+# than one actor - and then the test would be checking an edit it did not make.
+function Edit-Actor([string]$path, [string]$function, [string]$from, [string]$to) {
+    $text = Get-Content $path -Raw
+
+    $start = $text.IndexOf($function)
+    Assert-True ($start -ge 0) "$function is in the file"
+
+    $end = $text.IndexOf("`n}", $start)
+    Assert-True ($end -gt $start) "$function has an end"
+
+    $body = $text.Substring($start, $end - $start)
+    Assert-True ($body.Contains($from)) "$function contains '$from'"
+
+    $text = $text.Substring(0, $start) + $body.Replace($from, $to) + $text.Substring($end)
+    Set-Content -Path $path -Value $text -NoNewline -Encoding ASCII
+}
+
 try {
     Write-Host "First run"
     $first = Run-Game "first" @()
 
     Assert-True ($first.Text -like "*map MAP01: OK*") "the level loaded"
-    Assert-True ($first.Text -like "*actors: OK*") "the reference was written"
+    Assert-True ($first.Text -like "*actors: OK (4 file(s)*") "the folder was written"
+    Assert-True ($first.Text -like "*actor(s))*") "and then loaded"
 
     Assert-True (Test-Path $first.Actors) "the folder exists"
     Assert-True (Test-Path (Join-Path $first.Actors "monsters.dpts")) "and holds the monsters"
@@ -78,67 +107,54 @@ try {
 
     $monsters = Get-Content (Join-Path $first.Actors "monsters.dpts") -Raw
 
-    # The shotgun guy, by the numbers a player would recognise.
     Assert-True ($monsters -like "*fn Thing_3004()*") "a known actor is there"
     Assert-True ($monsters -like "*Health(20)*") "with its health"
     Assert-True ($monsters -like "*SpawnState(`"PossStnd`")*") "and its states, by name"
+    Assert-True ($monsters -like "*This file IS loaded*") `
+        "the header says the file is loaded, and before DeHackEd"
 
-    # A file that mentions a secret or a guess rather than the table would be useless.
-    Assert-True ($monsters -like "*This file is a REFERENCE*") `
-        "the header says what the file is"
+    Write-Host "The same folder on a later run"
+    # The same directory, not a fresh one: the question is whether a folder that already exists is
+    # written again, and a fresh directory would answer a different question.
+    $secondText = (& $Exe -headless -iwad $Iwad -warp 1 -skill 3 -tics $Tics -userdir $first.Dir 2>&1) -join "`n"
 
-    Write-Host "Second run"
-    $edited = Join-Path $first.Actors "monsters.dpts"
-    Set-Content -Path $edited -Value "// edited by the test`r`n" -Encoding ASCII
+    Assert-True ($secondText -like "*actor(s))*") "it is loaded again"
+    Assert-True ($secondText -notlike "*file(s)*") "but not written again"
 
-    $second = Run-Game "second" @()
+    # The claim that makes the text trustworthy: an unchanged folder is the engine's own table.
+    Assert-True ((State-Of $first.Text) -eq (State-Of $secondText)) `
+        "two runs with the same folder agree"
 
-    # The second run has its own directory, so it unpacks its own copy. What matters is the
-    # behaviour inside one directory, which is what the next block checks.
-    Assert-True ($second.Text -like "*actors: OK*") "a fresh directory unpacks"
+    Write-Host "Editing the folder"
+    # The claim that makes it the source of truth. A zombieman with 500 health fights differently,
+    # so a run with no input at all diverges from one where it has 20.
+    Edit-Actor (Join-Path $first.Actors "monsters.dpts") "fn Thing_3004()" "Health(20);" "Health(500);"
 
-    $again = & $Exe -headless -iwad $Iwad -warp 1 -skill 3 -tics 5 -userdir $first.Dir 2>&1
-    $againText = $again -join "`n"
+    # Started by hand rather than through Run-Game, because this run has to use the folder that was
+    # just edited, and Run-Game always makes a fresh directory.
+    $editedText = (& $Exe -headless -iwad $Iwad -warp 1 -skill 3 -tics $Tics -userdir $first.Dir 2>&1) -join "`n"
 
-    Assert-True ($againText -notlike "*actors: OK*") "a second run in the same directory is quiet"
-    Assert-True ((Get-Content $edited -Raw) -like "*edited by the test*") `
-        "and the edit survives"
+    Assert-True ($editedText -like "*actor(s))*") "the edited folder loaded"
+    Assert-True ($editedText -notlike "*actor folder*") "with no complaints about it"
+
+    Assert-True ((State-Of $editedText) -ne (State-Of $secondText)) `
+        "the edit changed the world"
+
+    Assert-True ((Get-Content (Join-Path $first.Actors "monsters.dpts") -Raw) -like "*Health(500)*") `
+        "and the edit was not overwritten by the run"
 
     Write-Host "-nodata"
     $clean = Run-Game "clean" @('-nodata')
 
     Assert-True (-not (Test-Path $clean.Actors)) "nothing is written"
-    Assert-True ($clean.Text -notlike "*actors: OK*") "and nothing is announced"
+    Assert-True ($clean.Text -notlike "*actors*") "and nothing is read either"
 
-    Write-Host "The generated file is a no-op"
-    # The claim that makes the reference trustworthy. The same run, with the generated patch fed
-    # back in, must reach the same world.
-    #
-    # Taken from the second directory, not the first: the first one's monsters.dpts was
-    # overwritten above to check that edits survive, and loading that would test the edit rather
-    # than the generator.
-    $plain = Run-Game "plain" @('-nodata')
+    # And with nothing read, the compiled table is the fallback - which is the same world as an
+    # unedited folder, since that is where the folder came from.
+    Assert-True ((State-Of $clean.Text) -eq (State-Of $secondText)) `
+        "the compiled table gives the same world as an unedited folder"
 
-    # One -script flag with several paths: the parser takes everything after the flag until the
-    # next option, so repeating the flag would only keep the first one.
-    $replayed = Run-Game "replayed" @('-nodata', '-script',
-                                      (Join-Path $second.Actors "monsters.dpts"),
-                                      (Join-Path $second.Actors "items.dpts"),
-                                      (Join-Path $second.Actors "decorations.dpts"))
-
-    Assert-True ($replayed.Text -like "*scripts: OK*") "the generated scripts loaded"
-    Assert-True ($replayed.Text -notlike "*script problem*") "with no problems"
-
-    $stateA = [regex]::Match($plain.Text, 'State: mobj=\S+ sector=\S+ tic=\d+')
-    $stateB = [regex]::Match($replayed.Text, 'State: mobj=\S+ sector=\S+ tic=\d+')
-
-    Assert-True $stateA.Success "the plain run reported a world state"
-    Assert-True $stateB.Success "and so did the one with the reference applied"
-
-    Assert-True ($stateA.Value -eq $stateB.Value) `
-        ("the generated patch changes nothing (" + $stateA.Value + " vs " + $stateB.Value + ")")
-
-    Write-Host "Actor reference test passed."
+    Write-Host "Actor folder test passed."
 }
 catch {
     Write-Host ""

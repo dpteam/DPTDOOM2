@@ -160,8 +160,12 @@ namespace DPTDOOMTest.UnitTests
             // problems, the loader is wrong and the report has become noise.
             LoadReport.Clear();
 
+            // -nodata: this test is about the IWAD loading clean, not about what the game writes
+            // to the data directory. Without it the run would unpack the actor folder into the
+            // machine's real data directory, and a stale folder there would then fail this test
+            // for a reason that has nothing to do with the IWAD.
             using (var content = new GameContent(
-                new CommandLineArgs(new[] { "-iwad", WadPath.Doom2 })))
+                new CommandLineArgs(new[] { "-iwad", WadPath.Doom2, "-nodata" })))
             {
                 Assert.IsFalse(LoadReport.HasProblems,
                     "the IWAD loads clean, but reported:\n" + LoadReport.Describe());

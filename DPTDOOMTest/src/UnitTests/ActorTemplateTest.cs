@@ -92,18 +92,23 @@ namespace DPTDOOMTest.UnitTests
         }
 
         [TestMethod]
-        public void TheReferenceIsNotLoadedByItself()
+        public void TheFolderIsLoadedBeforeDeHackEd()
         {
-            // The claim the file header makes. If this ever becomes false - if the unpacked
-            // folder is picked up automatically - then a DeHackEd patch loaded alongside it
-            // would be undone, and the header would be lying.
+            // The order is the whole design and it fails silently when reversed: applying the text
+            // after a patch would set every field back to the value written in the file and undo
+            // the patch. Checked in the source because the order is a property of the code, not of
+            // any value it produces - a behavioural test would have to construct a patch that
+            // happens to touch a field the text also touches, and would still pass if the two
+            // merely agreed.
             var source = File.ReadAllText(SourcePath("DPTDOOM/src/Doom/Game/GameContent.cs"));
 
-            StringAssert.Contains(source, "ActorTemplateWriter.UnpackIfMissing",
-                "the unpacker is called at all");
+            var load = source.IndexOf("LoadActorReference()", StringComparison.Ordinal);
+            var dehacked = source.IndexOf("DeHackEd.Initialize(", StringComparison.Ordinal);
 
-            Assert.IsFalse(source.Contains("dptdoom-data/actors\")"),
-                "and the folder is not fed back into the script library");
+            Assert.IsTrue(load >= 0, "the folder is loaded at all");
+            Assert.IsTrue(dehacked >= 0, "and DeHackEd runs at all");
+            Assert.IsTrue(load < dehacked,
+                "the actor folder is applied before DeHackEd, so a patch wins over it");
         }
 
         [TestMethod]
