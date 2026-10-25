@@ -644,6 +644,58 @@ ACTOR ConfusedImp 3001
     Assert-True ($lookExBadLog -like "*map MAP01: OK*") "and the level still loads"
     Assert-True ($lookExBadLog -notlike "*scripts: FAILED*") "the actor survives it"
 
+    Write-Host "With an A_Chase this engine can take"
+    $chase = Join-Path $work "chase.dec"
+
+    # The argument order is what this checks: flags in the third position. A converter that read
+    # them from the first position would report a state-label mistake and still load, so the
+    # absence of a report line is the observable.
+    [System.IO.File]::WriteAllText($chase, @"
+ACTOR TurretImp 3001
+{
+  States
+  {
+  Spawn:
+    TROO A 4 A_Look
+    Goto See
+  See:
+    TROO B 4 A_Chase(0, 0, CHF_DONTMOVE|CHF_NOPLAYACTIVE)
+    TROO C 4 A_Chase(0, 0, CHF_STOPIFBLOCKED)
+    Loop
+  }
+}
+"@)
+
+    $chaseLog = Run-Game "chase" @('-decorate', $chase)
+
+    Assert-True ($chaseLog -like "*scripts: OK*") "A_Chase with flags converts"
+    Assert-True ($chaseLog -like "*map MAP01: OK*") "the level loads"
+    Assert-True ($chaseLog -notlike "*the flags go third*") "the flags were read from the third position"
+    Assert-True ($chaseLog -notlike "*takes no arguments*") "and are not refused"
+    Assert-True ($chaseLog -notlike "*decorate problem*") "a block this engine can take reports nothing"
+
+    Write-Host "With A_Chase written in the order that looks natural"
+    $badChase = Join-Path $work "badchase.dec"
+
+    # A_Chase(CHF_DONTMOVE) is the mistake a modder makes. It must be named as a mistake, not
+    # quietly accepted as flags.
+    [System.IO.File]::WriteAllText($badChase, @"
+ACTOR ConfusedImp 3001
+{
+  States
+  {
+  See:
+    TROO A 4 A_Chase(CHF_DONTMOVE)
+    Loop
+  }
+}
+"@)
+
+    $badChaseLog = Run-Game "badchase" @('-decorate', $badChase)
+
+    Assert-True ($badChaseLog -like "*the flags go third*") "the mistake is explained"
+    Assert-True ($badChaseLog -like "*map MAP01: OK*") "and the level still loads"
+
     Write-Host "With a truncated file"
     $cutLog = Run-Game "cut" @('-decorate', $truncated)
 

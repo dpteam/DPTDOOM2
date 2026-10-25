@@ -319,6 +319,33 @@ namespace DPTDOOM.Scripting
         /// that "no such frame" is worded the same way in each and a modder reads one rule rather
         /// than three.
         /// </summary>
+        /// <summary>
+        /// One of A_Chase's two state arguments: -1 for "the actor's own", otherwise the state.
+        ///
+        /// An empty string is how the converter writes "use the actor's own", because a script has
+        /// no null literal and -1 would read as a state number.
+        /// </summary>
+        private int ResolveChaseState(ScriptCall call, int index)
+        {
+            var name = call.AsText(index);
+
+            if (name.Length == 0)
+            {
+                return -1;
+            }
+
+            int state;
+
+            if (!ResolveState(name, out state))
+            {
+                throw call.Fail("no such state '" + name +
+                                "' for 'A_Chase'; it is neither a state of this actor nor one of " +
+                                "the engine's");
+            }
+
+            return state;
+        }
+
         private int FrameNumber(string frameName, ScriptCall call)
         {
             int number;
@@ -723,6 +750,26 @@ namespace DPTDOOM.Scripting
 
                 DoomInfo.SetStateAction(number, (world, mobj) =>
                     world.MonsterBehavior.FaceTarget(mobj, maxTurn, offset));
+
+                return ScriptValue.Void;
+            });
+
+            // A_Chase with its arguments.
+            //
+            // The argument order is the one that trips people up, so it is written out here and in
+            // the docs: ZDoom's signature is A_Chase(melee, missile, flags), which makes flags the
+            // **third** argument. A_Chase(CHF_DONTMOVE) is not a turret - it is a state label of 16,
+            // and ZDoom would look for a state of that name.
+            host.Register("Chase", 4, 4, call =>
+            {
+                var number = FrameNumber(call.AsText(0), call);
+                var flags = call.AsInt(3);
+
+                var melee = ResolveChaseState(call, 1);
+                var missile = ResolveChaseState(call, 2);
+
+                DoomInfo.SetStateAction(number, (world, mobj) =>
+                    world.MonsterBehavior.Chase(mobj, flags, melee, missile));
 
                 return ScriptValue.Void;
             });

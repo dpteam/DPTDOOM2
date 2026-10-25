@@ -709,6 +709,22 @@ namespace DPTDOOM
 
         public void Chase(Mobj actor)
         {
+            Chase(actor, 0, -1, -1);
+        }
+
+        /// <summary>
+        /// A_Chase with its arguments: flags, and states to use instead of the actor's own.
+        ///
+        /// With no flags and -1 for both states this is plain A_Chase, and it has to stay **bit
+        /// for bit** the same: every monster in the IWAD runs it every tic, so its random draws,
+        /// its sight checks and its state changes go into the world hash.
+        ///
+        /// -1 means "the actor's own state" because MobjState.Null is 0 and therefore a legal
+        /// value; using it as the sentinel would make "no melee attack" indistinguishable from
+        /// "the actor's melee state", which are opposite instructions.
+        /// </summary>
+        public void Chase(Mobj actor, int flags, int meleeState, int missileState)
+        {
             if (actor.ReactionTime > 0)
             {
                 actor.ReactionTime--;
@@ -727,8 +743,23 @@ namespace DPTDOOM
                 }
             }
 
+            // CHF_NIGHTMAREFAST: the generic speed-up a mod asks for by name, in nightmare or fast
+            // mode. Separate from the vanilla one, which halves only the sergeant's frames and
+            // happens where the state is set.
+            if ((flags & ChaseFlags.NightmareFast) != 0 &&
+                (world.Options.Skill == GameSkill.Nightmare || world.Options.FastMonsters) &&
+                actor.Tics > 3)
+            {
+                actor.Tics -= actor.Tics / 2;
+
+                if (actor.Tics < 3)
+                {
+                    actor.Tics = 3;
+                }
+            }
+
             // Turn towards movement direction if not there yet.
-            if ((int)actor.MoveDir < 8)
+            if ((flags & ChaseFlags.NoDirectionTurn) == 0 && (int)actor.MoveDir < 8)
             {
                 actor.Angle = new Angle((int)actor.Angle.Data & (7 << 29));
 
@@ -744,10 +775,12 @@ namespace DPTDOOM
                 }
             }
 
+            var allAround = (flags & ChaseFlags.DontLookAllAround) == 0;
+
             if (actor.Target == null || (actor.Target.Flags & MobjFlags.Shootable) == 0)
             {
                 // Look for a new target.
-                if (LookForPlayers(actor, true))
+                if (LookForPlayers(actor, allAround))
                 {
                     // Got a new target.
                     return;
@@ -764,7 +797,10 @@ namespace DPTDOOM
                 actor.Flags &= ~MobjFlags.JustAttacked;
 
                 if (world.Options.Skill != GameSkill.Nightmare &&
-                    !world.Options.FastMonsters)
+                    !world.Options.FastMonsters &&
+                    (flags & ChaseFlags.DontMove) == 0 &&
+                    (flags & ChaseFlags.NoPostAttackTurn) == 0 &&
+                    (flags & ChaseFlags.StopIfBlocked) == 0)
                 {
                     NewChaseDir(actor);
                 }
@@ -772,8 +808,11 @@ namespace DPTDOOM
                 return;
             }
 
+            var melee = meleeState >= 0 ? meleeState : (int)actor.Info.MeleeState;
+            var missile = missileState >= 0 ? missileState : (int)actor.Info.MissileState;
+
             // Check for melee attack.
-            if (actor.Info.MeleeState != 0 && CheckMeleeRange(actor))
+            if (melee != 0 && CheckMeleeRange(actor))
             {
                 if (actor.Info.AttackSound != 0 ||
                     ActorSounds.Has((int)actor.Type, ActorSoundSlot.Attack))
@@ -782,13 +821,13 @@ namespace DPTDOOM
                         actor.Info.AttackSound, SfxType.Weapon);
                 }
 
-                actor.SetState(actor.Info.MeleeState);
+                actor.SetStateNumber(melee);
 
                 return;
             }
 
             // Check for missile attack.
-            if (actor.Info.MissileState != 0)
+            if (missile != 0)
             {
                 if (world.Options.Skill < GameSkill.Nightmare &&
                     !world.Options.FastMonsters &&
@@ -802,7 +841,7 @@ namespace DPTDOOM
                     goto noMissile;
                 }
 
-                actor.SetState(actor.Info.MissileState);
+                actor.SetStateNumber(missile);
                 actor.Flags |= MobjFlags.JustAttacked;
 
                 return;
@@ -814,7 +853,7 @@ namespace DPTDOOM
                 actor.Threshold == 0 &&
                 !world.VisibilityCheck.CheckSight(actor, actor.Target))
             {
-                if (LookForPlayers(actor, true))
+                if (LookForPlayers(actor, allAround))
                 {
                     // Got a new target.
                     return;
@@ -822,17 +861,34 @@ namespace DPTDOOM
             }
 
             // Chase towards player.
-            if (--actor.MoveCount < 0 || !Move(actor))
+            //
+            // The two flag guards sit inside the conditions rather than around the block, so that
+            // with no flags the short-circuit order - and therefore whether Move is called at all -
+            // is exactly what it was.
+            if ((flags & ChaseFlags.DontMove) != 0)
+            {
+                // A turret still counts its move count down, which is what keeps its attack rhythm
+                // the same as a monster that walks.
+                if (actor.MoveCount > 0)
+                {
+                    actor.MoveCount--;
+                }
+            }
+            else if ((--actor.MoveCount < 0 && (flags & ChaseFlags.NoRandomTurn) == 0) ||
+                     (!Move(actor) && (flags & ChaseFlags.StopIfBlocked) == 0))
             {
                 NewChaseDir(actor);
             }
 
             // Make active sound.
             //
-            // The order of the two conditions is not cosmetic: `ActiveSound != 0` is evaluated
+            // The order of the conditions is not cosmetic: `ActiveSound != 0` is evaluated
             // first, so for every vanilla actor exactly as many world-random numbers are drawn as
-            // before, whether or not a mod named a sound.
-            if ((actor.Info.ActiveSound != 0 ||
+            // before, whether or not a mod named a sound. The flag comes before the draw because
+            // it asks for the sound not to happen at all - drawing a number to throw it away would
+            // be worse than not drawing it.
+            if ((flags & ChaseFlags.NoPlayActive) == 0 &&
+                (actor.Info.ActiveSound != 0 ||
                  ActorSounds.Has((int)actor.Type, ActorSoundSlot.Active)) &&
                 world.Random.Next() < 3)
             {

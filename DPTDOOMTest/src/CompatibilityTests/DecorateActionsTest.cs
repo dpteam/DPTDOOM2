@@ -82,6 +82,23 @@ namespace DPTDOOMTest.CompatibilityTests
         }
 
         /// <summary>
+        /// Moves an already-spawned thing to a new place in the world.
+        ///
+        /// The unlink is not optional: SetThingPosition adds the thing to its sector's and
+        /// blockmap cell's lists without removing the old links, so calling it on a linked thing
+        /// makes the list point at itself and the next walk over that list never ends.
+        /// </summary>
+        private static void PlaceAt(World world, Mobj mobj, Fixed x, Fixed y)
+        {
+            world.ThingMovement.UnsetThingPosition(mobj);
+
+            mobj.X = x;
+            mobj.Y = y;
+
+            world.ThingMovement.SetThingPosition(mobj);
+        }
+
+        /// <summary>
         /// An imp whose see chain is one frame carrying the given call.
         ///
         /// The call has to be in the **same** function as the frames: a frame name is scoped to the
@@ -262,9 +279,7 @@ namespace DPTDOOMTest.CompatibilityTests
                 Assert.IsNotNull(player);
 
                 // The player due south of the imp, the imp facing east: 90 degrees to turn.
-                player.Mobj.X = imp.X;
-                player.Mobj.Y = imp.Y + Fixed.FromInt(64);
-                world.ThingMovement.SetThingPosition(player.Mobj);
+                PlaceAt(world, player.Mobj, imp.X, imp.Y + Fixed.FromInt(64));
 
                 imp.Target = player.Mobj;
                 imp.Angle = Angle.Ang0;
@@ -295,9 +310,7 @@ namespace DPTDOOMTest.CompatibilityTests
                 Assert.IsNotNull(imp);
                 Assert.IsNotNull(player);
 
-                player.Mobj.X = imp.X;
-                player.Mobj.Y = imp.Y + Fixed.FromInt(64);
-                world.ThingMovement.SetThingPosition(player.Mobj);
+                PlaceAt(world, player.Mobj, imp.X, imp.Y + Fixed.FromInt(64));
 
                 imp.Target = player.Mobj;
                 imp.Angle = Angle.Ang0;
@@ -325,9 +338,7 @@ namespace DPTDOOMTest.CompatibilityTests
                 Assert.IsNotNull(imp);
                 Assert.IsNotNull(player);
 
-                player.Mobj.X = imp.X;
-                player.Mobj.Y = imp.Y + Fixed.FromInt(64);
-                world.ThingMovement.SetThingPosition(player.Mobj);
+                PlaceAt(world, player.Mobj, imp.X, imp.Y + Fixed.FromInt(64));
 
                 imp.Target = player.Mobj;
                 imp.Angle = Angle.Ang0;

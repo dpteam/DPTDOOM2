@@ -191,6 +191,18 @@ namespace DPTDOOM.Scripting
 
         /// <summary>Offset added to the resulting angle, in degrees.</summary>
         public int FaceOffset;
+
+        /// <summary>True when the frame's action was A_Chase with arguments.</summary>
+        public bool HasChase;
+
+        /// <summary>A_Chase's flags, already summed from the CHF_ names.</summary>
+        public int ChaseFlags;
+
+        /// <summary>State to use instead of the actor's melee state, or null for the actor's own.</summary>
+        public string ChaseMeleeState;
+
+        /// <summary>State to use instead of the actor's missile state, or null for the actor's own.</summary>
+        public string ChaseMissileState;
     }
 
     /// <summary>
@@ -665,6 +677,21 @@ namespace DPTDOOM.Scripting
                               .Append(frame.FaceMaxTurn.ToString(CultureInfo.InvariantCulture))
                               .Append(", ")
                               .Append(frame.FaceOffset.ToString(CultureInfo.InvariantCulture))
+                              .Append(");\n");
+                    }
+
+                    if (frame.HasChase)
+                    {
+                        // An empty name means "the actor's own state", which is what the script
+                        // call reads as -1. A state this actor declared is written as its frame
+                        // name; anything else is written as-is and resolved by the script layer,
+                        // the same rule as a jump.
+                        script.Append("    Chase(\"").Append(name).Append("\", \"")
+                              .Append(ChaseStateName(actor, frame.ChaseMeleeState, problems, frame))
+                              .Append("\", \"")
+                              .Append(ChaseStateName(actor, frame.ChaseMissileState, problems, frame))
+                              .Append("\", ")
+                              .Append(frame.ChaseFlags.ToString(CultureInfo.InvariantCulture))
                               .Append(");\n");
                     }
 
@@ -1488,6 +1515,12 @@ namespace DPTDOOM.Scripting
                 return;
             }
 
+            if (string.Equals(frame.Action, "A_Chase", StringComparison.OrdinalIgnoreCase))
+            {
+                ReadChase(arguments, actor, frame, problems);
+                return;
+            }
+
             if (!isJump)
             {
                 if (hasArguments)
@@ -1967,6 +2000,258 @@ namespace DPTDOOM.Scripting
             }
 
             return int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out value);
+        }
+
+        /// <summary>
+        /// A_Chase with its arguments.
+        ///
+        /// The order is the trap, so it is spelled out here: ZDoom's signature is
+        /// <c>A_Chase(melee, missile, flags)</c>, which makes flags the **third** argument.
+        /// A_Chase(CHF_DONTMOVE) is therefore not a turret - it is a state label of 16, and ZDoom
+        /// would go looking for a state of that name and find nothing. A mod that writes it gets
+        /// told what it actually means here, instead of being quietly given the wrong thing.
+        ///
+        /// 0 in either of the first two positions means "the actor's own", which is how mods write
+        /// "flags only". That is a reading, not a certainty: ZDoom would take 0 as a state label
+        /// and fail to find it. The reading is the only one that makes A_Chase(0, 0, flags) mean
+        /// anything, and it is said so in the docs rather than left to be discovered.
+        /// </summary>
+        private static void ReadChase(List<List<Token>> arguments, DecorateActor actor,
+                                      StateFrame frame, IList<string> problems)
+        {
+            // No arguments at all: leave the plain action in place, so a mod that writes A_Chase()
+            // gets exactly the engine's own A_Chase rather than a closure that calls it.
+            if (arguments.Count == 0)
+            {
+                return;
+            }
+
+            frame.Action = "";
+            frame.HasChase = true;
+
+            frame.ChaseMeleeState = ReadChaseState(arguments, 0, actor, frame, problems, "melee");
+            frame.ChaseMissileState = ReadChaseState(arguments, 1, actor, frame, problems, "missile");
+
+            if (arguments.Count < 3 || arguments[2].Count == 0)
+            {
+                return;
+            }
+
+            int flags;
+            string unknown;
+
+            if (TryReadChaseFlags(arguments[2], out flags, out unknown))
+            {
+                frame.ChaseFlags = flags;
+
+                // Named, not swallowed: each of these asks for behaviour this engine does not have,
+                // and a modder who wrote one should hear about it once rather than wonder.
+                if ((flags & ChaseFlags.FastChase) != 0)
+                {
+                    problems.Add(actor.Name + " line " + frame.Line + ": 'A_Chase' CHF_FASTCHASE " +
+                                 "is accepted and has no effect - this engine has no boss " +
+                                 "strafing to turn on");
+                }
+
+                if ((flags & ChaseFlags.Resurrect) != 0)
+                {
+                    problems.Add(actor.Name + " line " + frame.Line + ": 'A_Chase' CHF_RESURRECT " +
+                                 "is accepted and has no effect - this engine has no resurrection");
+                }
+
+                if ((flags & ChaseFlags.DontIdle) != 0)
+                {
+                    problems.Add(actor.Name + " line " + frame.Line + ": 'A_Chase' CHF_DONTIDLE " +
+                                 "is accepted and has no effect - this engine has no wander, so a " +
+                                 "monster without a target returns to its spawn state");
+                }
+            }
+            else
+            {
+                problems.Add(actor.Name + " line " + frame.Line + ": 'A_Chase' flag '" + unknown +
+                             "' is not one this engine knows, so the chase runs without it");
+            }
+        }
+
+        /// <summary>One of A_Chase's two state arguments.</summary>
+        private static string ReadChaseState(List<List<Token>> arguments, int index,
+                                             DecorateActor actor, StateFrame frame,
+                                             IList<string> problems, string which)
+        {
+            if (index >= arguments.Count || arguments[index].Count == 0)
+            {
+                return null;
+            }
+
+            var token = arguments[index].Count == 1 ? arguments[index][0] : null;
+
+            if (token == null)
+            {
+                problems.Add(actor.Name + " line " + frame.Line + ": 'A_Chase' " + which +
+                             " state must be one name, so the actor's own is used");
+                return null;
+            }
+
+            // 0 is how a mod writes "no override" when it only wants flags.
+            if (token.IsNumber && token.Number == 0)
+            {
+                return null;
+            }
+
+            // A flag written in a state position. This is the natural mistake - the signature reads
+            // "A_Chase(flags)" in a modder's memory - and it deserves the real explanation rather
+            // than "there is no state called CHF_DONTMOVE", which is true and useless.
+            if (!token.IsNumber)
+            {
+                int ignored;
+
+                if (TryReadChaseFlags(new List<Token> { token }, out ignored, out _))
+                {
+                    problems.Add(actor.Name + " line " + frame.Line + ": 'A_Chase' " + which +
+                                 " argument is the flag '" + token.Text + "', but the first two " +
+                                 "arguments are state names - the flags go third. Write " +
+                                 "A_Chase(0, 0, ...) to keep the actor's own attack states. " +
+                                 "The actor's own " + which + " state is used");
+                    return null;
+                }
+            }
+
+            if (token.IsNumber)
+            {
+                problems.Add(actor.Name + " line " + frame.Line + ": 'A_Chase' " + which +
+                             " argument is the number " + token.Number.ToString(
+                                 CultureInfo.InvariantCulture) +
+                             ", but the first two arguments are state names - the flags go " +
+                             "third. The actor's own " + which + " state is used");
+                return null;
+            }
+
+            // Kept as written; resolved when the states are emitted, because the chain may be
+            // declared further down the same block.
+            return token.Text;
+        }
+
+        /// <summary>
+        /// A_Chase's flag argument, written as CHF_ names joined by bars, a number, or a mix.
+        ///
+        /// The numbers are ZDoom's own (p_enemy.cpp), not a guess.
+        /// </summary>
+        private static bool TryReadChaseFlags(List<Token> argument, out int flags, out string unknown)
+        {
+            flags = 0;
+            unknown = null;
+
+            if (argument.Count != 1)
+            {
+                unknown = "the whole argument";
+                return false;
+            }
+
+            var token = argument[0];
+
+            if (token.IsNumber)
+            {
+                flags = token.Number;
+                return true;
+            }
+
+            foreach (var part in token.Text.Split('|'))
+            {
+                var name = part.Trim();
+
+                if (name.Length == 0)
+                {
+                    continue;
+                }
+
+                switch (name.ToUpperInvariant())
+                {
+                    case "CHF_FASTCHASE":
+                        flags |= ChaseFlags.FastChase;
+                        break;
+
+                    case "CHF_NOPLAYACTIVE":
+                        flags |= ChaseFlags.NoPlayActive;
+                        break;
+
+                    case "CHF_NIGHTMAREFAST":
+                        flags |= ChaseFlags.NightmareFast;
+                        break;
+
+                    case "CHF_RESURRECT":
+                        flags |= ChaseFlags.Resurrect;
+                        break;
+
+                    case "CHF_DONTMOVE":
+                        flags |= ChaseFlags.DontMove;
+                        break;
+
+                    case "CHF_NORANDOMTURN":
+                        flags |= ChaseFlags.NoRandomTurn;
+                        break;
+
+                    case "CHF_NODIRECTIONTURN":
+                        flags |= ChaseFlags.NoDirectionTurn;
+                        break;
+
+                    case "CHF_NOPOSTATTACKTURN":
+                        flags |= ChaseFlags.NoPostAttackTurn;
+                        break;
+
+                    case "CHF_STOPIFBLOCKED":
+                        flags |= ChaseFlags.StopIfBlocked;
+                        break;
+
+                    case "CHF_DONTIDLE":
+                        flags |= ChaseFlags.DontIdle;
+                        break;
+
+                    case "CHF_DONTLOOKALLAROUND":
+                        flags |= ChaseFlags.DontLookAllAround;
+                        break;
+
+                    default:
+                        int value;
+
+                        if (!TryReadWholeNumberText(name, out value))
+                        {
+                            unknown = name;
+                            return false;
+                        }
+
+                        flags |= value;
+                        break;
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// One of A_Chase's state arguments as it should be written in the script.
+        ///
+        /// Same rule as a jump: this actor's own chain wins over the engine's, because a mod that
+        /// called its own chain "See" must reach its own. A name that is neither is reported and
+        /// becomes "the actor's own", so the chase still works.
+        /// </summary>
+        private static string ChaseStateName(DecorateActor actor, string label,
+                                             IList<string> problems, StateFrame frame)
+        {
+            if (label == null)
+            {
+                return "";
+            }
+
+            if (HasChain(actor, label))
+            {
+                return FrameName(label, 1);
+            }
+
+            problems.Add(actor.Name + " line " + frame.Line + ": 'A_Chase' names the state '" +
+                         label + "', which is not one of this actor's own chains, so the actor's " +
+                         "own state is used");
+
+            return "";
         }
 
         /// <summary>
