@@ -139,40 +139,114 @@ namespace DPTDOOM
         }
 
         /// <summary>
-        /// Writes the actor reference into the data directory, once.
+        /// Writes the actor reference into the data directory, once, and keeps the archive the
+        /// engine builds for itself up to date.
         ///
-        /// Never overwrites and never fails the load: the folder is a convenience for a modder,
-        /// and a read-only data directory must not stop the game. Problems go to the load
-        /// report, which is where a player already looks when something is missing.
+        /// The folder is never overwritten; the archive is a build artifact and is rewritten when
+        /// the fingerprint differs, because nobody edits a PK3 by hand and a stale one would be
+        /// invisible. The two exist for different reasons: the folder is what a person edits, the
+        /// archive is what can be copied to another machine as one file.
+        ///
+        /// Never fails the load: a read-only data directory must not stop the game. Problems go to
+        /// the load report, which is where a player already looks when something is missing.
         /// </summary>
         private void UnpackActorReference(CommandLineArgs args)
         {
-            var written = ActorTemplateWriter.UnpackIfMissing(
-                ConfigUtilities.GetDataDirectory(), DoomInfo.MobjInfos, actorReferenceProblems);
+            var dataDirectory = ConfigUtilities.GetDataDirectory();
 
-            if (written.Count == 0)
+            var written = ActorTemplateWriter.UnpackIfMissing(
+                dataDirectory, DoomInfo.MobjInfos, actorReferenceProblems);
+
+            // Written on every run rather than only on the first: the check is a fingerprint
+            // comparison, and on the overwhelming majority of runs it writes nothing.
+            var archiveProblems = new System.Collections.Generic.List<string>();
+
+            var pk3Path = ActorTemplateWriter.Pk3Path(dataDirectory);
+
+            var stale = !System.IO.File.Exists(pk3Path) ||
+                        !string.Equals(ReadPk3Fingerprint(pk3Path),
+                                       ActorTemplateWriter.CurrentFingerprint(DoomInfo.MobjInfos),
+                                       StringComparison.Ordinal);
+
+            if (stale)
+            {
+                ActorTemplateWriter.WritePk3(dataDirectory, DoomInfo.MobjInfos, archiveProblems);
+            }
+
+            if (written.Count == 0 && archiveProblems.Count == 0 && !stale)
             {
                 return;
             }
 
-            ConsoleUi.Begin("actors");
+            if (written.Count > 0 || archiveProblems.Count > 0)
+            {
+                ConsoleUi.Begin("actors");
+            }
 
             foreach (var problem in actorReferenceProblems)
             {
                 LoadReport.Add("actor reference", problem, "that file was not written");
             }
 
-            if (actorReferenceProblems.Count > 0)
+            foreach (var problem in archiveProblems)
             {
-                ConsoleUi.Failed(actorReferenceProblems.Count + " problem(s)");
+                LoadReport.Add("actor archive", problem, "it is read from the folder instead");
+            }
+
+            if (actorReferenceProblems.Count > 0 || archiveProblems.Count > 0)
+            {
+                ConsoleUi.Failed((actorReferenceProblems.Count + archiveProblems.Count) +
+                                 " problem(s)");
             }
             else
             {
                 // Said once, on the run that creates it, and never again - a line on every
                 // start about a folder that has not changed would be noise.
                 ConsoleUi.Ok(written.Count + " file(s) in " +
-                             ActorTemplateWriter.FolderName + "/actors");
+                             ActorTemplateWriter.FolderName + "/actors" +
+                             (stale ? "; " + ActorTemplateWriter.Pk3Name + " refreshed" : ""));
             }
+        }
+
+        /// <summary>
+        /// The fingerprint stored in the archive, or null.
+        ///
+        /// Read from the README the archive carries rather than kept in a marker of its own: the
+        /// archive is supposed to be the same reference the folder holds, so the two cannot
+        /// disagree about what build they came from.
+        /// </summary>
+        private static string ReadPk3Fingerprint(string path)
+        {
+            try
+            {
+                var archive = new ZipArchiveReader(path);
+
+                foreach (var entry in archive.Entries)
+                {
+                    if (!entry.Name.EndsWith("README.txt", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    var text = System.Text.Encoding.UTF8.GetString(archive.ReadEntry(entry));
+
+                    foreach (var line in text.Split('\n'))
+                    {
+                        var trimmed = line.Trim();
+
+                        if (trimmed.StartsWith("Fingerprint:", StringComparison.Ordinal))
+                        {
+                            return trimmed.Substring("Fingerprint:".Length).Trim();
+                        }
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                // Unreadable or half-written archive: treat as stale and rewrite it.
+            }
+
+            return null;
         }
 
         private readonly System.Collections.Generic.List<string> actorReferenceProblems =

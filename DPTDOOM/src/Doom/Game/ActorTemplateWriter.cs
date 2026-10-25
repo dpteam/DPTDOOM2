@@ -272,6 +272,131 @@ namespace DPTDOOM
             return FingerprintOf(Build(table));
         }
 
+        /// <summary>Name of the archive this writer keeps beside the folder.</summary>
+        public const string Pk3Name = "dptdoom.pk3";
+
+        /// <summary>
+        /// Writes the actor reference into a PK3 that the engine builds for itself.
+        ///
+        /// A port that ships its own content usually ships it as an archive built by its
+        /// build scripts. This one has no build scripts on the player's machine, so the engine
+        /// makes the archive on first run and refreshes it when the fingerprint changes - the same
+        /// idea as the loose folder, with two differences that matter:
+        ///
+        ///  - the archive is a **build artifact** and is rewritten when stale, while the folder is
+        ///    editable and is never touched. That is why the folder still wins when both exist: an
+        ///    edit is a decision, and a regenerated artifact is not;
+        ///  - the archive is one file, so it can be copied to another machine as-is. A folder cannot
+        ///    be, not usefully: it is three files and a README whose paths matter.
+        ///
+        /// Returns true when it wrote something.
+        /// </summary>
+        public static bool WritePk3(string dataDirectory, MobjInfo[] table, IList<string> problems)
+        {
+            var path = System.IO.Path.Combine(dataDirectory, FolderName, Pk3Name);
+
+            try
+            {
+                if (System.IO.Directory.Exists(System.IO.Path.Combine(dataDirectory, FolderName)))
+                {
+                    // The folder exists: the archive belongs beside it.
+                }
+                else
+                {
+                    System.IO.Directory.CreateDirectory(
+                        System.IO.Path.Combine(dataDirectory, FolderName));
+                }
+
+                var files = new List<KeyValuePair<string, byte[]>>();
+
+                foreach (var file in Build(table))
+                {
+                    files.Add(new KeyValuePair<string, byte[]>(
+                        "actors/" + file.Name,
+                        System.Text.Encoding.UTF8.GetBytes(file.Content)));
+                }
+
+                Pk3Writer.Write(path, files, false);
+                return true;
+            }
+            catch (Exception e)
+            {
+                // A read-only data directory must not stop the game, and the built-in table is
+                // already correct without this archive.
+                problems.Add(Pk3Name + ": " + e.Message);
+
+                return false;
+            }
+        }
+
+        /// <summary>The archive's path, whether or not it exists.</summary>
+        public static string Pk3Path(string dataDirectory)
+        {
+            return System.IO.Path.Combine(dataDirectory, FolderName, Pk3Name);
+        }
+
+        /// <summary>
+        /// Reads the actor reference from the archive.
+        ///
+        /// Used when the loose folder is not there - a fresh copy of the archive on a machine that
+        /// has never unpacked it. The folder wins when both exist, because it is what a person
+        /// edits.
+        /// </summary>
+        private static int LoadFromPk3(string dataDirectory, MobjInfo[] table,
+                                       IList<string> problems)
+        {
+            var path = Pk3Path(dataDirectory);
+
+            if (!System.IO.File.Exists(path))
+            {
+                return 0;
+            }
+
+            try
+            {
+                var archive = new ZipArchiveReader(path);
+                var library = new Scripting.ScriptLibrary();
+                var any = false;
+
+                foreach (var entry in archive.Entries)
+                {
+                    var name = entry.Name.Replace('\\', '/');
+
+                    if (!name.StartsWith("actors/", StringComparison.OrdinalIgnoreCase) ||
+                        !name.EndsWith(".dpts", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    library.Add(System.Text.Encoding.UTF8.GetString(archive.ReadEntry(entry)),
+                        name, table);
+
+                    any = true;
+                }
+
+                if (!any)
+                {
+                    return 0;
+                }
+
+                library.ApplyTo(table);
+
+                foreach (var problem in library.Problems)
+                {
+                    problems.Add(problem);
+                }
+
+                return library.Patches.Count;
+            }
+            catch (Exception e)
+            {
+                // A corrupt archive is reported and ignored: the built-in table is correct without
+                // it, and a half-written file must not stop the game.
+                problems.Add(Pk3Name + ": " + e.Message);
+                return 0;
+            }
+        }
+
         /// <summary>
         /// Applies the actor files from the folder, if it has any.
         ///
@@ -291,7 +416,9 @@ namespace DPTDOOM
 
             if (!System.IO.Directory.Exists(folder))
             {
-                return 0;
+                // No folder: fall back to the archive the engine builds for itself. That is the
+                // case on a machine that was handed a copy of the PK3 and never unpacked it.
+                return LoadFromPk3(dataDirectory, table, problems);
             }
 
             var library = new Scripting.ScriptLibrary();
