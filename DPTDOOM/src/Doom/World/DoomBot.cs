@@ -432,6 +432,7 @@ namespace DPTDOOM
             nav = sharedNav ?? new NavGraph(world.Map);
             path = new int[nav.NodeCount];
             escapePath = new int[nav.NodeCount];
+            sectorExitCache = new sbyte[world.Map.Sectors.Length];
             visitedSector = new bool[world.Map.Sectors.Length];
             triedSector = new bool[world.Map.Sectors.Length];
 
@@ -1375,6 +1376,78 @@ namespace DPTDOOM
             trapped = true;
         }
 
+        /// <summary>
+        /// Whether every sector along a route can still reach the exit.
+        ///
+        /// This is the check that actually keeps the bot out of a pocket, and it took a wrong
+        /// version to see why. Checking only the *destination* is not enough: the graph is
+        /// directed, so a route to somewhere harmless can pass **through** a one-way drop and
+        /// leave the bot stranded at the far end while the destination itself was fine.
+        /// Measured on MAP01: a Sweeper heading for a point on the far side went through the
+        /// sector 43 area, and from there only six of the map's fifty-nine sectors are
+        /// reachable - the exit is not one of them.
+        ///
+        /// Answering per sector, cached, because a route is hundreds of nodes long and the
+        /// same handful of sectors repeats.
+        /// </summary>
+        internal bool RouteStaysEscapable(int[] route, int length)
+        {
+            if (exitSector < 0)
+            {
+                return true;
+            }
+
+            for (var i = 0; i < length; i++)
+            {
+                if (!SectorCanReachExit(nav.GetSector(route[i])))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Whether a sector reaches the exit, cached per sector.
+        ///
+        /// The cache is valid for the life of the bot: the graph does not change, and the exit
+        /// does not move. Penalties and banned passages do change, which is why the answer is
+        /// computed with a private buffer and the plain search rather than through anything
+        /// that remembers state.
+        /// </summary>
+        private bool SectorCanReachExit(int sector)
+        {
+            if (sector < 0 || sector >= sectorExitCache.Length)
+            {
+                return true;
+            }
+
+            if (sectorExitCache[sector] != 0)
+            {
+                return sectorExitCache[sector] > 0;
+            }
+
+            var first = nav.FirstNodeOfSector(sector);
+            var reaches = false;
+
+            if (first >= 0)
+            {
+                reaches = nav.FindPathToSector(first, exitSector, escapePath) > 0;
+            }
+
+            sectorExitCache[sector] = reaches ? (sbyte)1 : (sbyte)-1;
+            return reaches;
+        }
+
+        /// <summary>
+        /// Per-sector answer to "can the exit be reached from here": 0 unknown, 1 yes, -1 no.
+        ///
+        /// A byte array rather than a dictionary: there is one entry per sector of the map and
+        /// the index is the sector number.
+        /// </summary>
+        private readonly sbyte[] sectorExitCache;
+
         internal bool CanStillLeave(int node, int fromNode)
         {
             if (exitSector < 0)
@@ -1382,13 +1455,76 @@ namespace DPTDOOM
                 return true;
             }
 
-            if (fromNode >= 0 && nav.FindPathToSector(fromNode, exitSector, escapePath) <= 0)
+            // Whether the bot is *currently* trapped is a question about its sector, not
+            // about the nearest navigation node. The nearest node can belong to the sector
+            // on the other side of the line the bot is standing on, and answering from it
+            // is how a bot inside a one-way pocket decided it was not trapped: the node it
+            // asked about was in the room it had just dropped out of.
+            if (IsTrappedNow())
             {
                 return true;
             }
 
             return nav.FindPathToSector(node, exitSector, escapePath) > 0;
         }
+
+        /// <summary>
+        /// Whether the exit can be reached from the sector the bot is standing in.
+        ///
+        /// Answered by trying the sector's own nodes rather than the nearest one: a sector can
+        /// hold several clusters of points that do not see each other, and the nearest node is
+        /// not always the connected one - the same lesson the recovery path in
+        /// <see cref="PlanExplore"/> already learned.
+        ///
+        /// Cached per sector because this runs while planning, which happens on every arrival,
+        /// and the answer cannot change without the bot changing sector.
+        /// </summary>
+        private bool IsTrappedNow()
+        {
+            var mobj = player.Mobj;
+
+            if (mobj == null || exitSector < 0)
+            {
+                return false;
+            }
+
+            var sector = mobj.Subsector.Sector.Number;
+
+            if (sector == trappedCheckedSector)
+            {
+                return trappedResult;
+            }
+
+            trappedCheckedSector = sector;
+            trappedResult = !SectorReachesExit(sector);
+
+            return trappedResult;
+        }
+
+        /// <summary>
+        /// Whether any node of this sector reaches the exit.
+        ///
+        /// Any, not all: one connected cluster is enough to get out, and requiring every node
+        /// would call a large room a trap because of one point wedged behind a pillar.
+        /// </summary>
+        private bool SectorReachesExit(int sector)
+        {
+            var first = nav.FirstNodeOfSector(sector);
+
+            if (first >= 0 && nav.FindPathToSector(first, exitSector, escapePath) > 0)
+            {
+                return true;
+            }
+
+            var node = nav.NodeAt(player.Mobj.X, player.Mobj.Y);
+
+            return node >= 0 && nav.FindPathToSector(node, exitSector, escapePath) > 0;
+        }
+
+        /// <summary>The sector the trapped answer was computed for, or -1.</summary>
+        private int trappedCheckedSector = -1;
+
+        private bool trappedResult;
 
         private void PlanExplore(int continueFrom)
         {
@@ -1519,7 +1655,8 @@ namespace DPTDOOM
 
                 var length = nav.FindPath(start, target, path);
 
-                if (length > 0 && CanStillLeave(target, start))
+                if (length > 0 && CanStillLeave(target, start) &&
+                    RouteStaysEscapable(path, length))
                 {
                     pathLength = length;
                     return;
@@ -1575,7 +1712,8 @@ namespace DPTDOOM
                 {
                     var explored = nav.FindPath(node, target, path);
 
-                    if (explored > 0 && CanStillLeave(target, node))
+                    if (explored > 0 && CanStillLeave(target, node) &&
+                        RouteStaysEscapable(path, explored))
                     {
                         pathLength = explored;
                         pathIndex = 0;

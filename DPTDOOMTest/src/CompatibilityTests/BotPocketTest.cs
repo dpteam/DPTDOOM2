@@ -77,6 +77,62 @@ namespace DPTDOOMTest.CompatibilityTests
             }
         }
 
+        [TestMethod]
+        public void ARouteThroughThePocketIsRefused()
+        {
+            // The check that actually keeps the bot out, and the one that was missing.
+            //
+            // Checking only the destination was not enough: the graph is directed, so a route
+            // to somewhere perfectly safe can pass **through** a one-way drop, and the bot is
+            // stranded at the far end while the destination was fine all along. That is what
+            // happened on MAP01 - a Sweeper heading for a point on the far side went through
+            // the sector 43 area and stayed there for the rest of the run, with three thousand
+            // tics of "no route".
+            using (var content = GameContent.CreateDummy(WadPath.Doom2))
+            {
+                var world = BuildMap01(content);
+                var nav = new NavGraph(world.Map);
+
+                var exitSector = FindExitSector(world.Map);
+
+                if (exitSector < 0)
+                {
+                    Assert.Inconclusive("MAP01 has no exit line");
+                }
+
+                var spawn = nav.NodeAt(world.Options.Players[0].Mobj.X, world.Options.Players[0].Mobj.Y);
+                var pocket = nav.NodeAt(Fixed.FromInt(350), Fixed.FromInt(1849));
+
+                if (spawn < 0 || pocket < 0)
+                {
+                    Assert.Inconclusive("the graph has no node near the spawn or the pocket");
+                }
+
+                var bot = new DoomBot(world, world.Options.Players[0], nav, null, BotStyle.Sweeper);
+
+                // The rule is checked directly rather than through a real route: the pocket
+                // is not reachable from the spawn by a graph path any more (that is what the
+                // guard achieved), so a route through it has to be constructed to test the
+                // refusal. What matters is the rule, not how the bot would have got there.
+                var route = new[] { spawn, pocket };
+
+                Assert.IsFalse(bot.RouteStaysEscapable(route, route.Length),
+                    "a route that ends in the pocket is refused");
+
+                var back = new[] { pocket, pocket };
+
+                Assert.IsFalse(bot.RouteStaysEscapable(back, back.Length),
+                    "and so is one that stays there");
+
+                // A route that stays in the reachable part of the map is allowed, or the guard
+                // would refuse every plan and the bot would never move.
+                var ordinary = new[] { spawn, spawn };
+
+                Assert.IsTrue(bot.RouteStaysEscapable(ordinary, ordinary.Length),
+                    "an ordinary route from the spawn is allowed");
+            }
+        }
+
         private static World BuildMap01(GameContent content)
         {
             var options = new GameOptions();
