@@ -346,6 +346,32 @@ namespace DPTDOOM
 		private Mobj bombSpot;
 		private int bombDamage;
 
+		/// <summary>
+		/// How far the blast reaches, which vanilla keeps equal to the damage.
+		///
+		/// A separate field rather than reusing <see cref="bombDamage"/>: the range check and the
+		/// falloff are two different questions, and only the second one involves the damage.
+		/// </summary>
+		private int bombRadius;
+
+		/// <summary>
+		/// Whether the explosion is allowed to hurt the actor that caused it.
+		///
+		/// False by default, and that default is **not** the same as "always exempt the source".
+		/// Vanilla Doom does not exempt the source at all - a rocket hurts the player who fired it
+		/// at point blank, and the tests that compare the world hash depend on it. Only
+		/// <see cref="exemptSource"/> turns the exemption on, and only DECORATE's A_Explode asks
+		/// for it, because ZDoom's XF_HURTSOURCE is what removes the exemption there.
+		///
+		/// Keeping the two ideas apart is what stops a new flag from changing a vanilla rocket.
+		/// </summary>
+		private bool bombHurtSource;
+
+		/// <summary>
+		/// True only for an A_Explode that did not ask for XF_HURTSOURCE.
+		/// </summary>
+		private bool exemptSource;
+
 		private Func<Mobj, bool> radiusAttackFunc;
 
 		private void InitRadiusAttack()
@@ -369,6 +395,20 @@ namespace DPTDOOM
 				return true;
 			}
 
+			// The source is exempt **only** when this explosion says so, and vanilla never says so.
+			// Vanilla Doom does not exempt the source of a radius attack: a rocket hurts the player
+			// who fired it at point blank, and the world-hash tests depend on that. Exempting it by
+			// default changed the world of every vanilla rocket - the failure looked like a test
+			// problem and was a real regression.
+			//
+			// And the spot is not exempt either. Those are different actors for a barrel: its
+			// Explode passes whoever it was aiming at as the source, which is what makes a barrel
+			// chain-reaction work. Exempting the spot as well would make a barrel immune to itself.
+			if (exemptSource && thing == bombSource)
+			{
+				return true;
+			}
+
 			var dx = Fixed.Abs(thing.X - bombSpot.X);
 			var dy = Fixed.Abs(thing.Y - bombSpot.Y);
 
@@ -380,7 +420,7 @@ namespace DPTDOOM
 				dist = Fixed.Zero;
 			}
 
-			if (dist.Data >= bombDamage)
+			if (dist.Data >= bombRadius)
 			{
 				// Out of range.
 				return true;
@@ -397,12 +437,41 @@ namespace DPTDOOM
 
 		/// <summary>
 		/// Source is the creature that caused the explosion at spot.
+		///
+		/// This is the vanilla signature, where the damage and the radius are the same number and
+		/// the source is always exempt. Those are facts a rocket depends on, so the overload below
+		/// keeps this one as the call with the default parameters rather than changing its meaning.
 		/// </summary>
 		public void RadiusAttack(Mobj spot, Mobj source, int damage)
 		{
+			RadiusAttack(spot, source, damage, damage, false, false);
+		}
+
+		/// <summary>
+		/// Radius attack with the damage and the radius as separate numbers, and a choice of
+		/// whether the source is hurt.
+		///
+		/// Vanilla only ever calls this with radius == damage, hurtSource false and
+		/// exemptSourceRequested false, so its world is unchanged. DECORATE's A_Explode needs the
+		/// separation: A_Explode(128, 128) is a different explosion from A_Explode(128, 64), and
+		/// collapsing them back into one number would mean a rocket-sized damage in a much bigger
+		/// circle, or a small damage in a tiny one.
+		///
+		/// hurtSource and exemptSourceRequested are two different questions, and collapsing them is
+		/// how a new flag would change a vanilla rocket. The first is what the explosion asks for;
+		/// the second is whether this caller has ZDoom's rule at all.
+		/// </summary>
+		public void RadiusAttack(Mobj spot, Mobj source, int damage, int radius, bool hurtSource)
+		{
+			RadiusAttack(spot, source, damage, radius, hurtSource, true);
+		}
+
+		private void RadiusAttack(Mobj spot, Mobj source, int damage, int radius, bool hurtSource,
+		                          bool exemptSourceRequested)
+		{
 			var bm = world.Map.BlockMap;
 
-			var dist = Fixed.FromInt(damage + GameConst.MaxThingRadius.Data);
+			var dist = Fixed.FromInt(radius + GameConst.MaxThingRadius.Data);
 
 			var blockY1 = bm.GetBlockY(spot.Y - dist);
 			var blockY2 = bm.GetBlockY(spot.Y + dist);
@@ -412,6 +481,13 @@ namespace DPTDOOM
 			bombSpot = spot;
 			bombSource = source;
 			bombDamage = damage;
+			bombRadius = radius;
+			bombHurtSource = hurtSource;
+
+			// Vanilla calls this with hurtSource false and must not change at all: the source of a
+			// vanilla radius attack is **not** exempt. DECORATE's XF_HURTSOURCE is what removes the
+			// exemption, so only an explosion that did not ask for it gets one.
+			exemptSource = !hurtSource && exemptSourceRequested;
 
 			for (var by = blockY1; by <= blockY2; by++)
 			{

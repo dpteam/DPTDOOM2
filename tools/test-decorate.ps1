@@ -644,6 +644,51 @@ ACTOR ConfusedImp 3001
     Assert-True ($lookExBadLog -like "*map MAP01: OK*") "and the level still loads"
     Assert-True ($lookExBadLog -notlike "*scripts: FAILED*") "the actor survives it"
 
+    Write-Host "With an A_Explode this engine can take"
+    $explode = Join-Path $work "explode.dec"
+
+    # The damage and the radius are different numbers, and the flags are the third argument. What
+    # this proves is the whole path: conversion, script parsing, and the state the blast hangs off.
+    [System.IO.File]::WriteAllText($explode, @"
+ACTOR GrenadeImp 3001
+{
+  States
+  {
+  Death:
+    TROO A 4 A_Explode(64, 32, XF_HURTSOURCE)
+    TROO B 4 A_Explode(128, 128, 0)
+    Loop
+  }
+}
+"@)
+
+    $explodeLog = Run-Game "explode" @('-decorate', $explode)
+
+    Assert-True ($explodeLog -like "*scripts: OK*") "A_Explode with arguments converts"
+    Assert-True ($explodeLog -like "*map MAP01: OK*") "the level loads"
+    Assert-True ($explodeLog -notlike "*takes no arguments*") "and is not refused"
+    Assert-True ($explodeLog -notlike "*decorate problem*") "a block this engine can take reports nothing"
+
+    Write-Host "With an A_Explode flag this engine cannot honour"
+    $badExplode = Join-Path $work "badexplode.dec"
+
+    [System.IO.File]::WriteAllText($badExplode, @"
+ACTOR RocketImp 3001
+{
+  States
+  {
+  Death:
+    TROO A 4 A_Explode(64, 64, XF_THRUSTZ|XF_CIRCULAR)
+    Loop
+  }
+}
+"@)
+
+    $badExplodeLog = Run-Game "badexplode" @('-decorate', $badExplode)
+
+    Assert-True ($badExplodeLog -like "*no counterpart*") "the unsupported flag is named"
+    Assert-True ($badExplodeLog -like "*map MAP01: OK*") "and the level still loads"
+
     Write-Host "With an A_Chase this engine can take"
     $chase = Join-Path $work "chase.dec"
 

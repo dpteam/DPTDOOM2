@@ -1057,6 +1057,41 @@ namespace DPTDOOM
         }
 
         /// <summary>
+        /// A_Explode: a blast around this actor, with its own damage and radius.
+        ///
+        /// A separate name from <see cref="Explode(Mobj)"/> on purpose, because they are not the
+        /// same thing: Explode is the barrel's own action and passes the barrel's **target** as the
+        /// source of the blast, which is what makes a barrel chain-reaction and infighting work.
+        /// A_Explode is the actor blowing up where it stands, with itself as the source. Reusing
+        /// one name for both would mean reading "Explode" and getting the wrong one.
+        ///
+        /// ZDoom's signature is A_Explode(damage, distance, flags, alert, fulldamagedistance, ...)
+        /// and distance defaults to damage. Two things that are not obvious and are the reason this
+        /// exists at all:
+        ///
+        ///  - damage and radius are **different numbers**. Vanilla ties them together because it
+        ///    only ever explodes rockets, and a mod that writes A_Explode(128, 64) wants full
+        ///    damage in a small circle, not half damage in a big one.
+        ///  - ZDoom's default flags value is XF_HURTSOURCE, the opposite of vanilla: a barrel or a
+        ///    grenade is meant to hurt whoever caused it. A mod that writes A_Explode() gets the
+        ///    barrel behaviour.
+        ///
+        /// The damage is applied by the same routine a rocket uses, so pain, death and infighting
+        /// are the ordinary ones rather than a second set of rules.
+        /// </summary>
+        public void RadiusExplode(Mobj actor, int damage, int radius, bool hurtSource)
+        {
+            if (radius <= 0)
+            {
+                // A zero or negative distance is ZDoom's way of saying "the same as the damage",
+                // not "explode nowhere". A mod that writes A_Explode(128) means an explosion.
+                radius = damage;
+            }
+
+            world.ThingInteraction.RadiusAttack(actor, actor, damage, radius, hurtSource);
+        }
+
+        /// <summary>
         /// A_ClearTarget: forget the target.
         ///
         /// ZDoom clears three fields - target, lastheard and lastenemy. This engine keeps no

@@ -203,6 +203,18 @@ namespace DPTDOOM.Scripting
 
         /// <summary>State to use instead of the actor's missile state, or null for the actor's own.</summary>
         public string ChaseMissileState;
+
+        /// <summary>True when the frame's action was A_Explode with arguments.</summary>
+        public bool HasExplode;
+
+        /// <summary>How much damage the blast does at its centre.</summary>
+        public int ExplodeDamage = 128;
+
+        /// <summary>How far the blast reaches. Zero or negative means the same as the damage.</summary>
+        public int ExplodeRadius;
+
+        /// <summary>A_Explode's flags, already summed from the XF_ names.</summary>
+        public int ExplodeFlags = ExplosionFlags.HurtSource;
     }
 
     /// <summary>
@@ -692,6 +704,17 @@ namespace DPTDOOM.Scripting
                               .Append(ChaseStateName(actor, frame.ChaseMissileState, problems, frame))
                               .Append("\", ")
                               .Append(frame.ChaseFlags.ToString(CultureInfo.InvariantCulture))
+                              .Append(");\n");
+                    }
+
+                    if (frame.HasExplode)
+                    {
+                        script.Append("    Explode(\"").Append(name).Append("\", ")
+                              .Append(frame.ExplodeDamage.ToString(CultureInfo.InvariantCulture))
+                              .Append(", ")
+                              .Append(frame.ExplodeRadius.ToString(CultureInfo.InvariantCulture))
+                              .Append(", ")
+                              .Append(frame.ExplodeFlags.ToString(CultureInfo.InvariantCulture))
                               .Append(");\n");
                     }
 
@@ -1521,6 +1544,12 @@ namespace DPTDOOM.Scripting
                 return;
             }
 
+            if (string.Equals(frame.Action, "A_Explode", StringComparison.OrdinalIgnoreCase))
+            {
+                ReadExplode(arguments, actor, frame, problems);
+                return;
+            }
+
             if (!isJump)
             {
                 if (hasArguments)
@@ -2252,6 +2281,207 @@ namespace DPTDOOM.Scripting
                          "own state is used");
 
             return "";
+        }
+
+        /// <summary>
+        /// A_Explode with arguments.
+        ///
+        /// ZDoom's signature is (damage, distance, flags, alert, fulldamagedistance, nails,
+        /// naildamage, pufftype, damagetype). The first three are what a mod usually writes, and
+        /// they are the three this engine can honour.
+        ///
+        /// A bare A_Explode is left as the engine's own action, which is the barrel explosion - the
+        /// same thing the IWAD means by it. That is not an accident of the defaults: the barrel is
+        /// the only vanilla actor that uses the action, so its behaviour is the right default.
+        ///
+        /// A negative damage means "from the actor's metadata" in ZDoom (ExplosionDamage and
+        /// ExplosionRadius), and this engine has no such properties, so it is reported rather than
+        /// turned into an explosion that heals.
+        /// </summary>
+        private static void ReadExplode(List<List<Token>> arguments, DecorateActor actor,
+                                        StateFrame frame, IList<string> problems)
+        {
+            if (arguments.Count == 0)
+            {
+                return;
+            }
+
+            frame.Action = "";
+            frame.HasExplode = true;
+
+            if (arguments.Count > 0 && arguments[0].Count > 0)
+            {
+                int damage;
+
+                if (!TryReadWholeNumber(arguments[0], out damage))
+                {
+                    problems.Add(actor.Name + " line " + frame.Line + ": 'A_Explode' damage must " +
+                                 "be a whole number; 128 is used");
+                    damage = 128;
+                }
+                else if (damage < 0)
+                {
+                    problems.Add(actor.Name + " line " + frame.Line + ": 'A_Explode' negative " +
+                                 "damage means 'from the actor's metadata' in ZDoom, and this " +
+                                 "engine has no ExplosionDamage property, so 128 is used");
+                    damage = 128;
+                }
+
+                frame.ExplodeDamage = damage;
+            }
+
+            if (arguments.Count > 1 && arguments[1].Count > 0)
+            {
+                int radius;
+
+                if (!TryReadWholeNumber(arguments[1], out radius))
+                {
+                    problems.Add(actor.Name + " line " + frame.Line + ": 'A_Explode' distance " +
+                                 "must be a whole number; the damage is used as the radius");
+                    radius = 0;
+                }
+
+                frame.ExplodeRadius = radius;
+            }
+            else
+            {
+                frame.ExplodeRadius = frame.ExplodeDamage;
+            }
+
+            if (arguments.Count > 2 && arguments[2].Count > 0)
+            {
+                int flags;
+                string unknown;
+
+                if (TryReadExplodeFlags(arguments[2], out flags, out unknown))
+                {
+                    frame.ExplodeFlags = flags;
+
+                    var unsupported = flags & ~(ExplosionFlags.HurtSource | ExplosionFlags.NotMissile |
+                                                ExplosionFlags.ExplicitDamageType |
+                                                ExplosionFlags.NoSplash);
+
+                    if (unsupported != 0)
+                    {
+                        problems.Add(actor.Name + " line " + frame.Line + ": 'A_Explode' flags " +
+                                     "0x" + unsupported.ToString("x", CultureInfo.InvariantCulture) +
+                                     " (thrust, allies, circular) have no counterpart in this " +
+                                     "engine, so the blast is the ordinary square one; the rest " +
+                                     "of the call still runs");
+                    }
+                }
+                else
+                {
+                    problems.Add(actor.Name + " line " + frame.Line + ": 'A_Explode' flag '" +
+                                 unknown + "' is not one this engine knows, so the explosion runs " +
+                                 "with the flags it did understand");
+                }
+            }
+
+            // The arguments past the flags are a nailbomb, a puff type and a damage type. A mod
+            // that uses them gets a different explosion, and it should be told so once.
+            for (var i = 3; i < arguments.Count; i++)
+            {
+                if (arguments[i].Count == 0)
+                {
+                    continue;
+                }
+
+                if (arguments[i].Count == 1 && arguments[i][0].IsNumber &&
+                    arguments[i][0].Number == 0)
+                {
+                    continue;
+                }
+
+                problems.Add(actor.Name + " line " + frame.Line + ": 'A_Explode' arguments after " +
+                             "the flags (alert, full damage distance, nails, puff, damage type) " +
+                             "are not supported, so they are ignored; the blast itself still runs");
+                break;
+            }
+        }
+
+        /// <summary>A_Explode's flag argument, written as XF_ names joined by bars or a number.</summary>
+        private static bool TryReadExplodeFlags(List<Token> argument, out int flags, out string unknown)
+        {
+            flags = 0;
+            unknown = null;
+
+            if (argument.Count != 1)
+            {
+                unknown = "the whole argument";
+                return false;
+            }
+
+            var token = argument[0];
+
+            if (token.IsNumber)
+            {
+                flags = token.Number;
+                return true;
+            }
+
+            foreach (var part in token.Text.Split('|'))
+            {
+                var name = part.Trim();
+
+                if (name.Length == 0)
+                {
+                    continue;
+                }
+
+                switch (name.ToUpperInvariant())
+                {
+                    case "XF_HURTSOURCE":
+                        flags |= ExplosionFlags.HurtSource;
+                        break;
+
+                    case "XF_NOTMISSILE":
+                        flags |= ExplosionFlags.NotMissile;
+                        break;
+
+                    case "XF_EXPLICITDAMAGETYPE":
+                        flags |= ExplosionFlags.ExplicitDamageType;
+                        break;
+
+                    case "XF_NOSPLASH":
+                        flags |= ExplosionFlags.NoSplash;
+                        break;
+
+                    case "XF_THRUSTZ":
+                        flags |= ExplosionFlags.ThrustZ;
+                        break;
+
+                    case "XF_THRUSTLESS":
+                        flags |= ExplosionFlags.ThrustLess;
+                        break;
+
+                    case "XF_NOALLIES":
+                        flags |= ExplosionFlags.NoAllies;
+                        break;
+
+                    case "XF_CIRCULAR":
+                        flags |= ExplosionFlags.Circular;
+                        break;
+
+                    case "XF_CIRCULARTHRUST":
+                        flags |= ExplosionFlags.CircularThrust;
+                        break;
+
+                    default:
+                        int value;
+
+                        if (!TryReadWholeNumberText(name, out value))
+                        {
+                            unknown = name;
+                            return false;
+                        }
+
+                        flags |= value;
+                        break;
+                }
+            }
+
+            return true;
         }
 
         /// <summary>

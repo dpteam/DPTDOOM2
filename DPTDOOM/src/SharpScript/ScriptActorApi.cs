@@ -754,6 +754,26 @@ namespace DPTDOOM.Scripting
                 return ScriptValue.Void;
             });
 
+            // A_Explode: a blast around this actor.
+            //
+            // The flag argument is the one that decides the most: XF_HURTSOURCE is ZDoom's default
+            // and is the opposite of what a rocket does, so a mod writing A_Explode() means "this
+            // thing hurts whoever caused it" - which is what a barrel does.
+            host.Register("Explode", 4, 4, call =>
+            {
+                var number = FrameNumber(call.AsText(0), call);
+                var damage = call.AsInt(1);
+                var radius = call.AsInt(2);
+                var flags = call.AsInt(3);
+
+                var hurtSource = (flags & ExplosionFlags.HurtSource) != 0;
+
+                DoomInfo.SetStateAction(number, (world, mobj) =>
+                    world.MonsterBehavior.RadiusExplode(mobj, damage, radius, hurtSource));
+
+                return ScriptValue.Void;
+            });
+
             // A_Chase with its arguments.
             //
             // The argument order is the one that trips people up, so it is written out here and in
