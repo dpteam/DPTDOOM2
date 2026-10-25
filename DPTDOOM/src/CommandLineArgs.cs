@@ -205,6 +205,15 @@ namespace DPTDOOM
         /// </summary>
         public readonly Arg<string[]> mapinfo;
 
+        /// <summary>
+        /// SNDINFO files, by path, or read from a <c>SNDINFO</c> lump in the WAD.
+        ///
+        /// Which lump a sound name plays, so a mod can give a vanilla sound its own recording without
+        /// touching a line of code. The names are the engine's own Sfx names, because Sfx is an enum
+        /// and an enum cannot grow at runtime.
+        /// </summary>
+        public readonly Arg<string[]> sndinfo;
+
         public CommandLineArgs(string[] args)
         {
             iwad = GetString(args, "-iwad");
@@ -304,6 +313,7 @@ namespace DPTDOOM
             botbraindir = GetString(args, "-botbraindir");
             nodata = new Arg(args.Contains("-nodata"));
             mapinfo = Check_mapinfo(args);
+            sndinfo = Check_sndinfo(args);
 
             // Check for drag & drop.
             if (args.Length > 0 && args.All(arg => arg.FirstOrDefault() != '-'))
@@ -417,6 +427,17 @@ namespace DPTDOOM
         private static Arg<string[]> Check_mapinfo(string[] args)
         {
             var values = GetValues(args, "-mapinfo");
+            if (values.Length >= 1)
+            {
+                return new Arg<string[]>(values);
+            }
+
+            return new Arg<string[]>();
+        }
+
+        private static Arg<string[]> Check_sndinfo(string[] args)
+        {
+            var values = GetValues(args, "-sndinfo");
             if (values.Length >= 1)
             {
                 return new Arg<string[]>(values);

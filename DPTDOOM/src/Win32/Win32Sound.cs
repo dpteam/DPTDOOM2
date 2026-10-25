@@ -13,6 +13,7 @@
 //
 
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Threading;
 using DPTDOOM.Audio;
@@ -47,7 +48,10 @@ namespace DPTDOOM.Win32
         private const float Attenuator = ClipDist - CloseDist;
 
         private readonly Config config;
-        private readonly SoundSample[] samples;
+        // One or more samples per sound: SNDINFO's $random gives a name several lumps, and the whole
+        // point of that directive is that the choice varies. A single sample per sound was the shape
+        // before SNDINFO existed and cannot express it.
+        private readonly SoundSample[][] samples;
         private readonly float[] amplitudes;
         private readonly DoomRandom random;
 
@@ -71,13 +75,41 @@ namespace DPTDOOM.Win32
 
         private Sfx uiReserved;
 
+        /// <summary>
+        /// Picks one of a sound's variants.
+        ///
+        /// A plain <see cref="Random"/> rather than the engine's <see cref="DoomRandom"/>, and that
+        /// is deliberate: which footstep plays is presentation, not simulation. Drawing it from the
+        /// game's generator would move the world forward by one number and put a sound choice into
+        /// the world hash - the exact mistake the chat and the view tilt are documented against.
+        ///
+        /// One variant is the common case and skips the generator entirely, so a mod that does not
+        /// use $random pays nothing.
+        /// </summary>
+        private readonly Random variation = new Random();
+
+        private SoundSample Pick(SoundSample[] variants)
+        {
+            if (variants == null || variants.Length == 0)
+            {
+                return null;
+            }
+
+            if (variants.Length == 1)
+            {
+                return variants[0];
+            }
+
+            return variants[variation.Next(variants.Length)];
+        }
+
         public Win32Sound(Config config, GameContent content)
         {
             this.config = config;
 
             config.audio_soundvolume = MathEx.Clamp(config.audio_soundvolume, 0, MaxVolume);
 
-            samples = new SoundSample[DoomInfo.SfxNames.Length];
+            samples = new SoundSample[DoomInfo.SfxNames.Length][];
             amplitudes = new float[DoomInfo.SfxNames.Length];
 
             if (config.audio_randompitch)
@@ -89,19 +121,66 @@ namespace DPTDOOM.Win32
 
             for (var i = 0; i < DoomInfo.SfxNames.Length; i++)
             {
-                var name = "DS" + DoomInfo.SfxNames[i].ToString().ToUpper();
-                if (content.Wad.GetLumpNumber(name) == -1)
+                var name = DoomInfo.SfxNames[i].ToString().ToUpper();
+
+                // SNDINFO first: a mod that gave this sound its own lump means it, and the
+                // DS-prefix convention is only what happens when nobody said otherwise.
+                var lumps = SoundInfo.LumpsFor(name);
+
+                if (lumps == null)
+                {
+                    var conventional = new List<string>();
+                    conventional.Add("DS" + name);
+                    lumps = conventional;
+                }
+
+                var variants = new List<SoundSample>();
+                var loudest = 0F;
+
+                foreach (var lumpName in lumps)
+                {
+                    if (content.Wad.GetLumpNumber(lumpName) == -1)
+                    {
+                        // A named lump that is not in the WAD is worth saying once: it is the
+                        // difference between "the modder forgot to include the file" and "the sound
+                        // system is broken", and only one of those is fixable by the player.
+                        if (SoundInfo.LumpsFor(name) != null)
+                        {
+                            LoadReport.Add("missing sound",
+                                lumpName + " for " + DoomInfo.SfxNames[i],
+                                "that sound plays nothing");
+                        }
+
+                        continue;
+                    }
+
+                    var parsed = SoundSample.Parse(content.Wad.ReadLump(lumpName));
+
+                    if (parsed == null)
+                    {
+                        continue;
+                    }
+
+                    variants.Add(parsed);
+
+                    if (parsed.GetAmplitude() > loudest)
+                    {
+                        loudest = parsed.GetAmplitude();
+                    }
+                }
+
+                if (variants.Count == 0)
                 {
                     continue;
                 }
 
-                var sample = SoundSample.Parse(content.Wad.ReadLump(name));
-                if (sample != null)
-                {
-                    samples[i] = sample;
-                    amplitudes[i] = sample.GetAmplitude();
-                    loaded++;
-                }
+                samples[i] = variants.ToArray();
+
+                // The loudest of the variants, not the first: priority is compared against other
+                // sounds competing for a channel, and a quiet variant of a loud sound must not make
+                // the whole sound lose those comparisons.
+                amplitudes[i] = loudest;
+                loaded++;
             }
 
             ConsoleUi.Line("sound", loaded + " effects loaded");
@@ -176,7 +255,7 @@ namespace DPTDOOM.Win32
 
                 if (info.Reserved != Sfx.NONE)
                 {
-                    var sample = samples[(int)info.Reserved];
+                    var sample = Pick(samples[(int)info.Reserved]);
                     if (sample != null)
                     {
                         StartVoice(i, info, sample);
@@ -189,7 +268,7 @@ namespace DPTDOOM.Win32
 
             if (uiReserved != Sfx.NONE)
             {
-                var sample = samples[(int)uiReserved];
+                var sample = Pick(samples[(int)uiReserved]);
                 if (sample != null)
                 {
                     StartUiVoice(sample);

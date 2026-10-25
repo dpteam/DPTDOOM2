@@ -58,12 +58,31 @@ namespace DPTDOOM.Headless
             foreach (var rawName in names)
             {
                 var name = NormalizeName(rawName);
+
+                // SNDINFO first, exactly as the game does it: a sound test that ignored the mapping
+                // would render a lump the game never plays, and the tool would be lying about the one
+                // thing it exists to answer.
+                var mapped = SoundInfo.LumpsFor(rawName == null ? "" : rawName.Trim());
+
+                if (mapped != null && mapped.Count > 0)
+                {
+                    name = mapped[0].ToUpperInvariant();
+                }
+
                 var lump = wad.GetLumpNumber(name);
 
                 if (lump == -1)
                 {
                     Console.WriteLine("  " + name + ": not in this WAD");
                     continue;
+                }
+
+                // Named explicitly, because with SNDINFO in play the name asked for and the lump
+                // played are no longer the same word, and a tool that hides the difference hides
+                // the answer.
+                if (!string.Equals(name, NormalizeName(rawName), StringComparison.Ordinal))
+                {
+                    Console.WriteLine("  " + NormalizeName(rawName) + " -> " + name);
                 }
 
                 var sample = SoundSample.Parse(wad.ReadLump(name));

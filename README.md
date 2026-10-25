@@ -104,6 +104,7 @@ Internet Explorer. WebView2 на Windows XP не ставится, а MSHTML е�
 | [docs/BOTS.md](docs/BOTS.md) | как устроены боты, замеры, известные ограничения |
 | [docs/SCRIPTS.md](docs/SCRIPTS.md) | SharpScript: свой язык описания актёров, API, песочница |
 | [docs/MAPINFO.md](docs/MAPINFO.md) | MAPINFO: название, небо и музыка уровней |
+| [docs/SNDINFO.md](docs/SNDINFO.md) | SNDINFO: какой люмп играет звук по имени |
 | [docs/DECORATE.md](docs/DECORATE.md) | DECORATE: что переносится в SharpScript, а что честно не переносится |
 | [docs/MASTER.md](docs/MASTER.md) · [docs/RELAY.md](docs/RELAY.md) | сервер списка сессий и relay |
 | [docs/LAUNCHER.md](docs/LAUNCHER.md) | лаунчер: страница, мост, темы |
@@ -184,7 +185,7 @@ powershell -NoProfile -File tools\test-launcher.ps1
 powershell -NoProfile -File tools\check-standalone.ps1
 ```
 
-696 тестов. Геймплейные сверяют хеши мира с эталонами Managed Doom — то есть
+711 тестов. Геймплейные сверяют хеши мира с эталонами Managed Doom — то есть
 проверяют, что порт остался демо-совместимым, а не только что он компилируется.
 Тесты, которым нужен IWAD, без него помечаются пропущенными, а не падают.
 

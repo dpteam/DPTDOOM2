@@ -54,6 +54,7 @@ powershell -NoProfile -File tools\test-jump.ps1
 powershell -NoProfile -File tools\test-rofl.ps1
 powershell -NoProfile -File tools\test-actors.ps1
 powershell -NoProfile -File tools\test-mapinfo.ps1
+powershell -NoProfile -File tools\test-sndinfo.ps1
 powershell -NoProfile -File tools\test-upnp.ps1
 powershell -NoProfile -File tools\test-reconnect.ps1
 powershell -NoProfile -File tools\test-profile.ps1
@@ -135,6 +136,14 @@ powershell -NoProfile -File tools\test-launcher.ps1
   пробелами. Строка загрузки уровня печатает **название**, а не слово «loaded»: иначе
   MAPINFO нельзя проверить headless-прогоном. Проверка — `MapInfoTest`,
   `MapInfoAppliedTest`, `tools/test-mapinfo.ps1`.
+- SNDINFO (`SoundInfo`, `docs/SNDINFO.md`) — **не состояние игры**: какой люмп играет звук по
+  имени, читается при загрузке контента, до создания звукового бэкенда. Имена — имена `Sfx`,
+  потому что звук выбирается перечислением. Вариант `$random` выбирается обычным `Random`, а
+  **не** `DoomRandom`: выбор звука — подача, и брать его из мирового генератора значит сдвинуть
+  мир на одно число и положить выбор в хеш. Приоритет канала — по самому громкому варианту.
+  Цикл алиасов обрывается на глубине, иначе это зависание в кадре. Неподдерживаемые директивы
+  (`$volume`, `$attenuation`) **называются в отчёте**. `-soundtest` резолвит имя через SNDINFO.
+  Проверка — `SoundInfoTest`, `tools/test-sndinfo.ps1`.
 - Отладочные переключатели — `DebugSettings`. Всё, что меняет симуляцию
   (заморозка, замедление), разрешено только в одиночной игре: демо или сеть
   разъедутся. Проверка — `DebugSettings.SimulationChangesAllowed`.

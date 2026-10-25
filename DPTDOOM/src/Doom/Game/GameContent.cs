@@ -86,6 +86,9 @@ namespace DPTDOOM
             // Levels are described separately from actors, and read before any map exists.
             InitializeMapInfo(args);
 
+            // Sounds by name, so a mod can give a vanilla sound its own lump.
+            InitializeSoundInfo(args);
+
             // A blank line between the groups, so a startup log of a dozen lines can be
             // skimmed instead of read. Purely visual - the timestamps already say what
             // took how long.
@@ -262,6 +265,65 @@ namespace DPTDOOM
             else
             {
                 ConsoleUi.Ok(MapInfo.Count + " map(s) described");
+            }
+        }
+
+        /// <summary>
+        /// Reads SNDINFO: the <c>SNDINFO</c> lump from the WAD, and any files named with
+        /// <c>-sndinfo</c>.
+        ///
+        /// Read before the sound backend is constructed, because the backend loads every sample at
+        /// startup: a mapping that arrives afterwards would apply to the next sound played and not to
+        /// the ones already in memory.
+        /// </summary>
+        private void InitializeSoundInfo(CommandLineArgs args)
+        {
+            var paths = args.sndinfo.Present ? args.sndinfo.Value : new string[0];
+            var lump = wad.GetLumpNumber("SNDINFO");
+
+            if (paths.Length == 0 && lump == -1)
+            {
+                return;
+            }
+
+            ConsoleUi.Begin("sndinfo");
+
+            var problems = new System.Collections.Generic.List<string>();
+
+            SoundInfo.Clear();
+
+            foreach (var path in paths)
+            {
+                try
+                {
+                    SoundInfo.Add(System.IO.File.ReadAllText(path),
+                        System.IO.Path.GetFileName(path), problems);
+                }
+                catch (Exception e)
+                {
+                    problems.Add(path + ": " + e.Message);
+                }
+            }
+
+            if (lump != -1)
+            {
+                SoundInfo.Add(System.Text.Encoding.UTF8.GetString(wad.ReadLump(lump)),
+                    "SNDINFO lump", problems);
+            }
+
+            foreach (var problem in problems)
+            {
+                LoadReport.Add("sndinfo", problem,
+                    "that sound keeps the lump it would have played anyway");
+            }
+
+            if (problems.Count > 0)
+            {
+                ConsoleUi.Failed(problems.Count + " problem(s)");
+            }
+            else
+            {
+                ConsoleUi.Ok(SoundInfo.Count + " sound(s) described");
             }
         }
 
