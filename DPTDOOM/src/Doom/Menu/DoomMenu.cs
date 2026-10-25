@@ -432,10 +432,10 @@ namespace DPTDOOM
                     },
                     "Frame sections, reported on exit."),
 
-                new InfoTextItem(
+                new ActionTextItem(
                     "VERSION",
-                    () => ApplicationInfo.Title,
-                    "The build you are running."),
+                    () => ShowAbout(),
+                    "Open the About screen: build, licence, credits."),
 
                 new ActionTextItem(
                     "END GAME",
@@ -566,10 +566,13 @@ namespace DPTDOOM
         {
             if (active)
             {
-                if (e.Type == EventType.KeyDown && FeedKonami(e.Key))
+                // The Konami code lives on the About screen, and only there. An easter egg that
+                // works from every page is found by accident; one that works on the page that
+                // lists the credits is found by somebody reading the credits, which is the joke.
+                if (current == about && e.Type == EventType.KeyDown && FeedKonami(e.Key))
                 {
-                    // Consumed: the key that completes the code should not also move the
-                    // cursor or activate the row under it.
+                    // Consumed: the key that completes the code should not also activate the
+                    // row under it.
                     return true;
                 }
 
