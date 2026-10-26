@@ -540,9 +540,117 @@ namespace DPTDOOM
         }
 
         /// <summary>
-        /// Get the speed of the given missile type.
-        /// Some missiles have different speeds according to the game setting.
+        /// Spawns a projectile with DECORATE's side offset, height and angle adjustment.
+        ///
+        /// The side offset always uses the source's own facing. The angle argument is an offset
+        /// from the direction to the target (or from the source's facing without one), except in
+        /// absolute-angle mode, where it replaces that direction. Keeping those two bases separate
+        /// is what makes CMF_ABSOLUTEANGLE different from an ordinary angled shot.
         /// </summary>
+        public Mobj SpawnCustomProjectile(Mobj source, MobjType type, Fixed sideOffset,
+                                           Fixed height, Angle angle, bool absoluteAngle,
+                                           Mobj target, bool transferTranslation)
+        {
+            var side = source.Angle - Angle.Ang90;
+            var x = source.X + sideOffset * Trig.Cos(side);
+            var y = source.Y + sideOffset * Trig.Sin(side);
+
+            var missile = SpawnMobj(x, y, source.Z + height, type);
+
+            if (missile.Info.SeeSound != 0 ||
+                ActorSounds.Has((int)missile.Type, ActorSoundSlot.See))
+            {
+                world.StartActorSound(missile, ActorSoundSlot.See,
+                    missile.Info.SeeSound, SfxType.Misc);
+            }
+
+            missile.Target = source;
+
+            var travelAngle = target != null
+                ? Geometry.PointToAngle(x, y, target.X, target.Y)
+                : source.Angle;
+
+            travelAngle = absoluteAngle ? angle : travelAngle + angle;
+
+            var speed = GetMissileSpeed(type);
+
+            missile.Angle = travelAngle;
+            missile.MomX = new Fixed(speed) * Trig.Cos(travelAngle);
+            missile.MomY = new Fixed(speed) * Trig.Sin(travelAngle);
+
+            if (target != null)
+            {
+                var dist = Geometry.AproxDistance(target.X - x, target.Y - y);
+                var num = (target.Z - (source.Z + height)).Data;
+                var den = (dist / speed).Data;
+
+                if (den >= 1)
+                {
+                    missile.MomZ = new Fixed((int)((long)num * speed / den));
+                }
+            }
+
+            if (transferTranslation)
+            {
+                missile.Flags = (missile.Flags & ~MobjFlags.Translation) |
+                                (source.Flags & MobjFlags.Translation);
+            }
+
+            return missile;
+        }
+
+        /// <summary>
+        /// A_FireProjectile: the player-only variant with Doom's ordinary horizontal auto-aim.
+        /// FPF_AIMATANGLE moves the initial auto-aim direction; without it, the angle is added
+        /// after auto-aim. FPF_NOAUTOAIM skips that search without changing the angle rule.
+        /// </summary>
+        public Mobj FireCustomProjectile(Mobj source, MobjType type, Fixed sideOffset,
+                                          Fixed height, Angle angle, bool aimAtAngle,
+                                          bool transferTranslation, bool noAutoAim)
+        {
+            if (source.Player == null)
+            {
+                return null;
+            }
+
+            var initialAngle = aimAtAngle ? source.Angle + angle : source.Angle;
+            Mobj target = null;
+
+            if (!noAutoAim)
+            {
+                var hs = world.Hitscan;
+                var range = Fixed.FromInt(16 * 64);
+                var searchAngle = initialAngle;
+
+                hs.AimLineAttack(source, searchAngle, range);
+
+                if (hs.LineTarget == null)
+                {
+                    searchAngle += new Angle(1 << 26);
+                    hs.AimLineAttack(source, searchAngle, range);
+
+                    if (hs.LineTarget == null)
+                    {
+                        searchAngle -= new Angle(2 << 26);
+                        hs.AimLineAttack(source, searchAngle, range);
+                    }
+                }
+
+                target = hs.LineTarget;
+            }
+
+            if (aimAtAngle && target == null)
+            {
+                // There is no auto-aim result to supply the base direction, so the already
+                // adjusted initial angle is the complete direction.
+                return SpawnCustomProjectile(source, type, sideOffset, height,
+                    initialAngle, true, null, transferTranslation);
+            }
+
+            return SpawnCustomProjectile(source, type, sideOffset, height,
+                aimAtAngle ? Angle.Ang0 : angle, false, target, transferTranslation);
+        }
+
         /// <summary>
         /// Fires a missile of any type, from any height, at a target or along the actor's own
         /// facing.
@@ -598,6 +706,10 @@ namespace DPTDOOM
             return missile;
         }
 
+        /// <summary>
+        /// Get the speed of the given missile type.
+        /// Some missiles have different speeds according to the game setting.
+        /// </summary>
         private int GetMissileSpeed(MobjType type)
         {
             if (world.Options.FastMonsters || world.Options.Skill == GameSkill.Nightmare)

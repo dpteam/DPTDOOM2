@@ -971,6 +971,12 @@ namespace DPTDOOM.Scripting
                 return ScriptValue.Void;
             });
 
+            // The two projectile actions have different flag sets and different defaults. Keeping
+            // their script entry points separate prevents FPF_TRANSFERTRANSLATION (2) from being
+            // mistaken for CMF_AIMDIRECTION (2), which has the same numeric value.
+            RegisterProjectile(host, false);
+            RegisterProjectile(host, true);
+
             // A flag the frame sets or clears. DECORATE's A_ChangeFlag names a flag, so the name is
             // resolved here, when the file is read: a typo must reach the report, not disappear into
             // a frame that quietly changes nothing.
@@ -1156,6 +1162,89 @@ namespace DPTDOOM.Scripting
 
             // States of the actor's own, for a mod that brings new frames.
             RegisterStates(host);
+        }
+
+        /// <summary>
+        /// Registers A_SpawnProjectile or A_FireProjectile. Numeric arguments are functions so
+        /// random() is evaluated by the world when the frame runs, not while content is loaded.
+        /// </summary>
+        private void RegisterProjectile(ScriptHost host, bool fire)
+        {
+            host.Register(fire ? "FireProjectile" : "SpawnProjectile", 7, 7, call =>
+            {
+                var number = FrameNumber(call.AsText(0), call);
+                var actorName = call.AsText(1);
+                var type = ActorNames.TypeOf(actorName);
+
+                if (type < 0)
+                {
+                    throw call.Fail("no such projectile actor '" + actorName + "'");
+                }
+
+                var height = ResolveSpawnExpression(call, 2);
+                var side = ResolveSpawnExpression(call, 3);
+                var angle = ResolveSpawnExpression(call, 4);
+                var flags = call.AsInt(5);
+                var pointer = fire ? ActorPointer.Null : call.AsInt(6);
+                var useAmmo = fire && call.AsBool(6);
+
+                DoomInfo.SetStateAction(number, (world, mobj) =>
+                {
+                    Fixed heightValue;
+                    Fixed sideValue;
+                    Fixed angleValue;
+
+                    // Evaluate in the order of the original DECORATE signature. Besides making
+                    // random() reproducible, this keeps its world-RNG consumption predictable.
+                    if (fire)
+                    {
+                        angleValue = angle.EvaluateValue(world, mobj).AsFixed();
+                        sideValue = side.EvaluateValue(world, mobj).AsFixed();
+                        heightValue = height.EvaluateValue(world, mobj).AsFixed();
+
+                        if (mobj.Player == null)
+                        {
+                            return;
+                        }
+
+                        if (useAmmo && !world.WeaponBehavior.TryUseCustomProjectileAmmo(mobj.Player))
+                        {
+                            return;
+                        }
+
+                        world.ThingAllocation.FireCustomProjectile(
+                            mobj, (MobjType)type, sideValue, heightValue,
+                            AngleFromFixedDegrees(angleValue),
+                            (flags & 1) != 0, (flags & 2) != 0, (flags & 4) != 0);
+                        return;
+                    }
+
+                    heightValue = height.EvaluateValue(world, mobj).AsFixed();
+                    sideValue = side.EvaluateValue(world, mobj).AsFixed();
+                    angleValue = angle.EvaluateValue(world, mobj).AsFixed();
+
+                    var target = ActorPointer.Resolve(mobj, pointer);
+                    var aimDirection = (flags & 3) == 2;
+
+                    if (aimDirection)
+                    {
+                        target = null;
+                    }
+                    else if (target == null)
+                    {
+                        // Unlike A_CustomMissile, A_SpawnProjectile does not fire without its
+                        // reference target unless CMF_AIMDIRECTION explicitly asks for direction.
+                        return;
+                    }
+
+                    world.ThingAllocation.SpawnCustomProjectile(
+                        mobj, (MobjType)type, sideValue, heightValue,
+                        AngleFromFixedDegrees(angleValue), (flags & 128) != 0,
+                        target, false);
+                });
+
+                return ScriptValue.Void;
+            });
         }
 
         private static void RegisterNumber(ScriptHost host, string name, Func<int> get, Action<int> set)

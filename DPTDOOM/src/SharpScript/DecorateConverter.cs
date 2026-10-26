@@ -318,6 +318,21 @@ namespace DPTDOOM.Scripting
         /// <summary>Volume and attenuation expressions, evaluated when the frame runs.</summary>
         public string StartSoundVolumeExpression;
         public string StartSoundAttenuationExpression;
+
+        /// <summary>True for A_SpawnProjectile or A_FireProjectile.</summary>
+        public bool HasSpawnProjectile;
+        public bool HasFireProjectile;
+
+        /// <summary>Projectile type and numeric expressions.</summary>
+        public string ProjectileName;
+        public string ProjectileHeightExpression;
+        public string ProjectileSideExpression;
+        public string ProjectileAngleExpression;
+
+        /// <summary>CMF/FPF flags and pointer/ammo choices.</summary>
+        public int ProjectileFlags;
+        public int ProjectilePointer;
+        public bool ProjectileUseAmmo = true;
     }
 
     /// <summary>
@@ -1017,6 +1032,33 @@ namespace DPTDOOM.Scripting
                               .Append(");\n");
                     }
 
+                    if (frame.HasSpawnProjectile || frame.HasFireProjectile)
+                    {
+                        script.Append("    ")
+                              .Append(frame.HasFireProjectile ? "FireProjectile" : "SpawnProjectile")
+                              .Append("(\"").Append(name).Append("\", \"")
+                              .Append(frame.ProjectileName).Append("\", \"")
+                              .Append(SpawnExFunctionName(actor, chain.Label, i + 1, 18))
+                              .Append("\", \"")
+                              .Append(SpawnExFunctionName(actor, chain.Label, i + 1, 19))
+                              .Append("\", \"")
+                              .Append(SpawnExFunctionName(actor, chain.Label, i + 1, 20))
+                              .Append("\", ")
+                              .Append(frame.ProjectileFlags.ToString(CultureInfo.InvariantCulture))
+                              .Append(", ");
+
+                        if (frame.HasFireProjectile)
+                        {
+                            script.Append(frame.ProjectileUseAmmo ? "true" : "false");
+                        }
+                        else
+                        {
+                            script.Append(frame.ProjectilePointer.ToString(CultureInfo.InvariantCulture));
+                        }
+
+                        script.Append(");\n");
+                    }
+
                     if (frame.HasStartSound)
                     {
                         script.Append("    StartSound(\"").Append(name).Append("\", \"")
@@ -1152,7 +1194,8 @@ namespace DPTDOOM.Scripting
 
                     if (!frame.HasSpawnItemEx && !frame.HasCustomMelee && !frame.HasCustomPunch &&
                         !frame.HasSetHealth && !frame.HasSetAngle && !frame.HasChangeVelocity &&
-                        !frame.HasScaleVelocity && !frame.HasStartSound)
+                        !frame.HasScaleVelocity && !frame.HasStartSound &&
+                        !frame.HasSpawnProjectile && !frame.HasFireProjectile)
                     {
                         continue;
                     }
@@ -1219,6 +1262,16 @@ namespace DPTDOOM.Scripting
                             frame.StartSoundVolumeExpression);
                         EmitSpawnExpression(script, actor, chain.Label, i + 1, 17,
                             frame.StartSoundAttenuationExpression);
+                    }
+
+                    if (frame.HasSpawnProjectile || frame.HasFireProjectile)
+                    {
+                        EmitSpawnExpression(script, actor, chain.Label, i + 1, 18,
+                            frame.ProjectileHeightExpression);
+                        EmitSpawnExpression(script, actor, chain.Label, i + 1, 19,
+                            frame.ProjectileSideExpression);
+                        EmitSpawnExpression(script, actor, chain.Label, i + 1, 20,
+                            frame.ProjectileAngleExpression);
                     }
                 }
             }
@@ -2027,6 +2080,18 @@ namespace DPTDOOM.Scripting
             if (string.Equals(frame.Action, "A_StartSound", StringComparison.OrdinalIgnoreCase))
             {
                 ReadStartSound(arguments, actor, frame, problems);
+                return;
+            }
+
+            if (string.Equals(frame.Action, "A_SpawnProjectile", StringComparison.OrdinalIgnoreCase))
+            {
+                ReadSpawnProjectile(arguments, actor, frame, problems, false);
+                return;
+            }
+
+            if (string.Equals(frame.Action, "A_FireProjectile", StringComparison.OrdinalIgnoreCase))
+            {
+                ReadSpawnProjectile(arguments, actor, frame, problems, true);
                 return;
             }
 
@@ -3277,6 +3342,224 @@ namespace DPTDOOM.Scripting
             frame.ChangeVelocityFlags = ReadActionFlags(arguments, 3, actor, frame, problems,
                 "A_ChangeVelocity");
             frame.ChangeVelocityPointer = pointer;
+        }
+
+        /// <summary>
+        /// A_SpawnProjectile and A_FireProjectile.
+        ///
+        /// Their argument order differs, so it is written out from actor.zs rather than guessed:
+        /// SpawnProjectile(missiletype, height, sideofs, angle, flags, pitch, ptr)
+        /// FireProjectile(missiletype, angle, useammo, sideofs, height, flags, pitch).
+        ///
+        /// The pointer defaults to AAPTR_TARGET only for A_SpawnProjectile. A_FireProjectile is
+        /// player-only and has no pointer argument. Pitch flags (and FireProjectile's numeric
+        /// pitch) are reported because this engine aims vertically through its projectile path,
+        /// not through a second actor-pitch model.
+        /// </summary>
+        private static void ReadSpawnProjectile(List<List<Token>> arguments, DecorateActor actor,
+                                                StateFrame frame, IList<string> problems,
+                                                bool fire)
+        {
+            if (arguments.Count == 0 || arguments[0].Count != 1)
+            {
+                problems.Add(actor.Name + " line " + frame.Line + ": '" +
+                             (fire ? "A_FireProjectile" : "A_SpawnProjectile") +
+                             "' needs a projectile actor name, so nothing is fired");
+                frame.Action = "";
+                return;
+            }
+
+            frame.Action = "";
+            frame.HasSpawnProjectile = !fire;
+            frame.HasFireProjectile = fire;
+            frame.ProjectileName = arguments[0][0].Text;
+
+            frame.ProjectileHeightExpression = ReadSpawnExpression(arguments, fire ? 4 : 1,
+                actor, frame, problems, fire ? "0" : "32");
+            frame.ProjectileSideExpression = ReadSpawnExpression(arguments, fire ? 3 : 2,
+                actor, frame, problems, "0");
+            frame.ProjectileAngleExpression = ReadSpawnExpression(arguments, fire ? 1 : 3,
+                actor, frame, problems, "0");
+            var pitch = ReadSpawnExpression(arguments, fire ? 6 : 5,
+                actor, frame, problems, "0");
+
+            if (fire)
+            {
+                frame.ProjectileUseAmmo = ReadActionBoolean(arguments, 2, true, actor, frame,
+                    problems, "A_FireProjectile useammo");
+                frame.ProjectilePointer = ActorPointer.Null;
+                frame.ProjectileFlags = ReadProjectileFlags(arguments, 5, true, actor, frame,
+                    problems);
+
+                if (frame.ProjectileUseAmmo)
+                {
+                    problems.Add(actor.Name + " line " + frame.Line + ": 'A_FireProjectile' " +
+                                 "useammo spends one shot of the currently ready vanilla weapon; " +
+                                 "DECORATE weapon states and their own ammo properties are not supported");
+                }
+
+                if (!IsZeroLiteral(pitch))
+                {
+                    problems.Add(actor.Name + " line " + frame.Line + ": 'A_FireProjectile' " +
+                                 "pitch is not supported by this engine's actor model, so it is ignored");
+                }
+            }
+            else
+            {
+                // The declared default is AAPTR_TARGET, not AAPTR_DEFAULT (the actor itself).
+                frame.ProjectilePointer = arguments.Count <= 6 || arguments[6].Count == 0
+                    ? ActorPointer.Target
+                    : ReadPointer(arguments, 6, actor, frame, problems, "A_SpawnProjectile");
+                frame.ProjectileFlags = ReadProjectileFlags(arguments, 4, false, actor, frame,
+                    problems);
+            }
+
+            if (frame.ProjectilePointer < 0)
+            {
+                frame.HasSpawnProjectile = false;
+                frame.HasFireProjectile = false;
+            }
+        }
+
+        /// <summary>Recognises a literal zero without introducing floating-point parsing.</summary>
+        private static bool IsZeroLiteral(string expression)
+        {
+            var text = expression.Replace(" ", "");
+            var start = text.StartsWith("+", StringComparison.Ordinal) ||
+                        text.StartsWith("-", StringComparison.Ordinal) ? 1 : 0;
+            var digit = false;
+            var point = false;
+
+            for (var i = start; i < text.Length; i++)
+            {
+                if (text[i] == '0')
+                {
+                    digit = true;
+                }
+                else if (text[i] == '.' && !point)
+                {
+                    point = true;
+                }
+                else
+                {
+                    return false;
+                }
+            }
+
+            return digit;
+        }
+
+        private static int ReadProjectileFlags(List<List<Token>> arguments, int index,
+                                               bool fire, DecorateActor actor,
+                                               StateFrame frame, IList<string> problems)
+        {
+            if (index >= arguments.Count || arguments[index].Count == 0)
+            {
+                return 0;
+            }
+
+            var text = JoinTokens(arguments[index]).Replace(" ", "");
+            int flags = 0;
+
+            foreach (var part in text.Split('|'))
+            {
+                if (part.Length == 0)
+                {
+                    continue;
+                }
+
+                int number;
+
+                if (int.TryParse(part, NumberStyles.Integer, CultureInfo.InvariantCulture, out number))
+                {
+                    flags |= number;
+                    continue;
+                }
+
+                var name = part.ToUpperInvariant();
+
+                if ((fire && !name.StartsWith("FPF_", StringComparison.Ordinal)) ||
+                    (!fire && !name.StartsWith("CMF_", StringComparison.Ordinal)))
+                {
+                    problems.Add(actor.Name + " line " + frame.Line + ": projectile flag '" +
+                                 part + "' belongs to the other projectile action, so it is ignored");
+                    continue;
+                }
+
+                switch (name)
+                {
+                    case "CMF_AIMOFFSET":
+                        flags |= 1;
+                        break;
+                    case "CMF_AIMDIRECTION":
+                        flags |= 2;
+                        break;
+                    case "CMF_ABSOLUTEANGLE":
+                        flags |= 128;
+                        break;
+                    case "FPF_AIMATANGLE":
+                        flags |= 1;
+                        break;
+                    case "FPF_TRANSFERTRANSLATION":
+                        flags |= 2;
+                        break;
+                    case "FPF_NOAUTOAIM":
+                        flags |= 4;
+                        break;
+                    case "CMF_TRACKOWNER":
+                        flags |= 4;
+                        break;
+                    case "CMF_CHECKTARGETDEAD":
+                        flags |= 8;
+                        break;
+                    case "CMF_ABSOLUTEPITCH":
+                        flags |= 16;
+                        break;
+                    case "CMF_OFFSETPITCH":
+                        flags |= 32;
+                        break;
+                    case "CMF_SAVEPITCH":
+                        flags |= 64;
+                        break;
+                    case "CMF_BADPITCH":
+                        flags |= 256;
+                        break;
+                    default:
+                        problems.Add(actor.Name + " line " + frame.Line + ": projectile flag '" +
+                                     part + "' is not known, so it is ignored");
+                        break;
+                }
+            }
+
+            if ((flags & (16 | 32 | 64 | 256)) != 0 && !fire)
+            {
+                problems.Add(actor.Name + " line " + frame.Line + ": projectile pitch flags are " +
+                             "not supported by this engine's vertical aiming, so they are ignored");
+            }
+
+            if (!fire && (flags & 4) != 0)
+            {
+                problems.Add(actor.Name + " line " + frame.Line + ": CMF_TRACKOWNER ownership " +
+                             "chains are not supported, so the flag is ignored");
+            }
+
+            if (!fire && (flags & 8) != 0)
+            {
+                problems.Add(actor.Name + " line " + frame.Line + ": CMF_CHECKTARGETDEAD cannot " +
+                             "change to the see state here, so the flag is ignored");
+            }
+
+            var known = fire ? 7 : 511;
+            var unknown = flags & ~known;
+
+            if (unknown != 0)
+            {
+                problems.Add(actor.Name + " line " + frame.Line + ": projectile flag bits 0x" +
+                             unknown.ToString("x", CultureInfo.InvariantCulture) +
+                             " are not known, so they are ignored");
+            }
+
+            return flags & known;
         }
 
         /// <summary>

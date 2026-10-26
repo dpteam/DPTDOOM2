@@ -101,26 +101,25 @@ namespace DPTDOOM
         }
 
 
+        private static int AmmoPerShot(Player player)
+        {
+            if (player.ReadyWeapon == WeaponType.Bfg)
+            {
+                return DoomInfo.DeHackEdConst.BfgCellsPerShot;
+            }
+
+            if (player.ReadyWeapon == WeaponType.SuperShotgun)
+            {
+                return 2;
+            }
+
+            return 1;
+        }
+
         private bool CheckAmmo(Player player)
         {
             var ammo = DoomInfo.WeaponInfos[(int)player.ReadyWeapon].Ammo;
-
-            // Minimal amount for one shot varies.
-            int count;
-            if (player.ReadyWeapon == WeaponType.Bfg)
-            {
-                count = DoomInfo.DeHackEdConst.BfgCellsPerShot;
-            }
-            else if (player.ReadyWeapon == WeaponType.SuperShotgun)
-            {
-                // Double barrel.
-                count = 2;
-            }
-            else
-            {
-                // Regular.
-                count = 1;
-            }
+            var count = AmmoPerShot(player);
 
             // Some do not need ammunition anyway.
             // Return if current ammunition sufficient.
@@ -189,6 +188,30 @@ namespace DPTDOOM
                 DoomInfo.WeaponInfos[(int)player.ReadyWeapon].DownState);
 
             return false;
+        }
+
+        /// <summary>
+        /// Spends one shot for a converted A_FireProjectile call. Unlike CheckAmmo, running dry
+        /// does not lower or switch the weapon: ZDoom's action simply declines to fire.
+        /// </summary>
+        public bool TryUseCustomProjectileAmmo(Player player)
+        {
+            var ammo = DoomInfo.WeaponInfos[(int)player.ReadyWeapon].Ammo;
+
+            if (ammo == AmmoType.NoAmmo)
+            {
+                return true;
+            }
+
+            var count = AmmoPerShot(player);
+
+            if (player.Ammo[(int)ammo] < count)
+            {
+                return false;
+            }
+
+            player.Ammo[(int)ammo] -= count;
+            return true;
         }
 
 
