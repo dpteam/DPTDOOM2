@@ -249,6 +249,11 @@ fn Thing_3001() {
 | `Explode("кадр", урон, радиус, флаги)` | `A_Explode` |
 | `CustomMeleeAttack("кадр", урон, "ЗвукПопадания", "ЗвукПромаха")` | `A_CustomMeleeAttack`; урон — функция выражения |
 | `CustomPunch("кадр", урон, norandom, флаги, "Puff", дальность, "ЗвукПопадания", "ЗвукПромаха")` | `A_CustomPunch`; урон и дальность — функции выражений |
+| `NoBlocking("кадр", drop)` | `A_NoBlocking`; очищает `SOLID` |
+| `SetHealth("кадр", здоровье, ptr)` | `A_SetHealth`; минимум 1, target/tracer |
+| `SetAngle("кадр", угол, флаги, ptr)` | `A_SetAngle`; угол — функция выражения в градусах |
+| `ChangeVelocity("кадр", x, y, z, флаги, ptr)` | `A_ChangeVelocity`; `CVF_RELATIVE` и `CVF_REPLACE` |
+| `ScaleVelocity("кадр", масштаб, ptr)` | `A_ScaleVelocity` |
 
 Имена разрешаются **при загрузке**, а не в тике: типа актора по имени в момент выстрела
 уже нет, а опечатка должна попасть в отчёт, а не в молчание. Пустая строка состояния у

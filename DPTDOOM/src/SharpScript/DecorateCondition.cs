@@ -51,7 +51,8 @@ namespace DPTDOOM.Scripting
             { "x", "X()" },
             { "y", "Y()" },
             { "z", "Z()" },
-            { "tics", "Tics()" }
+            { "tics", "Tics()" },
+            { "angle", "Angle()" }
         };
 
         /// <summary>

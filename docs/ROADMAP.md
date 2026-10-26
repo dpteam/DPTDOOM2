@@ -1048,6 +1048,7 @@ DECORATE приходится угадывать по чужим реализа�
 - [x] 13.25. Чтение всех лампов `DECORATE` в порядке WAD.
 - [x] 13.26. `A_SpawnItemEx` с выражениями и актёрами без `DoomEdNum`.
 - [x] 13.27. `A_CustomMeleeAttack` и `A_CustomPunch` с выражениями урона и своим puff.
+- [x] 13.28. `A_Stop`, `A_NoBlocking`, `A_SetHealth`, `A_SetAngle`, `A_ChangeVelocity`, `A_ScaleVelocity`.
 
 ### 13.1. Мышь при открытой консоли — **сделано**
 
@@ -1834,6 +1835,27 @@ armour bonus называются в отчёте. Второй аргумент
 `CustomMeleeAttackTest` (6) и `CustomPunchTest` (7), включая попадание, промах, `CPF_NOTURN`,
 отсутствие атаки у монстра и путь DECORATE → скрипт → реальный урон. Старый тест неподдерживаемого
 действия теперь проверяет `A_ThrowGrenade`, потому что `A_CustomPunch` поддержан.
+
+- [x] 13.28. `A_Stop`, `A_NoBlocking`, `A_SetHealth`, `A_SetAngle`, `A_ChangeVelocity`, `A_ScaleVelocity` - **сделано**
+
+Следующий пласт простых, но частых действий `ademo1.wad`: `A_Stop` 19 раз, `A_NoBlocking` 61,
+`A_SetHealth` 22, `A_SetAngle` 6, `A_ChangeVelocity` 11 и `A_ScaleVelocity` 2. Сигнатуры сверены с
+`actions.zs`, `actor.zs` и `p_actionfunctions.cpp`, а не восстановлены по памяти.
+
+`A_Stop` обнуляет скорость; `A_NoBlocking` очищает `SOLID`. `DropItem` отдельно остаётся
+неподдержанным свойством, поэтому `drop` не превращён в выдуманный список предметов.
+
+`A_SetHealth` не опускает здоровье ниже единицы и синхронизирует здоровье mobj и player record.
+`A_SetAngle` принимает выражение в градусах; в выражения добавлено поле `angle`, поэтому работают
+`A_SetAngle(angle + 100)` и дробные добавки. `A_ChangeVelocity` поддерживает `CVF_RELATIVE` и
+`CVF_REPLACE`, `A_ScaleVelocity` умножает все три компоненты скорости.
+
+`AAPTR_TARGET` и `AAPTR_TRACER` разрешаются в настоящие mobj. Остальные указатели не применяются к
+актору по умолчанию: это меняло бы не тот объект, поэтому действие отклоняется с именем указателя.
+`SPF_INTERPOLATE` остаётся только подачей и не меняет симуляцию.
+
+Проверка: `SimpleDecorateActionsTest` (12), включая реальные изменения здоровья, угла и скорости в
+мире, плюс выражения и указатели; живой блок в `tools/test-decorate.ps1` и `tools/test-ademo.ps1`.
 
 ## Известные ограничения
 

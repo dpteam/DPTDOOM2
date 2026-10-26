@@ -197,6 +197,10 @@ powershell -NoProfile -File tools\test-launcher.ps1
 - `A_CustomPunch` — hitscan игрока, `A_CustomMeleeAttack` — обычная проверка ближнего
   боя. Их урон вычисляется при кадре. Необязательный puff у `LineAttack` относится
   только к одному вызову; по умолчанию `BulletPuff` и ванильные RNG-броски прежние.
+- `A_Stop`/`A_NoBlocking`/`A_SetHealth`/`A_SetAngle`/`A_ChangeVelocity`/
+  `A_ScaleVelocity` вычисляют аргументы при кадре, а не при загрузке. Поле `angle`
+  возвращает градусы как fixed. `AAPTR_TARGET` и `AAPTR_TRACER` разрешаются в mobj;
+  master/player/line pointers действие отклоняет, а не применяет к себе.
 - Боты: навигация — граф **секторов**, не субсекторов (см. `docs/BOTS.md`).
   Рёбра направленные и фильтруются по высоте шага и просвету. Маршрут
   продвигается только по факту входа в следующий сектор. Из направленности следует

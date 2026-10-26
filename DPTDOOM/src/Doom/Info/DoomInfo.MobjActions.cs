@@ -68,6 +68,16 @@ namespace DPTDOOM
                 world.MonsterBehavior.FaceTarget(actor);
             }
 
+            public void Stop(World world, Mobj actor)
+            {
+                world.MonsterBehavior.Stop(actor);
+            }
+
+            public void NoBlocking(World world, Mobj actor)
+            {
+                world.MonsterBehavior.NoBlocking(actor);
+            }
+
             public void ClearTarget(World world, Mobj actor)
             {
                 world.MonsterBehavior.ClearTarget(actor);

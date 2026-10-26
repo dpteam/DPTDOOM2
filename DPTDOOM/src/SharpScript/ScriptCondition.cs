@@ -174,6 +174,26 @@ namespace DPTDOOM.Scripting
             // once per animation rather than once per tic.
             target.Register("Tics", 0, call => ScriptValue.FromInt(Current().Tics));
 
+            // DECORATE's angle is in degrees, like A_SetAngle's argument. Convert without a
+            // floating-point round trip so angle + 0.4 remains exact enough for lockstep.
+            target.Register("Angle", 0, call =>
+            {
+                var data = (long)Current().Angle.Data;
+                var numerator = data * 360L * Fixed.FracUnit;
+                const long denominator = 0x100000000L;
+
+                if (numerator >= 0)
+                {
+                    numerator += denominator / 2;
+                }
+                else
+                {
+                    numerator -= denominator / 2;
+                }
+
+                return ScriptValue.FromFixed(new Fixed((int)(numerator / denominator)));
+            });
+
             // DECORATE's random(lo, hi), inclusive. It draws from the WORLD generator, and that is
             // the point: a condition is part of the simulation, so every end of a session must make
             // the same draws. The presentation random the mixer uses would desynchronise the world.

@@ -768,6 +768,57 @@ ACTOR Spark : DoomImp
     Assert-True ($spawnExLog -notlike "*no such spawn expression*") "the random argument has a live expression"
     Assert-True ($spawnExLog -notlike "*decorate problem*") "a supported SpawnItemEx block reports nothing"
 
+    Write-Host "With simple movement and actor actions"
+    $simpleActions = Join-Path $work "simpleactions.dec"
+
+    # These are the forms used in ademo1.wad: angle as an expression, relative replacement of
+    # velocity, and a target pointer. They must not be reported as unsupported actions.
+    [System.IO.File]::WriteAllText($simpleActions, @"
+ACTOR ActiveImp 3001
+{
+  States
+  {
+  Melee:
+    TROO A 4 A_Stop
+    TROO B 4 A_NoBlocking(false)
+    TROO C 4 A_SetHealth(10)
+    TROO D 4 A_SetAngle(angle + 100)
+    TROO E 4 A_ChangeVelocity(8, 0, 2, CVF_RELATIVE | CVF_REPLACE, AAPTR_TARGET)
+    TROO F 4 A_ScaleVelocity(0.5)
+    Loop
+  }
+}
+"@)
+
+    $simpleLog = Run-Game "simpleactions" @('-decorate', $simpleActions)
+
+    Assert-True ($simpleLog -like "*scripts: OK*") "simple actor actions convert"
+    Assert-True ($simpleLog -like "*map MAP01: OK*") "the level loads"
+    Assert-True ($simpleLog -notlike "*no such action*") "none is a missing action"
+    Assert-True ($simpleLog -notlike "*takes no arguments*") "and none is refused for its arguments"
+    Assert-True ($simpleLog -notlike "*no such spawn expression*") "the expressions resolve"
+    Assert-True ($simpleLog -notlike "*decorate problem*") "a supported block reports nothing"
+
+    Write-Host "With an unsupported action pointer"
+    $badPointer = Join-Path $work "badpointer.dec"
+
+    [System.IO.File]::WriteAllText($badPointer, @"
+ACTOR ConfusedImp 3001
+{
+  States
+  {
+  Melee:
+    TROO A 4 A_SetHealth(10, AAPTR_MASTER)
+    Loop
+  }
+}
+"@)
+
+    $badPointerLog = Run-Game "badpointer" @('-decorate', $badPointer)
+
+    Assert-True ($badPointerLog -like "*AAPTR_MASTER*") "the unsupported pointer is named"
+    Assert-True ($badPointerLog -like "*map MAP01: OK*") "and the level still loads"
+
     Write-Host "With a truncated file"
     $cutLog = Run-Game "cut" @('-decorate', $truncated)
 

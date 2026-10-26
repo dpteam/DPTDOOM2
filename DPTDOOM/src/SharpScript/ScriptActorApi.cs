@@ -319,6 +319,16 @@ namespace DPTDOOM.Scripting
         /// that "no such frame" is worded the same way in each and a modder reads one rule rather
         /// than three.
         /// </summary>
+        /// <summary>Rejects an AAPTR value this engine cannot resolve, at load time.</summary>
+        private static void CheckActionPointer(ScriptCall call, int pointer)
+        {
+            if (!ActorPointer.IsSupported(pointer))
+            {
+                throw call.Fail("this AAPTR pointer is not supported here; target and tracer " +
+                                "are supported, master and player/line pointers are not");
+            }
+        }
+
         /// <summary>
         /// Resolves one of the expression functions generated for A_SpawnItemEx.
         /// </summary>
@@ -822,6 +832,121 @@ namespace DPTDOOM.Scripting
                     parameters.Flags = flags;
 
                     world.ThingAllocation.SpawnItemEx(mobj, parameters);
+                });
+
+                return ScriptValue.Void;
+            });
+
+            // A_NoBlocking: clear SOLID. DropItem metadata has no counterpart and is reported by
+            // the property parser, not hidden in this action.
+            host.Register("NoBlocking", 2, 2, call =>
+            {
+                var number = FrameNumber(call.AsText(0), call);
+
+                // The drop argument is read by the converter for compatibility, but there is no
+                // metadata list to drop from this engine.
+                DoomInfo.SetStateAction(number, (world, mobj) =>
+                    world.MonsterBehavior.NoBlocking(mobj));
+
+                return ScriptValue.Void;
+            });
+
+            // A_SetHealth: health is evaluated on the frame, not folded into a load-time constant.
+            host.Register("SetHealth", 3, 3, call =>
+            {
+                var number = FrameNumber(call.AsText(0), call);
+                var health = ResolveSpawnExpression(call, 1);
+                var pointer = call.AsInt(2);
+
+                CheckActionPointer(call, pointer);
+
+                DoomInfo.SetStateAction(number, (world, mobj) =>
+                {
+                    var target = ActorPointer.Resolve(mobj, pointer);
+
+                    if (target != null)
+                    {
+                        world.MonsterBehavior.SetHealth(
+                            target, health.EvaluateValue(world, mobj).AsInt());
+                    }
+                });
+
+                return ScriptValue.Void;
+            });
+
+            // A_SetAngle: the angle is a fixed-point degree expression.
+            host.Register("SetAngle", 4, 4, call =>
+            {
+                var number = FrameNumber(call.AsText(0), call);
+                var angle = ResolveSpawnExpression(call, 1);
+                var flags = call.AsInt(2);
+                var pointer = call.AsInt(3);
+
+                CheckActionPointer(call, pointer);
+
+                DoomInfo.SetStateAction(number, (world, mobj) =>
+                {
+                    var target = ActorPointer.Resolve(mobj, pointer);
+
+                    if (target != null)
+                    {
+                        // Interpolation flags affect presentation, not the simulation's angle.
+                        world.MonsterBehavior.SetAngle(
+                            target, AngleFromFixedDegrees(angle.EvaluateValue(world, mobj).AsFixed()));
+                    }
+                });
+
+                return ScriptValue.Void;
+            });
+
+            // A_ChangeVelocity: x/y/z are expressions; CVF_RELATIVE and CVF_REPLACE are honoured.
+            host.Register("ChangeVelocity", 6, 6, call =>
+            {
+                var number = FrameNumber(call.AsText(0), call);
+                var x = ResolveSpawnExpression(call, 1);
+                var y = ResolveSpawnExpression(call, 2);
+                var z = ResolveSpawnExpression(call, 3);
+                var flags = call.AsInt(4);
+                var pointer = call.AsInt(5);
+
+                CheckActionPointer(call, pointer);
+
+                DoomInfo.SetStateAction(number, (world, mobj) =>
+                {
+                    var target = ActorPointer.Resolve(mobj, pointer);
+
+                    if (target != null)
+                    {
+                        world.MonsterBehavior.ChangeVelocity(
+                            target,
+                            x.EvaluateValue(world, mobj).AsFixed(),
+                            y.EvaluateValue(world, mobj).AsFixed(),
+                            z.EvaluateValue(world, mobj).AsFixed(),
+                            flags);
+                    }
+                });
+
+                return ScriptValue.Void;
+            });
+
+            // A_ScaleVelocity: one factor applied to all three components.
+            host.Register("ScaleVelocity", 3, 3, call =>
+            {
+                var number = FrameNumber(call.AsText(0), call);
+                var scale = ResolveSpawnExpression(call, 1);
+                var pointer = call.AsInt(2);
+
+                CheckActionPointer(call, pointer);
+
+                DoomInfo.SetStateAction(number, (world, mobj) =>
+                {
+                    var target = ActorPointer.Resolve(mobj, pointer);
+
+                    if (target != null)
+                    {
+                        world.MonsterBehavior.ScaleVelocity(
+                            target, scale.EvaluateValue(world, mobj).AsFixed());
+                    }
                 });
 
                 return ScriptValue.Void;

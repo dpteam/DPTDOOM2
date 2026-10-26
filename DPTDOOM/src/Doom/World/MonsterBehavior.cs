@@ -1117,6 +1117,97 @@ namespace DPTDOOM
             actor.MomY -= distance * Trig.Sin(actor.Angle);
         }
 
+        /// <summary>
+        /// A_Stop: zero all velocity. Presentation-only idle handling in ZDoom is not part of the
+        /// simulation here, so there is no second player-state path to update.
+        /// </summary>
+        public void Stop(Mobj actor)
+        {
+            actor.MomX = Fixed.Zero;
+            actor.MomY = Fixed.Zero;
+            actor.MomZ = Fixed.Zero;
+        }
+
+        /// <summary>
+        /// A_NoBlocking: make a corpse stop blocking movement.
+        ///
+        /// DropItem metadata has no counterpart in this engine, and DECORATE already reports that
+        /// property when it appears. There is deliberately no invented drop list here: the action's
+        /// visible, ordinary behaviour is the SOLID flag being cleared.
+        /// </summary>
+        public void NoBlocking(Mobj actor)
+        {
+            actor.Flags &= ~MobjFlags.Solid;
+        }
+
+        /// <summary>
+        /// A_SetHealth: set health, but never below one. ZDoom clamps to one rather than killing
+        /// the actor, so a mod's A_SetHealth(0) is not an alternative A_Die.
+        /// </summary>
+        public void SetHealth(Mobj actor, int health)
+        {
+            var newHealth = health <= 0 ? 1 : health;
+
+            actor.Health = newHealth;
+
+            if (actor.Player != null)
+            {
+                actor.Player.Health = newHealth;
+
+                if (actor.Player.Mobj != null)
+                {
+                    actor.Player.Mobj.Health = newHealth;
+                }
+            }
+        }
+
+        /// <summary>A_SetAngle: replace the actor's angle.</summary>
+        public void SetAngle(Mobj actor, Angle angle)
+        {
+            actor.Angle = angle;
+        }
+
+        /// <summary>
+        /// A_ChangeVelocity: add or replace velocity, optionally rotating x/y by the actor's angle.
+        /// CVF_RELATIVE=1, CVF_REPLACE=2. The rotation follows ZDoom's formula, not the different
+        /// left/right convention used by A_SpawnItemEx.
+        /// </summary>
+        public void ChangeVelocity(Mobj actor, Fixed x, Fixed y, Fixed z, int flags)
+        {
+            var velocityX = x;
+            var velocityY = y;
+
+            if ((flags & 1) != 0)
+            {
+                var sin = Trig.Sin(actor.Angle);
+                var cos = Trig.Cos(actor.Angle);
+
+                velocityX = x * cos - y * sin;
+                velocityY = x * sin + y * cos;
+            }
+
+            if ((flags & 2) != 0)
+            {
+                actor.MomX = velocityX;
+                actor.MomY = velocityY;
+                actor.MomZ = z;
+            }
+            else
+            {
+                actor.MomX += velocityX;
+                actor.MomY += velocityY;
+                actor.MomZ += z;
+            }
+        }
+
+        /// <summary>A_ScaleVelocity: multiply all three velocity components by one factor.</summary>
+        public void ScaleVelocity(Mobj actor, Fixed scale)
+        {
+            actor.MomX *= scale;
+            actor.MomY *= scale;
+            actor.MomZ *= scale;
+        }
+
 
         /// <summary>
         /// A_CustomPunch: a melee hitscan with a custom damage amount, puff and range.

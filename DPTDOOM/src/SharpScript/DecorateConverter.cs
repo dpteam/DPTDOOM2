@@ -270,6 +270,42 @@ namespace DPTDOOM.Scripting
 
         /// <summary>Sound on a hit, by SNDINFO name, or null.</summary>
         public string PunchHitSound;
+
+        /// <summary>True for A_NoBlocking, including its optional drop argument.</summary>
+        public bool HasNoBlocking;
+
+        /// <summary>Whether A_NoBlocking was asked to drop metadata (unsupported here).</summary>
+        public bool NoBlockingDrop = true;
+
+        /// <summary>True for A_SetHealth.</summary>
+        public bool HasSetHealth;
+
+        /// <summary>Health expression and AAPTR pointer.</summary>
+        public string SetHealthExpression;
+        public int SetHealthPointer;
+
+        /// <summary>True for A_SetAngle.</summary>
+        public bool HasSetAngle;
+
+        /// <summary>Angle expression, flags and AAPTR pointer.</summary>
+        public string SetAngleExpression;
+        public int SetAngleFlags;
+        public int SetAnglePointer;
+
+        /// <summary>True for A_ChangeVelocity.</summary>
+        public bool HasChangeVelocity;
+
+        /// <summary>x/y/z expressions, CVF flags and AAPTR pointer.</summary>
+        public string[] ChangeVelocityExpressions;
+        public int ChangeVelocityFlags;
+        public int ChangeVelocityPointer;
+
+        /// <summary>True for A_ScaleVelocity.</summary>
+        public bool HasScaleVelocity;
+
+        /// <summary>Scale expression and AAPTR pointer.</summary>
+        public string ScaleVelocityExpression;
+        public int ScaleVelocityPointer;
     }
 
     /// <summary>
@@ -919,6 +955,56 @@ namespace DPTDOOM.Scripting
                               .Append("\");\n");
                     }
 
+                    if (frame.HasNoBlocking)
+                    {
+                        script.Append("    NoBlocking(\"").Append(name).Append("\", ")
+                              .Append(frame.NoBlockingDrop ? "true" : "false").Append(");\n");
+                    }
+
+                    if (frame.HasSetHealth)
+                    {
+                        script.Append("    SetHealth(\"").Append(name).Append("\", \"")
+                              .Append(SpawnExFunctionName(actor, chain.Label, i + 1, 10))
+                              .Append("\", ")
+                              .Append(frame.SetHealthPointer.ToString(CultureInfo.InvariantCulture))
+                              .Append(");\n");
+                    }
+
+                    if (frame.HasSetAngle)
+                    {
+                        script.Append("    SetAngle(\"").Append(name).Append("\", \"")
+                              .Append(SpawnExFunctionName(actor, chain.Label, i + 1, 11))
+                              .Append("\", ")
+                              .Append(frame.SetAngleFlags.ToString(CultureInfo.InvariantCulture))
+                              .Append(", ")
+                              .Append(frame.SetAnglePointer.ToString(CultureInfo.InvariantCulture))
+                              .Append(");\n");
+                    }
+
+                    if (frame.HasChangeVelocity)
+                    {
+                        script.Append("    ChangeVelocity(\"").Append(name).Append("\", \"")
+                              .Append(SpawnExFunctionName(actor, chain.Label, i + 1, 12))
+                              .Append("\", \"")
+                              .Append(SpawnExFunctionName(actor, chain.Label, i + 1, 13))
+                              .Append("\", \"")
+                              .Append(SpawnExFunctionName(actor, chain.Label, i + 1, 14))
+                              .Append("\", ")
+                              .Append(frame.ChangeVelocityFlags.ToString(CultureInfo.InvariantCulture))
+                              .Append(", ")
+                              .Append(frame.ChangeVelocityPointer.ToString(CultureInfo.InvariantCulture))
+                              .Append(");\n");
+                    }
+
+                    if (frame.HasScaleVelocity)
+                    {
+                        script.Append("    ScaleVelocity(\"").Append(name).Append("\", \"")
+                              .Append(SpawnExFunctionName(actor, chain.Label, i + 1, 15))
+                              .Append("\", ")
+                              .Append(frame.ScaleVelocityPointer.ToString(CultureInfo.InvariantCulture))
+                              .Append(");\n");
+                    }
+
                     if (frame.HasLookEx)
                     {
                         // The see state is written as a frame of this actor when the mod named one
@@ -1038,7 +1124,9 @@ namespace DPTDOOM.Scripting
                 {
                     var frame = chain.Frames[i];
 
-                    if (!frame.HasSpawnItemEx && !frame.HasCustomMelee && !frame.HasCustomPunch)
+                    if (!frame.HasSpawnItemEx && !frame.HasCustomMelee && !frame.HasCustomPunch &&
+                        !frame.HasSetHealth && !frame.HasSetAngle && !frame.HasChangeVelocity &&
+                        !frame.HasScaleVelocity)
                     {
                         continue;
                     }
@@ -1070,6 +1158,33 @@ namespace DPTDOOM.Scripting
                             frame.PunchDamageExpression);
                         EmitSpawnExpression(script, actor, chain.Label, i + 1, 9,
                             frame.PunchRangeExpression);
+                    }
+
+                    if (frame.HasSetHealth)
+                    {
+                        EmitSpawnExpression(script, actor, chain.Label, i + 1, 10,
+                            frame.SetHealthExpression);
+                    }
+
+                    if (frame.HasSetAngle)
+                    {
+                        EmitSpawnExpression(script, actor, chain.Label, i + 1, 11,
+                            frame.SetAngleExpression);
+                    }
+
+                    if (frame.HasChangeVelocity)
+                    {
+                        for (var value = 0; value < frame.ChangeVelocityExpressions.Length; value++)
+                        {
+                            EmitSpawnExpression(script, actor, chain.Label, i + 1, 12 + value,
+                                frame.ChangeVelocityExpressions[value]);
+                        }
+                    }
+
+                    if (frame.HasScaleVelocity)
+                    {
+                        EmitSpawnExpression(script, actor, chain.Label, i + 1, 15,
+                            frame.ScaleVelocityExpression);
                     }
                 }
             }
@@ -1842,6 +1957,36 @@ namespace DPTDOOM.Scripting
             if (string.Equals(frame.Action, "A_CustomPunch", StringComparison.OrdinalIgnoreCase))
             {
                 ReadCustomPunch(arguments, actor, frame, problems);
+                return;
+            }
+
+            if (string.Equals(frame.Action, "A_NoBlocking", StringComparison.OrdinalIgnoreCase))
+            {
+                ReadNoBlocking(arguments, actor, frame, problems);
+                return;
+            }
+
+            if (string.Equals(frame.Action, "A_SetHealth", StringComparison.OrdinalIgnoreCase))
+            {
+                ReadSetHealth(arguments, actor, frame, problems);
+                return;
+            }
+
+            if (string.Equals(frame.Action, "A_SetAngle", StringComparison.OrdinalIgnoreCase))
+            {
+                ReadSetAngle(arguments, actor, frame, problems);
+                return;
+            }
+
+            if (string.Equals(frame.Action, "A_ChangeVelocity", StringComparison.OrdinalIgnoreCase))
+            {
+                ReadChangeVelocity(arguments, actor, frame, problems);
+                return;
+            }
+
+            if (string.Equals(frame.Action, "A_ScaleVelocity", StringComparison.OrdinalIgnoreCase))
+            {
+                ReadScaleVelocity(arguments, actor, frame, problems);
                 return;
             }
 
@@ -3004,6 +3149,275 @@ namespace DPTDOOM.Scripting
             }
 
             return true;
+        }
+
+        /// <summary>A_NoBlocking: clear SOLID. DropItem metadata is reported by its own property.</summary>
+        private static void ReadNoBlocking(List<List<Token>> arguments, DecorateActor actor,
+                                           StateFrame frame, IList<string> problems)
+        {
+            // No arguments means the engine's plain A_NoBlocking, not a second closure for the same
+            // thing. The optional drop argument is the only reason to emit frame work.
+            if (arguments.Count == 0)
+            {
+                return;
+            }
+
+            frame.Action = "";
+            frame.HasNoBlocking = true;
+            frame.NoBlockingDrop = ReadActionBoolean(arguments, 0, true, actor, frame, problems,
+                "A_NoBlocking drop");
+        }
+
+        /// <summary>A_SetHealth: health is an expression, and target/tracer pointers are supported.</summary>
+        private static void ReadSetHealth(List<List<Token>> arguments, DecorateActor actor,
+                                          StateFrame frame, IList<string> problems)
+        {
+            frame.Action = "";
+
+            if (arguments.Count == 0 || arguments[0].Count == 0)
+            {
+                problems.Add(actor.Name + " line " + frame.Line +
+                             ": 'A_SetHealth' needs a health value, so it is not applied");
+                return;
+            }
+
+            var pointer = ReadPointer(arguments, 1, actor, frame, problems, "A_SetHealth");
+
+            if (pointer < 0)
+            {
+                return;
+            }
+
+            frame.HasSetHealth = true;
+            frame.SetHealthExpression = ReadSpawnExpression(arguments, 0, actor, frame, problems, "1");
+            frame.SetHealthPointer = pointer;
+        }
+
+        /// <summary>A_SetAngle: angle is a fixed-point degree expression.</summary>
+        private static void ReadSetAngle(List<List<Token>> arguments, DecorateActor actor,
+                                         StateFrame frame, IList<string> problems)
+        {
+            frame.Action = "";
+
+            var pointer = ReadPointer(arguments, 2, actor, frame, problems, "A_SetAngle");
+
+            if (pointer < 0)
+            {
+                return;
+            }
+
+            frame.HasSetAngle = true;
+            frame.SetAngleExpression = ReadSpawnExpression(arguments, 0, actor, frame, problems, "0");
+            frame.SetAngleFlags = ReadActionFlags(arguments, 1, actor, frame, problems, "A_SetAngle");
+            frame.SetAnglePointer = pointer;
+        }
+
+        /// <summary>A_ChangeVelocity: x/y/z are expressions, flags and pointer are read at load.</summary>
+        private static void ReadChangeVelocity(List<List<Token>> arguments, DecorateActor actor,
+                                               StateFrame frame, IList<string> problems)
+        {
+            frame.Action = "";
+
+            var pointer = ReadPointer(arguments, 4, actor, frame, problems, "A_ChangeVelocity");
+
+            if (pointer < 0)
+            {
+                return;
+            }
+
+            frame.HasChangeVelocity = true;
+            frame.ChangeVelocityExpressions = new string[3];
+
+            for (var i = 0; i < 3; i++)
+            {
+                frame.ChangeVelocityExpressions[i] = ReadSpawnExpression(
+                    arguments, i, actor, frame, problems, "0");
+            }
+
+            frame.ChangeVelocityFlags = ReadActionFlags(arguments, 3, actor, frame, problems,
+                "A_ChangeVelocity");
+            frame.ChangeVelocityPointer = pointer;
+        }
+
+        /// <summary>A_ScaleVelocity: one scale expression and an optional pointer.</summary>
+        private static void ReadScaleVelocity(List<List<Token>> arguments, DecorateActor actor,
+                                              StateFrame frame, IList<string> problems)
+        {
+            frame.Action = "";
+
+            if (arguments.Count == 0 || arguments[0].Count == 0)
+            {
+                problems.Add(actor.Name + " line " + frame.Line +
+                             ": 'A_ScaleVelocity' needs a scale, so it is not applied");
+                return;
+            }
+
+            var pointer = ReadPointer(arguments, 1, actor, frame, problems, "A_ScaleVelocity");
+
+            if (pointer < 0)
+            {
+                return;
+            }
+
+            frame.HasScaleVelocity = true;
+            frame.ScaleVelocityExpression = ReadSpawnExpression(arguments, 0, actor, frame, problems, "1.0");
+            frame.ScaleVelocityPointer = pointer;
+        }
+
+        /// <summary>Reads an AAPTR name or number, returning -1 when it cannot be honoured.</summary>
+        private static int ReadPointer(List<List<Token>> arguments, int index,
+                                       DecorateActor actor, StateFrame frame,
+                                       IList<string> problems, string action)
+        {
+            if (index >= arguments.Count || arguments[index].Count == 0)
+            {
+                return ActorPointer.Default;
+            }
+
+            var text = JoinTokens(arguments[index]).Replace(" ", "");
+            int pointer;
+
+            if (int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out pointer))
+            {
+                if (ActorPointer.IsSupported(pointer))
+                {
+                    return pointer;
+                }
+            }
+            else
+            {
+                switch (text.ToUpperInvariant())
+                {
+                    case "AAPTR_DEFAULT": return ActorPointer.Default;
+                    case "AAPTR_NULL": return ActorPointer.Null;
+                    case "AAPTR_TARGET": return ActorPointer.Target;
+                    case "AAPTR_TRACER": return ActorPointer.Tracer;
+                }
+            }
+
+            problems.Add(actor.Name + " line " + frame.Line + ": '" + action + "' pointer '" + text +
+                         "' is not supported here (target and tracer are supported, master and " +
+                         "player/line pointers are not), so the action is not applied");
+            return -1;
+        }
+
+        /// <summary>Reads a numeric flags argument without treating it as an expression.</summary>
+        private static int ReadActionFlags(List<List<Token>> arguments, int index,
+                                           DecorateActor actor, StateFrame frame,
+                                           IList<string> problems, string action)
+        {
+            if (index >= arguments.Count || arguments[index].Count == 0)
+            {
+                return 0;
+            }
+
+            var text = JoinTokens(arguments[index]).Replace(" ", "");
+            int value;
+
+            if (int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out value))
+            {
+                if (action == "A_ChangeVelocity" && (value & ~3) != 0)
+                {
+                    problems.Add(actor.Name + " line " + frame.Line + ": '" + action + "' flags 0x" +
+                                 (value & ~3).ToString("x", CultureInfo.InvariantCulture) +
+                                 " are not known; CVF_RELATIVE and CVF_REPLACE are used");
+                }
+                else if (action == "A_SetAngle" && (value & ~2) != 0)
+                {
+                    problems.Add(actor.Name + " line " + frame.Line + ": '" + action + "' flags 0x" +
+                                 (value & ~2).ToString("x", CultureInfo.InvariantCulture) +
+                                 " are not known; SPF_INTERPOLATE is presentation and the angle " +
+                                 "is still set");
+                }
+
+                return value;
+            }
+
+            // CVF and SPF names are tiny closed sets, not arbitrary expressions. Unknown names are
+            // reported instead of silently producing a different movement or angle.
+            if (action == "A_ChangeVelocity")
+            {
+                var flags = 0;
+
+                foreach (var part in text.Split('|'))
+                {
+                    switch (part.ToUpperInvariant())
+                    {
+                        case "CVF_RELATIVE": flags |= 1; break;
+                        case "CVF_REPLACE": flags |= 2; break;
+                        case "":
+                            break;
+                        default:
+                            problems.Add(actor.Name + " line " + frame.Line + ": '" + action +
+                                         "' flag '" + part + "' is not known, so it is ignored");
+                            break;
+                    }
+                }
+
+                return flags;
+            }
+
+            if (action == "A_SetAngle")
+            {
+                var flags = 0;
+
+                foreach (var part in text.Split('|'))
+                {
+                    switch (part.ToUpperInvariant())
+                    {
+                        case "SPF_INTERPOLATE":
+                            // Interpolation is presentation, not simulation. It is safe to accept:
+                            // the angle itself is still set on this tic.
+                            break;
+                        case "":
+                            break;
+                        default:
+                            problems.Add(actor.Name + " line " + frame.Line + ": '" + action +
+                                         "' flag '" + part + "' is not known, so it is ignored");
+                            break;
+                    }
+                }
+
+                return flags;
+            }
+
+            problems.Add(actor.Name + " line " + frame.Line + ": '" + action + "' flags '" + text +
+                         "' must be a number or a known flag name; zero is used");
+            return 0;
+        }
+
+        private static bool ReadActionBoolean(List<List<Token>> arguments, int index, bool fallback,
+                                              DecorateActor actor, StateFrame frame,
+                                              IList<string> problems, string what)
+        {
+            if (index >= arguments.Count || arguments[index].Count == 0)
+            {
+                return fallback;
+            }
+
+            if (arguments[index].Count == 1)
+            {
+                var token = arguments[index][0];
+
+                if (token.IsNumber)
+                {
+                    return token.Number != 0;
+                }
+
+                if (string.Equals(token.Text, "true", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+
+                if (string.Equals(token.Text, "false", StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+            }
+
+            problems.Add(actor.Name + " line " + frame.Line + ": '" + what +
+                         "' must be true/false or 0/1; the default is used");
+            return fallback;
         }
 
         /// <summary>
