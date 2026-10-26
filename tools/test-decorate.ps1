@@ -888,6 +888,31 @@ ACTOR GrenadeImp 3001
     Assert-True ($grenadeLog -like "*level throw*") "the missing actor pitch is named"
     Assert-True ((State-Of $grenadeLog) -ne $plainState) "the thrown grenade changed the world"
 
+    Write-Host "With A_AlertMonsters and no parentheses"
+    $alert = Join-Path $work "alert.dec"
+
+    [System.IO.File]::WriteAllText($alert, @"
+ACTOR AlertImp 3001
+{
+  States
+  {
+  Spawn:
+    TROO A 4 A_Look
+  See:
+    TROO AB 4 A_AlertMonsters
+    TROO CD 4 A_Chase
+    Loop
+  }
+}
+"@)
+
+    $alertLog = Run-Game "alert" @('-decorate', $alert)
+
+    Assert-True ($alertLog -like "*scripts: OK*") "the no-parentheses form is accepted"
+    Assert-True ($alertLog -like "*map MAP01: OK*") "the level loads"
+    Assert-True ($alertLog -notlike "*no such action 'A_AlertMonsters'*") "A_AlertMonsters is a real action"
+    Assert-True ((State-Of $alertLog) -ne $plainState) "the alert state changed the world"
+
     Write-Host "With a truncated file"
     $cutLog = Run-Game "cut" @('-decorate', $truncated)
 

@@ -307,6 +307,10 @@ namespace DPTDOOM.Scripting
         public string ScaleVelocityExpression;
         public int ScaleVelocityPointer;
 
+        /// <summary>True for A_AlertMonsters and its AMF_* flags.</summary>
+        public bool HasAlertMonsters;
+        public int AlertMonsterFlags;
+
         /// <summary>True for A_StartSound.</summary>
         public bool HasStartSound;
 
@@ -1080,6 +1084,13 @@ namespace DPTDOOM.Scripting
                               .Append(SpawnExFunctionName(actor, chain.Label, i + 1, 23))
                               .Append("\", ")
                               .Append(frame.GrenadeUseAmmo ? "true" : "false")
+                              .Append(");\n");
+                    }
+
+                    if (frame.HasAlertMonsters)
+                    {
+                        script.Append("    AlertMonsters(\"").Append(name).Append("\", ")
+                              .Append(frame.AlertMonsterFlags.ToString(CultureInfo.InvariantCulture))
                               .Append(");\n");
                     }
 
@@ -2133,6 +2144,12 @@ namespace DPTDOOM.Scripting
             if (string.Equals(frame.Action, "A_ThrowGrenade", StringComparison.OrdinalIgnoreCase))
             {
                 ReadThrowGrenade(arguments, actor, frame, problems);
+                return;
+            }
+
+            if (string.Equals(frame.Action, "A_AlertMonsters", StringComparison.OrdinalIgnoreCase))
+            {
+                ReadAlertMonsters(arguments, actor, frame, problems);
                 return;
             }
 
@@ -3383,6 +3400,86 @@ namespace DPTDOOM.Scripting
             frame.ChangeVelocityFlags = ReadActionFlags(arguments, 3, actor, frame, problems,
                 "A_ChangeVelocity");
             frame.ChangeVelocityPointer = pointer;
+        }
+
+        /// <summary>
+        /// A_AlertMonsters(maxdist, flags). The three AMF flags are cheap and fully supported.
+        /// maxdist is different: GZDoom stores LastHeard on each actor within the radius, while this
+        /// engine has one SoundTarget per sector. Pretending a sector-wide alert was radius-limited
+        /// would wake actors outside it, so a nonzero radius is reported and left unlimited.
+        /// </summary>
+        private static void ReadAlertMonsters(List<List<Token>> arguments, DecorateActor actor,
+                                              StateFrame frame, IList<string> problems)
+        {
+            frame.Action = "";
+            frame.HasAlertMonsters = true;
+
+            if (arguments.Count > 0 && arguments[0].Count > 0 &&
+                !IsZeroLiteral(JoinTokens(arguments[0])))
+            {
+                problems.Add(actor.Name + " line " + frame.Line +
+                             ": 'A_AlertMonsters' maxdist is ignored because this engine has " +
+                             "sector sound targets, not per-actor hearing memory; the alert is unlimited");
+            }
+
+            frame.AlertMonsterFlags = ReadAlertMonsterFlags(arguments, 1, actor, frame, problems);
+
+            if (arguments.Count > 2)
+            {
+                problems.Add(actor.Name + " line " + frame.Line +
+                             ": 'A_AlertMonsters' takes two arguments; the rest are ignored");
+            }
+        }
+
+        private static int ReadAlertMonsterFlags(List<List<Token>> arguments, int index,
+                                                 DecorateActor actor, StateFrame frame,
+                                                 IList<string> problems)
+        {
+            if (index >= arguments.Count || arguments[index].Count == 0)
+            {
+                return 0;
+            }
+
+            var text = JoinTokens(arguments[index]).Replace(" ", "");
+            int flags = 0;
+
+            foreach (var part in text.Split('|'))
+            {
+                if (part.Length == 0)
+                {
+                    continue;
+                }
+
+                int number;
+
+                if (int.TryParse(part, NumberStyles.Integer, CultureInfo.InvariantCulture, out number))
+                {
+                    flags |= number;
+                    continue;
+                }
+
+                switch (part.ToUpperInvariant())
+                {
+                    case "AMF_TARGETEMITTER": flags |= AlertMonsterFlags.TargetEmitter; break;
+                    case "AMF_TARGETNONPLAYER": flags |= AlertMonsterFlags.TargetNonPlayer; break;
+                    case "AMF_EMITFROMTARGET": flags |= AlertMonsterFlags.EmitFromTarget; break;
+                    default:
+                        problems.Add(actor.Name + " line " + frame.Line + ": alert flag '" +
+                                     part + "' is not known, so it is ignored");
+                        break;
+                }
+            }
+
+            var unknown = flags & ~AlertMonsterFlags.Supported;
+
+            if (unknown != 0)
+            {
+                problems.Add(actor.Name + " line " + frame.Line + ": alert flag bits 0x" +
+                             unknown.ToString("x", CultureInfo.InvariantCulture) +
+                             " are not known, so they are ignored");
+            }
+
+            return flags & AlertMonsterFlags.Supported;
         }
 
         /// <summary>

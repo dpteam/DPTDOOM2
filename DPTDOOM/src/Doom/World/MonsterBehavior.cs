@@ -166,6 +166,41 @@ namespace DPTDOOM
         }
 
         /// <summary>
+        /// A_AlertMonsters: propagate a noise through the same sector graph as a gunshot.
+        ///
+        /// A player is always the thing monsters should hear about. A monster instead tells them
+        /// about its player target, unless AMF_TARGETEMITTER or AMF_TARGETNONPLAYER says otherwise.
+        /// There is deliberately no fallback to the monster itself: with no suitable target the
+        /// original action is silent, and treating it as a gunshot would wake the wrong monsters.
+        /// </summary>
+        public void AlertMonsters(Mobj actor, int flags)
+        {
+            Mobj target = null;
+            var emitter = actor;
+
+            if (actor.Player != null || (flags & AlertMonsterFlags.TargetEmitter) != 0)
+            {
+                target = actor;
+            }
+            else if (actor.Target != null &&
+                     (actor.Target.Player != null ||
+                      (flags & AlertMonsterFlags.TargetNonPlayer) != 0))
+            {
+                target = actor.Target;
+            }
+
+            if ((flags & AlertMonsterFlags.EmitFromTarget) != 0)
+            {
+                emitter = target;
+            }
+
+            if (target != null && emitter != null)
+            {
+                world.WeaponBehavior.NoiseAlert(target, emitter);
+            }
+        }
+
+        /// <summary>
         /// A_Look, with the knobs DECORATE's A_LookEx adds.
         ///
         /// The null case is plain A_Look, and it has to stay **bit for bit** the same: it runs on

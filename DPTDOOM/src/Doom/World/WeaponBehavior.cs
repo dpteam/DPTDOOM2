@@ -271,7 +271,7 @@ namespace DPTDOOM
         }
 
 
-        private void NoiseAlert(Mobj target, Mobj emmiter)
+        public void NoiseAlert(Mobj target, Mobj emmiter)
         {
             RecursiveSound(
                 emmiter.Subsector.Sector,

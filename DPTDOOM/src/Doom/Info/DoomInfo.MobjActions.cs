@@ -58,6 +58,11 @@ namespace DPTDOOM
                 world.MonsterBehavior.Look(actor);
             }
 
+            public void AlertMonsters(World world, Mobj actor)
+            {
+                world.MonsterBehavior.AlertMonsters(actor, 0);
+            }
+
             public void Chase(World world, Mobj actor)
             {
                 world.MonsterBehavior.Chase(actor);

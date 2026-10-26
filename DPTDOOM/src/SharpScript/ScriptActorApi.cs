@@ -679,6 +679,19 @@ namespace DPTDOOM.Scripting
                 return ScriptValue.Void;
             });
 
+            // A_AlertMonsters is simulation, not audible sound: it marks sectors so their monsters
+            // acquire the selected target on a later look. Keep it on the ordinary noise path.
+            host.Register("AlertMonsters", 2, 2, call =>
+            {
+                var number = FrameNumber(call.AsText(0), call);
+                var flags = call.AsInt(1);
+
+                DoomInfo.SetStateAction(number, (world, mobj) =>
+                    world.MonsterBehavior.AlertMonsters(mobj, flags));
+
+                return ScriptValue.Void;
+            });
+
             // A projectile the frame fires. DECORATE's A_CustomMissile names it, so the type is
             // resolved here, when the file is read, and closed over: at play time there is no name
             // to look up and no way to report a typo.
