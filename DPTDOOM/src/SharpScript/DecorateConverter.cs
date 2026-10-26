@@ -306,6 +306,18 @@ namespace DPTDOOM.Scripting
         /// <summary>Scale expression and AAPTR pointer.</summary>
         public string ScaleVelocityExpression;
         public int ScaleVelocityPointer;
+
+        /// <summary>True for A_StartSound.</summary>
+        public bool HasStartSound;
+
+        /// <summary>Sound name, channel slot, supported presentation flags.</summary>
+        public string StartSoundName;
+        public int StartSoundSlot;
+        public int StartSoundFlags;
+
+        /// <summary>Volume and attenuation expressions, evaluated when the frame runs.</summary>
+        public string StartSoundVolumeExpression;
+        public string StartSoundAttenuationExpression;
     }
 
     /// <summary>
@@ -1005,6 +1017,20 @@ namespace DPTDOOM.Scripting
                               .Append(");\n");
                     }
 
+                    if (frame.HasStartSound)
+                    {
+                        script.Append("    StartSound(\"").Append(name).Append("\", \"")
+                              .Append(frame.StartSoundName).Append("\", ")
+                              .Append(frame.StartSoundSlot.ToString(CultureInfo.InvariantCulture))
+                              .Append(", ")
+                              .Append(frame.StartSoundFlags.ToString(CultureInfo.InvariantCulture))
+                              .Append(", \"")
+                              .Append(SpawnExFunctionName(actor, chain.Label, i + 1, 16))
+                              .Append("\", \"")
+                              .Append(SpawnExFunctionName(actor, chain.Label, i + 1, 17))
+                              .Append("\");\n");
+                    }
+
                     if (frame.HasLookEx)
                     {
                         // The see state is written as a frame of this actor when the mod named one
@@ -1126,7 +1152,7 @@ namespace DPTDOOM.Scripting
 
                     if (!frame.HasSpawnItemEx && !frame.HasCustomMelee && !frame.HasCustomPunch &&
                         !frame.HasSetHealth && !frame.HasSetAngle && !frame.HasChangeVelocity &&
-                        !frame.HasScaleVelocity)
+                        !frame.HasScaleVelocity && !frame.HasStartSound)
                     {
                         continue;
                     }
@@ -1185,6 +1211,14 @@ namespace DPTDOOM.Scripting
                     {
                         EmitSpawnExpression(script, actor, chain.Label, i + 1, 15,
                             frame.ScaleVelocityExpression);
+                    }
+
+                    if (frame.HasStartSound)
+                    {
+                        EmitSpawnExpression(script, actor, chain.Label, i + 1, 16,
+                            frame.StartSoundVolumeExpression);
+                        EmitSpawnExpression(script, actor, chain.Label, i + 1, 17,
+                            frame.StartSoundAttenuationExpression);
                     }
                 }
             }
@@ -1987,6 +2021,12 @@ namespace DPTDOOM.Scripting
             if (string.Equals(frame.Action, "A_ScaleVelocity", StringComparison.OrdinalIgnoreCase))
             {
                 ReadScaleVelocity(arguments, actor, frame, problems);
+                return;
+            }
+
+            if (string.Equals(frame.Action, "A_StartSound", StringComparison.OrdinalIgnoreCase))
+            {
+                ReadStartSound(arguments, actor, frame, problems);
                 return;
             }
 
@@ -3237,6 +3277,171 @@ namespace DPTDOOM.Scripting
             frame.ChangeVelocityFlags = ReadActionFlags(arguments, 3, actor, frame, problems,
                 "A_ChangeVelocity");
             frame.ChangeVelocityPointer = pointer;
+        }
+
+        /// <summary>
+        /// A_StartSound: sound name, channel, presentation flags, volume and attenuation.
+        ///
+        /// This is not the old A_PlaySound: its second argument is a CHAN_* slot, not a small
+        /// channel number with a different meaning. Volume and attenuation remain expressions,
+        /// because a mod may randomise them. Looping, overlap and local-only policies are reported
+        /// rather than promised: this mixer has channels, not those policies.
+        /// </summary>
+        private static void ReadStartSound(List<List<Token>> arguments, DecorateActor actor,
+                                           StateFrame frame, IList<string> problems)
+        {
+            if (arguments.Count == 0 || arguments[0].Count != 1)
+            {
+                problems.Add(actor.Name + " line " + frame.Line +
+                             ": 'A_StartSound' needs a sound name, so the frame stays silent");
+                frame.Action = "";
+                return;
+            }
+
+            frame.Action = "";
+            frame.HasStartSound = true;
+            frame.StartSoundName = arguments[0][0].Text;
+            frame.StartSoundSlot = ReadSoundSlot(arguments, 1, actor, frame, problems);
+            frame.StartSoundFlags = ReadStartSoundFlags(arguments, 2, actor, frame, problems);
+            frame.StartSoundVolumeExpression = ReadSpawnExpression(arguments, 3, actor, frame,
+                problems, "1.0");
+            frame.StartSoundAttenuationExpression = ReadSpawnExpression(arguments, 4, actor, frame,
+                problems, "1.0");
+
+            ReportUnsupportedSoundArgument(arguments, 5, actor, frame, problems, "pitch");
+            ReportUnsupportedSoundArgument(arguments, 6, actor, frame, problems, "startTime");
+        }
+
+        private static int ReadSoundSlot(List<List<Token>> arguments, int index,
+                                         DecorateActor actor, StateFrame frame,
+                                         IList<string> problems)
+        {
+            if (index >= arguments.Count || arguments[index].Count == 0)
+            {
+                return 4; // CHAN_BODY, ZDoom's default for A_StartSound.
+            }
+
+            var text = JoinTokens(arguments[index]).Replace(" ", "");
+            int slot;
+
+            if (int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out slot))
+            {
+                if (slot >= 0 && slot <= 7)
+                {
+                    return slot;
+                }
+            }
+            else
+            {
+                switch (text.ToUpperInvariant())
+                {
+                    case "CHAN_AUTO": return 0;
+                    case "CHAN_WEAPON": return 1;
+                    case "CHAN_VOICE": return 2;
+                    case "CHAN_ITEM": return 3;
+                    case "CHAN_BODY": return 4;
+                    case "CHAN_5": return 5;
+                    case "CHAN_6": return 6;
+                    case "CHAN_7": return 7;
+                }
+            }
+
+            problems.Add(actor.Name + " line " + frame.Line + ": 'A_StartSound' channel '" + text +
+                         "' is not a CHAN_* slot this engine knows; CHAN_BODY is used");
+            return 4;
+        }
+
+        private static int ReadStartSoundFlags(List<List<Token>> arguments, int index,
+                                               DecorateActor actor, StateFrame frame,
+                                               IList<string> problems)
+        {
+            if (index >= arguments.Count || arguments[index].Count == 0)
+            {
+                return 0;
+            }
+
+            var text = JoinTokens(arguments[index]).Replace(" ", "");
+            int flags = 0;
+            var unsupported = new List<string>();
+
+            foreach (var part in text.Split('|'))
+            {
+                if (part.Length == 0)
+                {
+                    continue;
+                }
+
+                int number;
+
+                if (int.TryParse(part, NumberStyles.Integer, CultureInfo.InvariantCulture, out number))
+                {
+                    flags |= number;
+                    continue;
+                }
+
+                switch (part.ToUpperInvariant())
+                {
+                    case "CHANF_DEFAULT":
+                    case "CHANF_LISTENERZ":
+                    case "CHANF_MAYBE_LOCAL":
+                    case "CHANF_UI":
+                    case "CHANF_NOPAUSE":
+                    case "CHANF_TRANSIENT":
+                    case "CHANF_RUMBLE":
+                    case "CHANF_NORUMBLE":
+                        break;
+
+                    case "CHANF_LOOP":
+                    case "CHAN_LOOP":
+                    case "CHANF_NOSTOP":
+                    case "CHAN_NOSTOP":
+                    case "CHANF_OVERLAP":
+                    case "CHAN_OVERLAP":
+                    case "CHANF_LOCAL":
+                    case "CHANF_FORCE":
+                    case "CHANF_SINGULAR":
+                        if (!unsupported.Contains(part))
+                        {
+                            unsupported.Add(part);
+                        }
+                        break;
+
+                    default:
+                        problems.Add(actor.Name + " line " + frame.Line + ": 'A_StartSound' flag '" +
+                                     part + "' is not known, so it is ignored");
+                        break;
+                }
+            }
+
+            if (unsupported.Count > 0)
+            {
+                problems.Add(actor.Name + " line " + frame.Line + ": 'A_StartSound' flags " +
+                             string.Join("|", unsupported.ToArray()) +
+                             " (looping, overlap or local policies) are not supported by this " +
+                             "mixer; the sound still plays once");
+            }
+
+            return flags;
+        }
+
+        private static void ReportUnsupportedSoundArgument(List<List<Token>> arguments, int index,
+                                                           DecorateActor actor, StateFrame frame,
+                                                           IList<string> problems, string what)
+        {
+            if (index >= arguments.Count || arguments[index].Count == 0)
+            {
+                return;
+            }
+
+            var text = JoinTokens(arguments[index]).Trim();
+
+            if (text == "0" || text == "0.0" || text == "0.00")
+            {
+                return;
+            }
+
+            problems.Add(actor.Name + " line " + frame.Line + ": 'A_StartSound' " + what +
+                         " is not supported by this mixer, so it is ignored");
         }
 
         /// <summary>A_ScaleVelocity: one scale expression and an optional pointer.</summary>

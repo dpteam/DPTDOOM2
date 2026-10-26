@@ -952,6 +952,25 @@ namespace DPTDOOM.Scripting
                 return ScriptValue.Void;
             });
 
+            // A_StartSound: a named sound with a CHAN_* slot, flags, volume and attenuation.
+            host.Register("StartSound", 6, 6, call =>
+            {
+                var number = FrameNumber(call.AsText(0), call);
+                var soundName = call.AsText(1);
+                var slot = call.AsInt(2);
+                var flags = call.AsInt(3);
+                var volume = ResolveSpawnExpression(call, 4);
+                var attenuation = ResolveSpawnExpression(call, 5);
+
+                DoomInfo.SetStateAction(number, (world, mobj) =>
+                    world.MonsterBehavior.StartSound(
+                        mobj, soundName, slot, flags,
+                        volume.EvaluateValue(world, mobj).AsFixed(),
+                        attenuation.EvaluateValue(world, mobj).AsFixed()));
+
+                return ScriptValue.Void;
+            });
+
             // A flag the frame sets or clears. DECORATE's A_ChangeFlag names a flag, so the name is
             // resolved here, when the file is read: a typo must reach the report, not disappear into
             // a frame that quietly changes nothing.

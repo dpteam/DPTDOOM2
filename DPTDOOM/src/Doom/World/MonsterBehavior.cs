@@ -1208,6 +1208,62 @@ namespace DPTDOOM
             actor.MomZ *= scale;
         }
 
+        /// <summary>
+        /// A_StartSound: play a sound by name with a CHAN_* slot and attenuation.
+        ///
+        /// The mixer uses its existing priority channels rather than pretending to implement
+        /// ZDoom's full sound policies. CHAN_WEAPON/VOICE/ITEM/BODY map onto the corresponding
+        /// Doom channels; CHAN_AUTO and the auxiliary slots use Misc. ATTN_NONE means diffuse,
+        /// which is the mixer's full-volume path. Volume is a fixed-point factor from 0 to 1,
+        /// converted to the mixer's 0..100 scale, so randomised volumes still work.
+        /// </summary>
+        public void StartSound(Mobj actor, string soundName, int channel, int flags,
+                               Fixed volume, Fixed attenuation)
+        {
+            if (string.IsNullOrEmpty(soundName))
+            {
+                return;
+            }
+
+            var type = SfxType.Misc;
+
+            switch (channel)
+            {
+                case 1: // CHAN_WEAPON
+                    type = SfxType.Weapon;
+                    break;
+
+                case 2: // CHAN_VOICE
+                    type = SfxType.Voice;
+                    break;
+
+                case 0: // CHAN_AUTO
+                case 3: // CHAN_ITEM
+                case 4: // CHAN_BODY
+                default:
+                    type = SfxType.Misc;
+                    break;
+            }
+
+            if (attenuation.Data == 0)
+            {
+                type = SfxType.Diffuse;
+            }
+
+            var percent = (int)(((long)volume.Data * 100 + Fixed.FracUnit / 2) >> Fixed.FracBits);
+
+            if (percent < 0)
+            {
+                percent = 0;
+            }
+            else if (percent > 100)
+            {
+                percent = 100;
+            }
+
+            world.StartSound(actor, soundName, type, percent);
+        }
+
 
         /// <summary>
         /// A_CustomPunch: a melee hitscan with a custom damage amount, puff and range.

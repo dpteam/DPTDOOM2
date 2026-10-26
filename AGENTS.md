@@ -201,6 +201,10 @@ powershell -NoProfile -File tools\test-launcher.ps1
   `A_ScaleVelocity` вычисляют аргументы при кадре, а не при загрузке. Поле `angle`
   возвращает градусы как fixed. `AAPTR_TARGET` и `AAPTR_TRACER` разрешаются в mobj;
   master/player/line pointers действие отклоняет, а не применяет к себе.
+- `A_StartSound` использует существующий SNDINFO/микшер: `CHAN_WEAPON`→`Weapon`,
+  `CHAN_VOICE`→`Voice`, остальное→`Misc`, `ATTN_NONE`→`Diffuse`. Loop/overlap/local
+  политики и pitch/startTime не обещаются, а называются в отчёте. Выбор звука —
+  подача, мировой генератор не трогаем.
 - Боты: навигация — граф **секторов**, не субсекторов (см. `docs/BOTS.md`).
   Рёбра направленные и фильтруются по высоте шага и просвету. Маршрут
   продвигается только по факту входа в следующий сектор. Из направленности следует

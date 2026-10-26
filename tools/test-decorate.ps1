@@ -819,6 +819,49 @@ ACTOR ConfusedImp 3001
     Assert-True ($badPointerLog -like "*AAPTR_MASTER*") "the unsupported pointer is named"
     Assert-True ($badPointerLog -like "*map MAP01: OK*") "and the level still loads"
 
+    Write-Host "With A_StartSound and its channel options"
+    $startSound = Join-Path $work "startsound.dec"
+
+    [System.IO.File]::WriteAllText($startSound, @"
+ACTOR SoundImp 3001
+{
+  States
+  {
+  Melee:
+    TROO A 4 A_StartSound("enemy/test", CHAN_WEAPON, 0, 0.5, ATTN_NONE)
+    TROO B 4 A_StartSound("enemy/test", CHAN_BODY, CHANF_DEFAULT, 1, ATTN_NORM)
+    Loop
+  }
+}
+"@)
+
+    $startSoundLog = Run-Game "startsound" @('-decorate', $startSound)
+
+    Assert-True ($startSoundLog -like "*scripts: OK*") "A_StartSound converts"
+    Assert-True ($startSoundLog -like "*map MAP01: OK*") "the level loads"
+    Assert-True ($startSoundLog -notlike "*no such action*") "A_StartSound is a real action"
+    Assert-True ($startSoundLog -notlike "*decorate problem*") "a supported sound block reports nothing"
+
+    Write-Host "With an unsupported A_StartSound policy"
+    $loopSound = Join-Path $work "loopsound.dec"
+
+    [System.IO.File]::WriteAllText($loopSound, @"
+ACTOR LoopImp 3001
+{
+  States
+  {
+  Melee:
+    TROO A 4 A_StartSound("enemy/test", CHAN_VOICE, CHANF_LOOP, 1, 1)
+    Loop
+  }
+}
+"@)
+
+    $loopSoundLog = Run-Game "loopsound" @('-decorate', $loopSound)
+
+    Assert-True ($loopSoundLog -like "*CHANF_LOOP*") "looping is named rather than promised"
+    Assert-True ($loopSoundLog -like "*map MAP01: OK*") "and the level still loads"
+
     Write-Host "With a truncated file"
     $cutLog = Run-Game "cut" @('-decorate', $truncated)
 

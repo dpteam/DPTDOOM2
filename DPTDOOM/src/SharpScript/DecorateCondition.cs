@@ -261,6 +261,28 @@ namespace DPTDOOM.Scripting
                                          "a function");
             }
 
+            // Sound attenuation constants are values, not actor fields. Carrying them through as
+            // unknown names would make A_StartSound silently fall back to normal attenuation.
+            if (string.Equals(name, "ATTN_NONE", StringComparison.OrdinalIgnoreCase))
+            {
+                return "0";
+            }
+
+            if (string.Equals(name, "ATTN_NORM", StringComparison.OrdinalIgnoreCase))
+            {
+                return "1";
+            }
+
+            if (string.Equals(name, "ATTN_IDLE", StringComparison.OrdinalIgnoreCase))
+            {
+                return "1.001";
+            }
+
+            if (string.Equals(name, "ATTN_STATIC", StringComparison.OrdinalIgnoreCase))
+            {
+                return "3";
+            }
+
             // random(lo, hi) is the one function worth carrying over: conditions use it to make a
             // behaviour vary, and this engine answers it from the world generator so the variation
             // stays in step across a session.
