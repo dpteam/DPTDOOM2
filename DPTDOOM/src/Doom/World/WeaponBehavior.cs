@@ -191,8 +191,8 @@ namespace DPTDOOM
         }
 
         /// <summary>
-        /// Spends one shot for a converted A_FireProjectile call. Unlike CheckAmmo, running dry
-        /// does not lower or switch the weapon: ZDoom's action simply declines to fire.
+        /// Spends one shot for a converted DECORATE projectile/grenade action. Unlike CheckAmmo,
+        /// running dry does not lower or switch the weapon: the action simply declines to fire.
         /// </summary>
         public bool TryUseCustomProjectileAmmo(Player player)
         {

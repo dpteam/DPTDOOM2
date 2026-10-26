@@ -707,6 +707,45 @@ namespace DPTDOOM
         }
 
         /// <summary>
+        /// Throws a grenade for DECORATE's A_ThrowGrenade.
+        ///
+        /// This is deliberately not the auto-aiming projectile path: xyvel replaces the actor's
+        /// normal speed when nonzero, zvel is independent, and the thrower contributes half its
+        /// own horizontal momentum. There is no actor pitch in this simulation, so the throw is
+        /// level; the converter reports that limitation instead of borrowing the player's view.
+        /// </summary>
+        public Mobj ThrowCustomGrenade(Mobj source, MobjType type, Fixed height,
+                                        Fixed xyVelocity, Fixed zVelocity)
+        {
+            var grenade = SpawnMobj(source.X, source.Y,
+                source.Z + height + Fixed.FromInt(35), type);
+
+            if (grenade.Info.SeeSound != 0 ||
+                ActorSounds.Has((int)grenade.Type, ActorSoundSlot.See))
+            {
+                world.StartActorSound(grenade, ActorSoundSlot.See,
+                    grenade.Info.SeeSound, SfxType.Misc);
+            }
+
+            // GZDoom's 360/256-degree steps are exactly 1<<24 in Doom's binary angle format.
+            // Use the world RNG: a presentation or system random source would desync lockstep.
+            var spread = world.Random.Next() % 8 - 4;
+            var angle = source.Angle + new Angle(spread << 24);
+            var speed = xyVelocity.Data != 0
+                ? xyVelocity
+                : new Fixed(grenade.Info.Speed);
+
+            grenade.Angle = angle;
+            grenade.MomX = speed * Trig.Cos(angle) + (source.MomX >> 1);
+            grenade.MomY = speed * Trig.Sin(angle) + (source.MomY >> 1);
+            grenade.MomZ = zVelocity;
+            grenade.Target = source;
+
+            CheckMissileSpawn(grenade);
+            return grenade;
+        }
+
+        /// <summary>
         /// Get the speed of the given missile type.
         /// Some missiles have different speeds according to the game setting.
         /// </summary>

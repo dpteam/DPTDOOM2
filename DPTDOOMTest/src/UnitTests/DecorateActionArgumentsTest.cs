@@ -173,15 +173,14 @@ namespace DPTDOOMTest.UnitTests
         public void AnUnsupportedArgumentedActionIsStillNamed()
         {
             // The actions this engine still cannot take must keep failing loudly rather than
-            // half-working. A_ThrowGrenade names an actor and a velocity this engine has no
-            // mechanism for, so it stays refused.
+            // half-working. A_CustomBulletAttack is still outside the supported action set.
             List<string> problems;
 
-            ParseSingle(ActorWith("A_ThrowGrenade(\"Rocket\", 0, 0, 0)"), out problems);
+            ParseSingle(ActorWith("A_CustomBulletAttack(5, 3, 1, 3)"), out problems);
 
             var text = All(problems);
 
-            StringAssert.Contains(text, "A_ThrowGrenade");
+            StringAssert.Contains(text, "A_CustomBulletAttack");
             StringAssert.Contains(text, "takes no arguments");
         }
 

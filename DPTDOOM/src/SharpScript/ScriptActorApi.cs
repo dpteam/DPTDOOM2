@@ -976,6 +976,7 @@ namespace DPTDOOM.Scripting
             // mistaken for CMF_AIMDIRECTION (2), which has the same numeric value.
             RegisterProjectile(host, false);
             RegisterProjectile(host, true);
+            RegisterGrenade(host);
 
             // A flag the frame sets or clears. DECORATE's A_ChangeFlag names a flag, so the name is
             // resolved here, when the file is read: a typo must reach the report, not disappear into
@@ -1241,6 +1242,47 @@ namespace DPTDOOM.Scripting
                         mobj, (MobjType)type, sideValue, heightValue,
                         AngleFromFixedDegrees(angleValue), (flags & 128) != 0,
                         target, false);
+                });
+
+                return ScriptValue.Void;
+            });
+        }
+
+        /// <summary>Registers A_ThrowGrenade with its three live numeric expressions.</summary>
+        private void RegisterGrenade(ScriptHost host)
+        {
+            host.Register("ThrowGrenade", 6, 6, call =>
+            {
+                var number = FrameNumber(call.AsText(0), call);
+                var actorName = call.AsText(1);
+                var type = ActorNames.TypeOf(actorName);
+
+                if (type < 0)
+                {
+                    throw call.Fail("no such grenade actor '" + actorName + "'");
+                }
+
+                var height = ResolveSpawnExpression(call, 2);
+                var xyVelocity = ResolveSpawnExpression(call, 3);
+                var zVelocity = ResolveSpawnExpression(call, 4);
+                var useAmmo = call.AsBool(5);
+
+                DoomInfo.SetStateAction(number, (world, mobj) =>
+                {
+                    // The original action receives already evaluated arguments, even when it
+                    // subsequently declines to spend ammo or spawn. Keep that order for random().
+                    var heightValue = height.EvaluateValue(world, mobj).AsFixed();
+                    var xyValue = xyVelocity.EvaluateValue(world, mobj).AsFixed();
+                    var zValue = zVelocity.EvaluateValue(world, mobj).AsFixed();
+
+                    if (useAmmo && mobj.Player != null &&
+                        !world.WeaponBehavior.TryUseCustomProjectileAmmo(mobj.Player))
+                    {
+                        return;
+                    }
+
+                    world.ThingAllocation.ThrowCustomGrenade(
+                        mobj, (MobjType)type, heightValue, xyValue, zValue);
                 });
 
                 return ScriptValue.Void;

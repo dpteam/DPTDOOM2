@@ -862,6 +862,32 @@ ACTOR LoopImp 3001
     Assert-True ($loopSoundLog -like "*CHANF_LOOP*") "looping is named rather than promised"
     Assert-True ($loopSoundLog -like "*map MAP01: OK*") "and the level still loads"
 
+    Write-Host "With A_ThrowGrenade in a real state"
+    $grenade = Join-Path $work "grenade.dec"
+
+    [System.IO.File]::WriteAllText($grenade, @"
+ACTOR GrenadeImp 3001
+{
+  States
+  {
+  Spawn:
+    TROO A 4 A_Look
+    TROO B 4 A_ThrowGrenade("DoomImpBall", 0, 8, 3, 0)
+  See:
+    TROO AB 4 A_Chase
+    Loop
+  }
+}
+"@)
+
+    $grenadeLog = Run-Game "grenade" @('-decorate', $grenade)
+
+    Assert-True ($grenadeLog -like "*scripts: OK*") "A_ThrowGrenade converts"
+    Assert-True ($grenadeLog -like "*map MAP01: OK*") "the level loads"
+    Assert-True ($grenadeLog -notlike "*takes no arguments*") "the action is no longer refused"
+    Assert-True ($grenadeLog -like "*level throw*") "the missing actor pitch is named"
+    Assert-True ((State-Of $grenadeLog) -ne $plainState) "the thrown grenade changed the world"
+
     Write-Host "With a truncated file"
     $cutLog = Run-Game "cut" @('-decorate', $truncated)
 

@@ -333,6 +333,16 @@ namespace DPTDOOM.Scripting
         public int ProjectileFlags;
         public int ProjectilePointer;
         public bool ProjectileUseAmmo = true;
+
+        /// <summary>True for A_ThrowGrenade.</summary>
+        public bool HasThrowGrenade;
+
+        /// <summary>Grenade type and its three expressions, evaluated when the frame runs.</summary>
+        public string GrenadeName;
+        public string GrenadeHeightExpression;
+        public string GrenadeXYVelocityExpression;
+        public string GrenadeZVelocityExpression;
+        public bool GrenadeUseAmmo = true;
     }
 
     /// <summary>
@@ -1059,6 +1069,20 @@ namespace DPTDOOM.Scripting
                         script.Append(");\n");
                     }
 
+                    if (frame.HasThrowGrenade)
+                    {
+                        script.Append("    ThrowGrenade(\"").Append(name).Append("\", \"")
+                              .Append(frame.GrenadeName).Append("\", \"")
+                              .Append(SpawnExFunctionName(actor, chain.Label, i + 1, 21))
+                              .Append("\", \"")
+                              .Append(SpawnExFunctionName(actor, chain.Label, i + 1, 22))
+                              .Append("\", \"")
+                              .Append(SpawnExFunctionName(actor, chain.Label, i + 1, 23))
+                              .Append("\", ")
+                              .Append(frame.GrenadeUseAmmo ? "true" : "false")
+                              .Append(");\n");
+                    }
+
                     if (frame.HasStartSound)
                     {
                         script.Append("    StartSound(\"").Append(name).Append("\", \"")
@@ -1195,7 +1219,8 @@ namespace DPTDOOM.Scripting
                     if (!frame.HasSpawnItemEx && !frame.HasCustomMelee && !frame.HasCustomPunch &&
                         !frame.HasSetHealth && !frame.HasSetAngle && !frame.HasChangeVelocity &&
                         !frame.HasScaleVelocity && !frame.HasStartSound &&
-                        !frame.HasSpawnProjectile && !frame.HasFireProjectile)
+                        !frame.HasSpawnProjectile && !frame.HasFireProjectile &&
+                        !frame.HasThrowGrenade)
                     {
                         continue;
                     }
@@ -1272,6 +1297,16 @@ namespace DPTDOOM.Scripting
                             frame.ProjectileSideExpression);
                         EmitSpawnExpression(script, actor, chain.Label, i + 1, 20,
                             frame.ProjectileAngleExpression);
+                    }
+
+                    if (frame.HasThrowGrenade)
+                    {
+                        EmitSpawnExpression(script, actor, chain.Label, i + 1, 21,
+                            frame.GrenadeHeightExpression);
+                        EmitSpawnExpression(script, actor, chain.Label, i + 1, 22,
+                            frame.GrenadeXYVelocityExpression);
+                        EmitSpawnExpression(script, actor, chain.Label, i + 1, 23,
+                            frame.GrenadeZVelocityExpression);
                     }
                 }
             }
@@ -2092,6 +2127,12 @@ namespace DPTDOOM.Scripting
             if (string.Equals(frame.Action, "A_FireProjectile", StringComparison.OrdinalIgnoreCase))
             {
                 ReadSpawnProjectile(arguments, actor, frame, problems, true);
+                return;
+            }
+
+            if (string.Equals(frame.Action, "A_ThrowGrenade", StringComparison.OrdinalIgnoreCase))
+            {
+                ReadThrowGrenade(arguments, actor, frame, problems);
                 return;
             }
 
@@ -3342,6 +3383,54 @@ namespace DPTDOOM.Scripting
             frame.ChangeVelocityFlags = ReadActionFlags(arguments, 3, actor, frame, problems,
                 "A_ChangeVelocity");
             frame.ChangeVelocityPointer = pointer;
+        }
+
+        /// <summary>
+        /// A_ThrowGrenade(missile, zheight, xyvel, zvel, useammo).
+        ///
+        /// Numeric arguments stay live expressions. The engine has no actor pitch, bob or crouch
+        /// state, so the throw is level and that approximation is named. Ammo uses the ready
+        /// vanilla weapon on a player, because DECORATE weapon/PSprite definitions do not exist.
+        /// </summary>
+        private static void ReadThrowGrenade(List<List<Token>> arguments, DecorateActor actor,
+                                             StateFrame frame, IList<string> problems)
+        {
+            if (arguments.Count == 0 || arguments[0].Count != 1)
+            {
+                problems.Add(actor.Name + " line " + frame.Line +
+                             ": 'A_ThrowGrenade' needs a grenade actor name, so nothing is thrown");
+                frame.Action = "";
+                return;
+            }
+
+            frame.Action = "";
+            frame.HasThrowGrenade = true;
+            frame.GrenadeName = arguments[0][0].Text;
+            frame.GrenadeHeightExpression = ReadSpawnExpression(arguments, 1,
+                actor, frame, problems, "0");
+            frame.GrenadeXYVelocityExpression = ReadSpawnExpression(arguments, 2,
+                actor, frame, problems, "0");
+            frame.GrenadeZVelocityExpression = ReadSpawnExpression(arguments, 3,
+                actor, frame, problems, "0");
+            frame.GrenadeUseAmmo = ReadActionBoolean(arguments, 4, true,
+                actor, frame, problems, "A_ThrowGrenade useammo");
+
+            if (arguments.Count > 5)
+            {
+                problems.Add(actor.Name + " line " + frame.Line +
+                             ": 'A_ThrowGrenade' takes five arguments; the rest are ignored");
+            }
+
+            problems.Add(actor.Name + " line " + frame.Line +
+                         ": 'A_ThrowGrenade' uses a level throw because shooter pitch, bob and " +
+                         "crouch offsets are not part of this engine's actor simulation");
+
+            if (frame.GrenadeUseAmmo)
+            {
+                problems.Add(actor.Name + " line " + frame.Line +
+                             ": 'A_ThrowGrenade' useammo on a player spends one shot of the ready " +
+                             "vanilla weapon; DECORATE weapon states and ammo properties are not supported");
+            }
         }
 
         /// <summary>
