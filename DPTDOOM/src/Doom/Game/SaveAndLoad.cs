@@ -16,7 +16,9 @@
 
 
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Text;
 
 namespace DPTDOOM
 {
@@ -124,10 +126,97 @@ namespace DPTDOOM
 
                 data[ptr++] = 0x1d;
 
+                // Named item counters go **after** the end marker, as a section vanilla readers
+                // stop before. That keeps the DSG layout untouched: an older save has no section and
+                // loads with empty counters, and an older tool reading this one stops at 0x1d.
+                var items = BuildItemBlock(game.World);
+
                 using (var writer = new FileStream(path, FileMode.Create, FileAccess.Write))
                 {
                     writer.Write(data, 0, ptr);
+                    writer.Write(items, 0, items.Length);
                 }
+            }
+
+            /// <summary>
+            /// The item section: one record per actor that carries named items.
+            ///
+            /// An actor is identified by its ordinal among mobjs in the thinker list, which the
+            /// loader rebuilds in the same order. A name is stored with its byte length, because
+            /// DECORATE names are ASCII but nothing guarantees that and a truncated name would
+            /// silently match a different counter.
+            /// </summary>
+            private static byte[] BuildItemBlock(World world)
+            {
+                var carriers = 0;
+
+                foreach (var thinker in world.Thinkers)
+                {
+                    var mobj = thinker as Mobj;
+
+                    if (mobj != null && HasItems(mobj))
+                    {
+                        carriers++;
+                    }
+                }
+
+                if (carriers == 0)
+                {
+                    return new byte[0];
+                }
+
+                var stream = new MemoryStream();
+                var writer = new BinaryWriter(stream);
+
+                writer.Write(new byte[] { (byte)'D', (byte)'P', (byte)'T', (byte)'I' });
+                writer.Write((byte)1);
+                writer.Write(carriers);
+
+                var ordinal = 0;
+
+                foreach (var thinker in world.Thinkers)
+                {
+                    var mobj = thinker as Mobj;
+
+                    if (mobj == null)
+                    {
+                        continue;
+                    }
+
+                    if (!HasItems(mobj))
+                    {
+                        ordinal++;
+                        continue;
+                    }
+
+                    var list = new List<KeyValuePair<string, int>>(mobj.Items);
+
+                    writer.Write(ordinal);
+                    writer.Write(list.Count);
+
+                    foreach (var pair in list)
+                    {
+                        var bytes = Encoding.UTF8.GetBytes(pair.Key);
+                        writer.Write((ushort)bytes.Length);
+                        writer.Write(bytes);
+                        writer.Write(pair.Value);
+                    }
+
+                    ordinal++;
+                }
+
+                writer.Flush();
+                return stream.ToArray();
+            }
+
+            private static bool HasItems(Mobj mobj)
+            {
+                foreach (var pair in mobj.Items)
+                {
+                    return true;
+                }
+
+                return false;
             }
 
             private void PadPointer()
@@ -606,6 +695,9 @@ namespace DPTDOOM
                     throw new Exception("Bad savegame!");
                 }
 
+                ptr++;
+                ReadItemBlock(game.World);
+
                 game.World.LevelTime = levelTime;
 
                 options.Sound.SetListener(game.World.ConsolePlayer.Mobj);
@@ -739,6 +831,103 @@ namespace DPTDOOM
 
                         default:
                             throw new Exception("Unknown thinker class in savegame!");
+                    }
+                }
+            }
+
+            /// <summary>
+            /// Reads the optional item section written after the end marker.
+            ///
+            /// Absent in every save made before named items existed, so a missing section is the
+            /// normal case and not an error. A section that is present but unreadable is reported
+            /// once and dropped: half a save is still better than none, and the alternative is a
+            /// load that fails over counters a mod may not even be using yet.
+            /// </summary>
+            private void ReadItemBlock(World world)
+            {
+                if (ptr + 9 > data.Length)
+                {
+                    return;
+                }
+
+                if (data[ptr] != 'D' || data[ptr + 1] != 'P' ||
+                    data[ptr + 2] != 'T' || data[ptr + 3] != 'I')
+                {
+                    return;
+                }
+
+                var start = ptr;
+                ptr += 4;
+
+                var version = data[ptr++];
+
+                if (version != 1)
+                {
+                    ptr = start;
+                    ConsoleUi.Warn("save items: section version " + version +
+                                   " is not known, so named item counters are not restored");
+                    return;
+                }
+
+                var carriers = BitConverter.ToInt32(data, ptr);
+                ptr += 4;
+
+                // The actors are identified by their position among mobjs, so the whole list has to
+                // be built before any counter can be placed.
+                var mobjs = new List<Mobj>();
+
+                foreach (var thinker in world.Thinkers)
+                {
+                    var mobj = thinker as Mobj;
+
+                    if (mobj != null)
+                    {
+                        mobjs.Add(mobj);
+                    }
+                }
+
+                for (var i = 0; i < carriers; i++)
+                {
+                    if (ptr + 8 > data.Length)
+                    {
+                        ConsoleUi.Warn("save items: the section is cut short, so the remaining " +
+                                       "item counters are not restored");
+                        return;
+                    }
+
+                    var ordinal = BitConverter.ToInt32(data, ptr);
+                    var count = BitConverter.ToInt32(data, ptr + 4);
+                    ptr += 8;
+
+                    for (var item = 0; item < count; item++)
+                    {
+                        if (ptr + 2 > data.Length)
+                        {
+                            ConsoleUi.Warn("save items: the section is cut short, so the remaining " +
+                                           "item counters are not restored");
+                            return;
+                        }
+
+                        var length = BitConverter.ToUInt16(data, ptr);
+                        ptr += 2;
+
+                        if (ptr + length + 4 > data.Length)
+                        {
+                            ConsoleUi.Warn("save items: the section is cut short, so the remaining " +
+                                           "item counters are not restored");
+                            return;
+                        }
+
+                        var name = Encoding.UTF8.GetString(data, ptr, length);
+                        ptr += length;
+
+                        var amount = BitConverter.ToInt32(data, ptr);
+                        ptr += 4;
+
+                        if (ordinal >= 0 && ordinal < mobjs.Count)
+                        {
+                            mobjs[ordinal].GiveItem(name, amount);
+                        }
                     }
                 }
             }

@@ -249,6 +249,28 @@ namespace DPTDOOM.Scripting
             target.Register("InMeleeRange", 0, call =>
                 ScriptValue.FromBool(world.MonsterBehavior.IsInMeleeRange(Current())));
 
+            // A_JumpIfInventory(name, amount, ptr). ZDoom's rule for amount <= 0 is "is the item
+            // full", and this engine has no per-item maximum - so an item is never full and the
+            // answer is false. That is the honest reading of "unbounded", and the converter says so
+            // once per actor rather than leaving a modder to wonder why the branch never fires.
+            target.Register("HasItem", 3, call =>
+            {
+                var name = call.AsText(0);
+                var amount = call.AsInt(1);
+                var pointer = call.AsInt(2);
+
+                var owner = ActorPointer.Resolve(Current(), pointer);
+
+                if (owner == null)
+                {
+                    return ScriptValue.FromBool(false);
+                }
+
+                var count = owner.GetItem(name);
+
+                return ScriptValue.FromBool(amount > 0 ? count >= amount : false);
+            });
+
             // A_CheckFlag: is a named flag set on one of the actor's pointers? The name is checked
             // by the converter, but a hand-written script can still misspell it, so a wrong name is
             // reported once instead of answering false for ever with no explanation.

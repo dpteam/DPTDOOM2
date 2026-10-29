@@ -679,6 +679,54 @@ namespace DPTDOOM.Scripting
                 return ScriptValue.Void;
             });
 
+            // A_GiveInventory and A_TakeInventory: named counters on one actor.
+            //
+            // The amount is an expression, because ademo1.wad writes random(1,3) in it, and it is
+            // evaluated when the frame runs - the same rule as every other argument here.
+            host.Register("GiveItem", 4, 4, call =>
+            {
+                var number = FrameNumber(call.AsText(0), call);
+                var name = call.AsText(1);
+                var amount = ResolveSpawnExpression(call, 2);
+                var pointer = call.AsInt(3);
+
+                DoomInfo.SetStateAction(number, (world, mobj) =>
+                {
+                    var receiver = ActorPointer.Resolve(mobj, pointer);
+
+                    if (receiver == null)
+                    {
+                        return;
+                    }
+
+                    receiver.GiveItem(name, amount.EvaluateValue(world, mobj).AsInt());
+                });
+
+                return ScriptValue.Void;
+            });
+
+            host.Register("TakeItem", 4, 4, call =>
+            {
+                var number = FrameNumber(call.AsText(0), call);
+                var name = call.AsText(1);
+                var amount = ResolveSpawnExpression(call, 2);
+                var pointer = call.AsInt(3);
+
+                DoomInfo.SetStateAction(number, (world, mobj) =>
+                {
+                    var receiver = ActorPointer.Resolve(mobj, pointer);
+
+                    if (receiver == null)
+                    {
+                        return;
+                    }
+
+                    receiver.TakeItem(name, amount.EvaluateValue(world, mobj).AsInt());
+                });
+
+                return ScriptValue.Void;
+            });
+
             // A_FaceTracer: turn toward the tracer, which is a different actor from the target and
             // must stay one - retargeting the monster to face it would change what it attacks.
             host.Register("FaceTracer", 3, 3, call =>

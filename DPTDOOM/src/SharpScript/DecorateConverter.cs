@@ -330,6 +330,15 @@ namespace DPTDOOM.Scripting
         public int FaceTracerMaxTurn;
         public int FaceTracerOffset;
 
+        /// <summary>True for A_GiveInventory or A_TakeInventory.</summary>
+        public bool HasGiveItem;
+        public bool HasTakeItem;
+
+        /// <summary>The item name, the amount expression and the receiver pointer.</summary>
+        public string ItemName;
+        public string ItemAmountExpression;
+        public int ItemPointer;
+
         /// <summary>True for A_StartSound.</summary>
         public bool HasStartSound;
 
@@ -1192,6 +1201,17 @@ namespace DPTDOOM.Scripting
                               .Append(");\n");
                     }
 
+                    if (frame.HasGiveItem || frame.HasTakeItem)
+                    {
+                        script.Append("    ").Append(frame.HasGiveItem ? "GiveItem" : "TakeItem")
+                              .Append("(\"").Append(name).Append("\", \"")
+                              .Append(frame.ItemName).Append("\", \"")
+                              .Append(SpawnExFunctionName(actor, chain.Label, i + 1, 24))
+                              .Append("\", ")
+                              .Append(frame.ItemPointer.ToString(CultureInfo.InvariantCulture))
+                              .Append(");\n");
+                    }
+
                     if (frame.HasFaceTracer)
                     {
                         script.Append("    FaceTracer(\"").Append(name).Append("\", ")
@@ -1352,7 +1372,8 @@ namespace DPTDOOM.Scripting
                         !frame.HasScaleVelocity && !frame.HasStartSound &&
                         !frame.HasSpawnProjectile && !frame.HasFireProjectile &&
                         !frame.HasThrowGrenade && !frame.HasAlertMonsters &&
-                        !frame.HasFaceTracer && !frame.HasMonsterRefire)
+                        !frame.HasFaceTracer && !frame.HasMonsterRefire &&
+                        !frame.HasGiveItem && !frame.HasTakeItem)
                     {
                         continue;
                     }
@@ -1429,6 +1450,12 @@ namespace DPTDOOM.Scripting
                             frame.ProjectileSideExpression);
                         EmitSpawnExpression(script, actor, chain.Label, i + 1, 20,
                             frame.ProjectileAngleExpression);
+                    }
+
+                    if (frame.HasGiveItem || frame.HasTakeItem)
+                    {
+                        EmitSpawnExpression(script, actor, chain.Label, i + 1, 24,
+                            frame.ItemAmountExpression);
                     }
 
                     if (frame.HasThrowGrenade)
@@ -2254,6 +2281,24 @@ namespace DPTDOOM.Scripting
                 return;
             }
 
+            if (string.Equals(frame.Action, "A_JumpIfInventory", StringComparison.OrdinalIgnoreCase))
+            {
+                ReadJumpIfInventory(arguments, actor, frame, problems);
+                return;
+            }
+
+            if (string.Equals(frame.Action, "A_GiveInventory", StringComparison.OrdinalIgnoreCase))
+            {
+                ReadItemChange(arguments, actor, frame, problems, true);
+                return;
+            }
+
+            if (string.Equals(frame.Action, "A_TakeInventory", StringComparison.OrdinalIgnoreCase))
+            {
+                ReadItemChange(arguments, actor, frame, problems, false);
+                return;
+            }
+
             if (string.Equals(frame.Action, "A_MonsterRefire", StringComparison.OrdinalIgnoreCase))
             {
                 ReadMonsterRefire(arguments, actor, frame, problems);
@@ -2631,6 +2676,160 @@ namespace DPTDOOM.Scripting
             frame.JumpLabel = label;
             frame.JumpCondition = condition;
             frame.Action = "";
+        }
+
+        /// <summary>
+        /// A_JumpIfInventory(name, amount, label, owner): leave for the label when the actor carries
+        /// at least that many of the named item.
+        ///
+        /// The item is a **name**, not a typed class: this engine has no inventory of item classes,
+        /// and the mods that use this action use it as a counter. The amount is an expression, so a
+        /// mod that writes random() gets a live value; the condition is asked when the frame ends,
+        /// which is exactly when the original would have asked.
+        /// </summary>
+        private static void ReadJumpIfInventory(List<List<Token>> arguments, DecorateActor actor,
+                                                StateFrame frame, IList<string> problems)
+        {
+            if (arguments.Count < 3 || arguments.Count > 4)
+            {
+                problems.Add(actor.Name + " line " + frame.Line +
+                             ": 'A_JumpIfInventory' needs an item, an amount and a label, so the " +
+                             "jump is dropped");
+                frame.Action = "";
+                return;
+            }
+
+            if (arguments[0].Count != 1 || arguments[0][0].IsNumber)
+            {
+                problems.Add(actor.Name + " line " + frame.Line +
+                             ": 'A_JumpIfInventory' takes an item name such as \"Clip\", so the " +
+                             "jump is dropped");
+                frame.Action = "";
+                return;
+            }
+
+            var name = arguments[0][0].Text;
+
+            var label = ReadLabel(arguments[2], actor, frame, problems);
+
+            if (label == null)
+            {
+                frame.Action = "";
+                return;
+            }
+
+            var pointer = arguments.Count > 3
+                ? ReadPointer(arguments, 3, actor, frame, problems, "A_JumpIfInventory")
+                : ActorPointer.Default;
+
+            if (pointer < 0)
+            {
+                frame.Action = "";
+                return;
+            }
+
+            var amount = DecorateCondition.TranslateExpression(
+                JoinTokens(arguments[1]), actor.Name, frame.Line, problems);
+
+            if (amount == null)
+            {
+                frame.Action = "";
+                return;
+            }
+
+            ReportUnboundedItemCheck(actor, frame, name, arguments[1], problems);
+
+            frame.JumpLabel = label;
+            frame.JumpCondition = "HasItem(\"" + name + "\", " + amount + ", " +
+                                  pointer.ToString(CultureInfo.InvariantCulture) + ")";
+            frame.Action = "";
+        }
+
+        /// <summary>
+        /// Says once per actor that an item can never be "full".
+        ///
+        /// ZDoom's A_JumpIfInventory with amount &lt;= 0 asks whether the item has reached its
+        /// maximum. Items here have no maximum, so the answer is always no - which is correct for an
+        /// unbounded counter and useless to a mod that meant "is it full". Saying it once is what
+        /// separates a documented limitation from a branch that silently never fires.
+        /// </summary>
+        private static void ReportUnboundedItemCheck(DecorateActor actor, StateFrame frame,
+                                                     string name, List<Token> amount,
+                                                     IList<string> problems)
+        {
+            var text = JoinTokens(amount).Trim();
+
+            if (text != "0")
+            {
+                return;
+            }
+
+            var key = "item-max:" + name.ToUpperInvariant();
+
+            if (!actor.ReportedFrameModifiers.Add(key))
+            {
+                return;
+            }
+
+            problems.Add(actor.Name + " line " + frame.Line + ": 'A_JumpIfInventory(\"" + name +
+                         "\", 0, ...)' asks whether the item is full, and items here have no " +
+                         "maximum, so that question is always false");
+        }
+
+        /// <summary>
+        /// A_GiveInventory(name, amount, giveto) and A_TakeInventory(name, amount, flags, giveto).
+        ///
+        /// The amount is an expression. `take` with a non-positive amount removes all of it, which is
+        /// the original's rule; `give` with a non-positive amount gives one.
+        /// </summary>
+        private static void ReadItemChange(List<List<Token>> arguments, DecorateActor actor,
+                                           StateFrame frame, IList<string> problems, bool give)
+        {
+            frame.Action = "";
+
+            if (arguments.Count == 0 || arguments[0].Count != 1 || arguments[0][0].IsNumber)
+            {
+                problems.Add(actor.Name + " line " + frame.Line + ": '" +
+                             (give ? "A_GiveInventory" : "A_TakeInventory") +
+                             "' needs an item name such as \"Clip\", so nothing changes");
+                return;
+            }
+
+            frame.ItemName = arguments[0][0].Text;
+            frame.ItemAmountExpression = ReadSpawnExpression(arguments, 1, actor, frame, problems,
+                give ? "1" : "0");
+
+            // A_TakeInventory's third argument is TIF_* flags, which have no counterpart here: they
+            // choose whether a taking may consume an infinite item. Named, not ignored.
+            var pointerIndex = give ? 2 : 3;
+
+            if (!give && arguments.Count > 2 && !IsZeroLiteral(JoinTokens(arguments[2])))
+            {
+                problems.Add(actor.Name + " line " + frame.Line +
+                             ": 'A_TakeInventory' flags are not part of this engine, so they are ignored");
+            }
+
+            frame.ItemPointer = arguments.Count > pointerIndex
+                ? ReadPointer(arguments, pointerIndex, actor, frame, problems,
+                    give ? "A_GiveInventory" : "A_TakeInventory")
+                : ActorPointer.Default;
+
+            if (frame.ItemPointer < 0)
+            {
+                return;
+            }
+
+            var expected = give ? pointerIndex + 1 : 4;
+
+            if (arguments.Count > expected)
+            {
+                problems.Add(actor.Name + " line " + frame.Line + ": '" +
+                             (give ? "A_GiveInventory" : "A_TakeInventory") +
+                             "' takes " + expected + " arguments; the rest are ignored");
+            }
+
+            frame.HasGiveItem = give;
+            frame.HasTakeItem = !give;
         }
 
         /// <summary>

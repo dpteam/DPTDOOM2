@@ -1004,6 +1004,39 @@ ACTOR NozImp 3001
         "noz is no longer treated as a malformed argument list"
     Assert-True ($nozLog -like "*map MAP01: OK*") "and the level loads"
 
+    Write-Host "With named item counters"
+    $items = Join-Path $work "items.dec"
+
+    # The shape ademo1.wad uses: a counter on the monster itself decides which frame comes next.
+    # Give, ask, and take, all in one chain, with an expression as the amount.
+    [System.IO.File]::WriteAllText($items, @"
+ACTOR ItemImp 3001
+{
+  States
+  {
+  Spawn:
+    TROO A 4 A_Look
+  See:
+    TROO A 4 A_JumpIfInventory("kgHits", 2, "Enough")
+    TROO B 4 A_GiveInventory("kgHits", 1)
+    TROO C 4 A_Chase
+    Loop
+  Enough:
+    TROO D 4 A_TakeInventory("kgHits", 1)
+    TROO E 4 A_Chase
+    Loop
+  }
+}
+"@)
+
+    $itemsLog = Run-Game "items" @('-decorate', $items)
+
+    Assert-True ($itemsLog -like "*scripts: OK*") "the item actions convert"
+    Assert-True ($itemsLog -like "*map MAP01: OK*") "the level loads"
+    Assert-True ($itemsLog -notlike "*no such action*") "none is a missing action"
+    Assert-True ($itemsLog -notlike "*takes no arguments*") "and none is refused for its arguments"
+    Assert-True ((State-Of $itemsLog) -ne $plainState) "the counters changed the world"
+
     Write-Host "With a truncated file"
     $cutLog = Run-Game "cut" @('-decorate', $truncated)
 

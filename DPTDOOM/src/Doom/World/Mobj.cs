@@ -16,6 +16,7 @@
 
 
 using System;
+using System.Collections.Generic;
 
 namespace DPTDOOM
 {
@@ -738,5 +739,100 @@ namespace DPTDOOM
             get => tracer;
             set => tracer = value;
         }
+
+        /// <summary>
+        /// Named counters a mod keeps on this actor, or null when it has none.
+        ///
+        /// DECORATE's A_GiveInventory and A_JumpIfInventory are used as variables far more often
+        /// than as real items - "how many times has this demon been hit", "which fire mode is
+        /// selected" - and that is the only sense this engine can honour without a full inventory
+        /// of typed item classes.
+        ///
+        /// Null until something is given: every mobj in the game would otherwise carry an empty
+        /// dictionary, and the vanilla actors - which never use it - would pay for a feature they
+        /// do not have. It is deliberately not part of the world hash: it is written by actions that
+        /// are themselves deterministic, so a divergence here is already a divergence in the tics.
+        /// </summary>
+        private Dictionary<string, int> items;
+
+        /// <summary>How many of a named item this actor carries.</summary>
+        public int GetItem(string name)
+        {
+            if (items == null || name == null)
+            {
+                return 0;
+            }
+
+            int count;
+            return items.TryGetValue(name, out count) ? count : 0;
+        }
+
+        /// <summary>
+        /// Adds to a named item. A non-positive amount means one, which is what ZDoom's
+        /// A_GiveInventory does with its default argument.
+        /// </summary>
+        public void GiveItem(string name, int amount)
+        {
+            if (name == null || name.Length == 0)
+            {
+                return;
+            }
+
+            if (amount <= 0)
+            {
+                amount = 1;
+            }
+
+            if (items == null)
+            {
+                items = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            int current;
+            items.TryGetValue(name, out current);
+
+            // Clamped rather than wrapped: an item used as a counter must not turn negative and
+            // start satisfying "at least one" after overflowing.
+            var total = (long)current + amount;
+            items[name] = total > int.MaxValue ? int.MaxValue : (int)total;
+        }
+
+        /// <summary>
+        /// Removes a named item. A non-positive amount removes all of it, as ZDoom's
+        /// A_TakeInventory does. The entry is dropped at zero so "has none" stays cheap.
+        /// </summary>
+        public void TakeItem(string name, int amount)
+        {
+            if (items == null || name == null)
+            {
+                return;
+            }
+
+            int current;
+
+            if (!items.TryGetValue(name, out current))
+            {
+                return;
+            }
+
+            if (amount <= 0 || amount >= current)
+            {
+                items.Remove(name);
+                return;
+            }
+
+            items[name] = current - amount;
+        }
+
+        /// <summary>
+        /// Every named item, for the save file. Read-only and empty when the actor has none.
+        /// </summary>
+        public IEnumerable<KeyValuePair<string, int>> Items
+        {
+            get { return items ?? EmptyItems; }
+        }
+
+        private static readonly Dictionary<string, int> EmptyItems =
+            new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
     }
 }
