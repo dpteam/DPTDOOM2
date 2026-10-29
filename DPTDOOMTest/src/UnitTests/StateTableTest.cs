@@ -64,6 +64,32 @@ namespace DPTDOOMTest.UnitTests
         }
 
         [TestMethod]
+        public void TheReserveGrowsWhenAModNeedsMore()
+        {
+            // DOOM ACE's ademo1.wad describes about 3700 frames, so the original fixed reserve of
+            // 1024 ran out part-way through: 25 actors lost their states and 19 transitions pointed
+            // at frames that were never created. The table now doubles instead.
+            var first = DoomInfo.AllocateState();
+            var previous = first;
+
+            for (var i = 0; i < DoomInfo.CustomStateReserve + 8; i++)
+            {
+                var next = DoomInfo.AllocateState();
+
+                Assert.IsTrue(next >= 0, "the table grew instead of refusing at " + i);
+                Assert.AreEqual(previous + 1, next,
+                    "growth appends: numbers stay contiguous, so a save cannot be misread");
+                previous = next;
+            }
+
+            Assert.IsTrue(previous >= DoomInfo.CustomStateFirst + DoomInfo.CustomStateReserve,
+                "the allocation went past the initial reserve");
+
+            Assert.AreEqual((int)MobjState.Tech2Lamp4 + 1, DoomInfo.CustomStateFirst,
+                "and vanilla numbering still starts the tail in the same place");
+        }
+
+        [TestMethod]
         public void EveryActionOfTheEngineCanBeFoundByName()
         {
             // An action that exists but cannot be named is invisible to a mod; a name that

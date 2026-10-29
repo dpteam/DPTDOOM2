@@ -104,6 +104,30 @@ namespace DPTDOOM.Scripting
         public int Line;
 
         /// <summary>
+        /// The same frame's work, on a different picture.
+        ///
+        /// DECORATE's letter runs share one action across every frame: `TNT1 AAAAAAAAA 0
+        /// A_SpawnItemEx(...)` spawns once per letter, twenty times in one tic, because zero tics
+        /// means "no time at all". The converter attaches a script call to a single frame, so a run
+        /// needed the work on each of them - and copying the payload field by field would silently
+        /// miss the next field somebody adds.
+        ///
+        /// A shallow clone cannot miss one: every payload field is copied because every field is,
+        /// and the four that describe the picture are then put back from the frame being replaced.
+        /// The string arrays inside are shared, which is safe - they are written once while the
+        /// file is read and never mutated afterwards.
+        /// </summary>
+        public StateFrame WithPicture(string sprite, string letter, int tics, int line)
+        {
+            var copy = (StateFrame)MemberwiseClone();
+            copy.Sprite = sprite;
+            copy.Letter = letter;
+            copy.Tics = tics;
+            copy.Line = line;
+            return copy;
+        }
+
+        /// <summary>
         /// The label an <c>A_Jump</c> leaves for, or null.
         ///
         /// Kept apart from <see cref="Action"/> because a jump is not an action this engine has -
@@ -334,6 +358,22 @@ namespace DPTDOOM.Scripting
         public bool HasSetArg;
         public int SetArgIndex;
         public string SetArgExpression;
+
+        /// <summary>True for A_CustomBulletAttack or A_FireBullets.</summary>
+        public bool HasBulletAttack;
+        public bool BulletIsPlayer;
+
+        /// <summary>Spread, damage and range, as expressions evaluated when the frame runs.</summary>
+        public string BulletSpreadXYExpression;
+        public string BulletSpreadZExpression;
+        public string BulletDamageExpression;
+        public string BulletRangeExpression;
+
+        /// <summary>Bullet count, puff actor, flags and reference pointer.</summary>
+        public int BulletCount;
+        public string BulletPuffName;
+        public int BulletFlags;
+        public int BulletPointer;
 
         /// <summary>True for A_GiveInventory or A_TakeInventory.</summary>
         public bool HasGiveItem;
@@ -1206,6 +1246,29 @@ namespace DPTDOOM.Scripting
                               .Append(");\n");
                     }
 
+                    if (frame.HasBulletAttack)
+                    {
+                        script.Append("    ")
+                              .Append(frame.BulletIsPlayer ? "FireBullets" : "CustomBulletAttack")
+                              .Append("(\"").Append(name).Append("\", \"")
+                              .Append(SpawnExFunctionName(actor, chain.Label, i + 1, 26))
+                              .Append("\", \"")
+                              .Append(SpawnExFunctionName(actor, chain.Label, i + 1, 27))
+                              .Append("\", ")
+                              .Append(frame.BulletCount.ToString(CultureInfo.InvariantCulture))
+                              .Append(", \"")
+                              .Append(SpawnExFunctionName(actor, chain.Label, i + 1, 28))
+                              .Append("\", \"")
+                              .Append(frame.BulletPuffName)
+                              .Append("\", ")
+                              .Append(frame.BulletFlags.ToString(CultureInfo.InvariantCulture))
+                              .Append(", \"")
+                              .Append(SpawnExFunctionName(actor, chain.Label, i + 1, 29))
+                              .Append("\", ")
+                              .Append(frame.BulletPointer.ToString(CultureInfo.InvariantCulture))
+                              .Append(");\n");
+                    }
+
                     if (frame.HasSetArg)
                     {
                         script.Append("    SetArg(\"").Append(name).Append("\", ")
@@ -1387,7 +1450,8 @@ namespace DPTDOOM.Scripting
                         !frame.HasSpawnProjectile && !frame.HasFireProjectile &&
                         !frame.HasThrowGrenade && !frame.HasAlertMonsters &&
                         !frame.HasFaceTracer && !frame.HasMonsterRefire &&
-                        !frame.HasGiveItem && !frame.HasTakeItem && !frame.HasSetArg)
+                        !frame.HasGiveItem && !frame.HasTakeItem && !frame.HasSetArg &&
+                        !frame.HasBulletAttack)
                     {
                         continue;
                     }
@@ -1470,6 +1534,18 @@ namespace DPTDOOM.Scripting
                     {
                         EmitSpawnExpression(script, actor, chain.Label, i + 1, 25,
                             frame.SetArgExpression);
+                    }
+
+                    if (frame.HasBulletAttack)
+                    {
+                        EmitSpawnExpression(script, actor, chain.Label, i + 1, 26,
+                            frame.BulletSpreadXYExpression);
+                        EmitSpawnExpression(script, actor, chain.Label, i + 1, 27,
+                            frame.BulletSpreadZExpression);
+                        EmitSpawnExpression(script, actor, chain.Label, i + 1, 28,
+                            frame.BulletDamageExpression);
+                        EmitSpawnExpression(script, actor, chain.Label, i + 1, 29,
+                            frame.BulletRangeExpression);
                     }
 
                     if (frame.HasGiveItem || frame.HasTakeItem)
@@ -2175,6 +2251,20 @@ namespace DPTDOOM.Scripting
                         chain.Frames[i].Action = "";
                     }
                 }
+                else if (last.Action.Length == 0 && chain.Frames.Count - firstFrame > 1)
+                {
+                    // A script-backed action on a letter run: every frame of the run does the work,
+                    // which is what DECORATE means. `TNT1 AAAAAAAAA 0 A_SpawnItemEx(...)` is twenty
+                    // gibs in one tic, not one - and until this, nineteen of them were lost and the
+                    // other frames were reported as naming an action the engine does not have.
+                    for (var i = firstFrame; i < chain.Frames.Count - 1; i++)
+                    {
+                        var picture = chain.Frames[i];
+
+                        chain.Frames[i] = last.WithPicture(
+                            picture.Sprite, picture.Letter, picture.Tics, picture.Line);
+                    }
+                }
             }
             else
             {
@@ -2198,14 +2288,29 @@ namespace DPTDOOM.Scripting
         {
             var open = reader.Next(ref line);
 
-            if (open == null)
+            // An action written without parentheses still reaches its handler, with an empty
+            // argument list - but only when the engine has no action by that name. A_FaceTracer and
+            // A_SpawnItemEx are script-backed, so returning here left the frame naming an action the
+            // engine does not have, which is reported as "no such action" for something the
+            // converter supports.
+            //
+            // The distinction matters in the other direction too: `A_Chase` and `A_Explode` without
+            // parentheses are the **vanilla** forms, and routing them to the script readers would
+            // make them demand arguments they were never given.
+            if (open == null || open.Text != "(")
             {
-                return;
-            }
+                if (open != null)
+                {
+                    reader.PushBack(open, ref line);
+                }
 
-            if (open.Text != "(")
-            {
-                reader.PushBack(open, ref line);
+                Action<World, Mobj> engineAction;
+
+                if (!DoomInfo.TryGetAction(frame.Action, out engineAction))
+                {
+                    Dispatch(new List<List<Token>>(), actor, frame, problems);
+                }
+
                 return;
             }
 
@@ -2267,6 +2372,19 @@ namespace DPTDOOM.Scripting
                 arguments = new List<List<Token>>();
             }
 
+            Dispatch(arguments, actor, frame, problems);
+        }
+
+        /// <summary>
+        /// Hands one frame's argument list to the reader for its action.
+        ///
+        /// Split out from <see cref="ReadActionArguments"/> so that the same dispatch can run for an
+        /// action written without parentheses: the only thing the two paths differ in is whether
+        /// there were tokens to read.
+        /// </summary>
+        private static void Dispatch(List<List<Token>> arguments, DecorateActor actor,
+                                     StateFrame frame, IList<string> problems)
+        {
             var isJump = string.Equals(frame.Action, "A_Jump", StringComparison.OrdinalIgnoreCase);
             var isJumpIf = string.Equals(frame.Action, "A_JumpIf", StringComparison.OrdinalIgnoreCase);
 
@@ -2304,6 +2422,14 @@ namespace DPTDOOM.Scripting
             if (string.Equals(frame.Action, "A_JumpIfInventory", StringComparison.OrdinalIgnoreCase))
             {
                 ReadJumpIfInventory(arguments, actor, frame, problems);
+                return;
+            }
+
+            if (string.Equals(frame.Action, "A_CustomBulletAttack", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(frame.Action, "A_FireBullets", StringComparison.OrdinalIgnoreCase))
+            {
+                ReadBulletAttack(arguments, actor, frame, problems,
+                    string.Equals(frame.Action, "A_FireBullets", StringComparison.OrdinalIgnoreCase));
                 return;
             }
 
@@ -2483,7 +2609,7 @@ namespace DPTDOOM.Scripting
 
             if (!isJump)
             {
-                if (hasArguments)
+                if (arguments.Count > 0)
                 {
                     problems.Add(actor.Name + " line " + frame.Line + ": '" + frame.Action +
                                  "' takes no arguments in this engine, so they are ignored; " +
@@ -2702,6 +2828,179 @@ namespace DPTDOOM.Scripting
             frame.JumpLabel = label;
             frame.JumpCondition = condition;
             frame.Action = "";
+        }
+
+        /// <summary>
+        /// A_CustomBulletAttack and A_FireBullets: a burst of hitscan bullets.
+        ///
+        /// The two have the **same first five arguments and then swap**: for A_CustomBulletAttack
+        /// the order is (spread, numbullets, damage, puff, range, flags, ptr, ...), while
+        /// A_FireBullets is (spread, numbullets, damage, puff, flags, range, ...). Reading them from
+        /// one table would silently turn a range into a flag mask, which is the kind of mistake that
+        /// looks like "the mod is just inaccurate".
+        ///
+        /// The defaults differ too: A_FireBullets starts with FBF_USEAMMO set and
+        /// A_CustomBulletAttack starts with no flags at all.
+        /// </summary>
+        private static void ReadBulletAttack(List<List<Token>> arguments, DecorateActor actor,
+                                             StateFrame frame, IList<string> problems, bool player)
+        {
+            var action = player ? "A_FireBullets" : "A_CustomBulletAttack";
+            frame.Action = "";
+
+            if (arguments.Count < 4 || !TryReadNumber(arguments[2], out var count))
+            {
+                problems.Add(actor.Name + " line " + frame.Line + ": '" + action +
+                             "' needs two spreads, a bullet count and a damage, so nothing is fired");
+                return;
+            }
+
+            frame.HasBulletAttack = true;
+            frame.BulletIsPlayer = player;
+            frame.BulletCount = count;
+            frame.BulletSpreadXYExpression = ReadSpawnExpression(arguments, 0, actor, frame, problems, "0");
+            frame.BulletSpreadZExpression = ReadSpawnExpression(arguments, 1, actor, frame, problems, "0");
+            frame.BulletDamageExpression = ReadSpawnExpression(arguments, 3, actor, frame, problems, "5");
+
+            frame.BulletPuffName = "BulletPuff";
+
+            if (arguments.Count > 4 && arguments[4].Count == 1 && !arguments[4][0].IsNumber &&
+                arguments[4][0].Text.Length > 0)
+            {
+                frame.BulletPuffName = arguments[4][0].Text;
+            }
+
+            // flags and range are arguments 6 and 5 for one action and 5 and 6 for the other.
+            var flagsIndex = player ? 5 : 6;
+            var rangeIndex = player ? 6 : 5;
+
+            frame.BulletFlags = ReadBulletFlags(arguments, flagsIndex, player, actor, frame, problems);
+            frame.BulletRangeExpression = ReadSpawnExpression(arguments, rangeIndex, actor, frame,
+                problems, "0");
+
+            frame.BulletPointer = player
+                ? ActorPointer.Null
+                : (arguments.Count > 7
+                    ? ReadPointer(arguments, 7, actor, frame, problems, action)
+                    : ActorPointer.Target);
+
+            if (frame.BulletPointer < 0)
+            {
+                frame.HasBulletAttack = false;
+                return;
+            }
+
+            // The `missile` argument spawns a projectile alongside each bullet. That is a second
+            // firing model rather than a flag, so it is named instead of half-done.
+            var missileIndex = player ? 7 : 8;
+
+            if (arguments.Count > missileIndex && arguments[missileIndex].Count > 0)
+            {
+                problems.Add(actor.Name + " line " + frame.Line + ": '" + action +
+                             "' missile argument is not supported - this engine fires the bullets " +
+                             "but does not spawn a projectile alongside them");
+            }
+
+            var tail = missileIndex + 1;
+
+            if (arguments.Count > tail)
+            {
+                problems.Add(actor.Name + " line " + frame.Line + ": '" + action +
+                             "' spawn height and side offset are not supported - bullets leave the " +
+                             "actor's own centre");
+            }
+
+            if (player)
+            {
+                if ((frame.BulletFlags & FireBulletsFlags.UseAmmo) != 0)
+                {
+                    problems.Add(actor.Name + " line " + frame.Line + ": 'A_FireBullets' useammo " +
+                                 "spends one shot of the currently ready vanilla weapon; DECORATE " +
+                                 "weapon states and their own ammo properties are not supported");
+                }
+            }
+        }
+
+        private static int ReadBulletFlags(List<List<Token>> arguments, int index, bool player,
+                                           DecorateActor actor, StateFrame frame,
+                                           IList<string> problems)
+        {
+            // A_FireBullets defaults to USEAMMO; A_CustomBulletAttack to nothing.
+            var fallback = player ? FireBulletsFlags.UseAmmo : 0;
+
+            if (index >= arguments.Count || arguments[index].Count == 0)
+            {
+                return fallback;
+            }
+
+            var text = JoinTokens(arguments[index]).Replace(" ", "");
+            var flags = 0;
+
+            foreach (var part in text.Split('|'))
+            {
+                if (part.Length == 0)
+                {
+                    continue;
+                }
+
+                int number;
+
+                if (int.TryParse(part, NumberStyles.Integer, CultureInfo.InvariantCulture, out number))
+                {
+                    flags |= number;
+                    continue;
+                }
+
+                var name = part.ToUpperInvariant();
+                var expected = player ? "FBF_" : "CBAF_";
+
+                if (!name.StartsWith(expected, StringComparison.Ordinal))
+                {
+                    problems.Add(actor.Name + " line " + frame.Line + ": bullet flag '" + part +
+                                 "' belongs to the other bullet action, so it is ignored");
+                    continue;
+                }
+
+                switch (name)
+                {
+                    case "CBAF_AIMFACING": flags |= CustomBulletAttackFlags.AimFacing; break;
+                    case "CBAF_NORANDOM": flags |= CustomBulletAttackFlags.NoRandom; break;
+                    case "CBAF_EXPLICITANGLE": flags |= CustomBulletAttackFlags.ExplicitAngle; break;
+                    case "CBAF_NOPITCH": flags |= CustomBulletAttackFlags.NoPitch; break;
+                    case "CBAF_NORANDOMPUFFZ": flags |= CustomBulletAttackFlags.NoRandomPuffZ; break;
+                    case "CBAF_PUFFTARGET": flags |= CustomBulletAttackFlags.PuffTarget; break;
+                    case "CBAF_PUFFMASTER": flags |= CustomBulletAttackFlags.PuffMaster; break;
+                    case "CBAF_PUFFTRACER": flags |= CustomBulletAttackFlags.PuffTracer; break;
+
+                    case "FBF_USEAMMO": flags |= FireBulletsFlags.UseAmmo; break;
+                    case "FBF_NORANDOM": flags |= FireBulletsFlags.NoRandom; break;
+                    case "FBF_EXPLICITANGLE": flags |= FireBulletsFlags.ExplicitAngle; break;
+                    case "FBF_NOPITCH": flags |= FireBulletsFlags.NoPitch; break;
+                    case "FBF_NOFLASH": flags |= FireBulletsFlags.NoFlash; break;
+                    case "FBF_NORANDOMPUFFZ": flags |= FireBulletsFlags.NoRandomPuffZ; break;
+                    case "FBF_PUFFTARGET": flags |= FireBulletsFlags.PuffTarget; break;
+                    case "FBF_PUFFMASTER": flags |= FireBulletsFlags.PuffMaster; break;
+                    case "FBF_PUFFTRACER": flags |= FireBulletsFlags.PuffTracer; break;
+
+                    default:
+                        problems.Add(actor.Name + " line " + frame.Line + ": bullet flag '" + part +
+                                     "' is not known, so it is ignored");
+                        break;
+                }
+            }
+
+            var supported = player ? FireBulletsFlags.Supported : CustomBulletAttackFlags.Supported;
+            var unknown = flags & ~supported;
+
+            if (unknown != 0)
+            {
+                problems.Add(actor.Name + " line " + frame.Line + ": bullet flag bits 0x" +
+                             unknown.ToString("x", CultureInfo.InvariantCulture) +
+                             " are not known or need puff pointers this engine does not have, " +
+                             "so they are ignored");
+            }
+
+            return flags & supported;
         }
 
         /// <summary>

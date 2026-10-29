@@ -20,15 +20,27 @@ namespace DPTDOOM
     public static partial class DoomInfo
     {
         /// <summary>
-        /// How many state slots are reserved for actors described by mods.
+        /// How many state slots are reserved for actors described by mods before the table grows.
         ///
-        /// Fixed rather than grown on demand, and that is the honest choice: the state table
-        /// is read through <c>DoomInfo.States[(int)state]</c> from a dozen places including
-        /// the save loader, so it cannot be resized while a game is running. A thousand
-        /// slots is about as many states as vanilla Doom has, which is more than a PWAD
-        /// describes; when it runs out, the mod is told rather than the game broken.
+        /// The table **does** grow, doubling when a mod needs more, but only during loading: every
+        /// reader takes the array through <see cref="States"/> at the moment it reads, so replacing
+        /// it between load phases is safe, while resizing it mid-tic would not be.
+        ///
+        /// It used to be a hard limit of 1024 with the reasoning that a thousand slots is more than
+        /// a PWAD describes. Running DOOM ACE's ademo1.wad showed otherwise: it describes about
+        /// 3700 frames, so the reserve ran out part-way through, 25 actors lost their states, and 19
+        /// transitions pointed at frames that were never created. A vanilla game still pays for
+        /// exactly this much and no more.
         /// </summary>
         public const int CustomStateReserve = 1024;
+
+        /// <summary>
+        /// The hard ceiling on growth, so a pathological file cannot allocate without end.
+        ///
+        /// 65536 states is far beyond any real mod - ademo1.wad, one of the largest Doom ACE mods,
+        /// needs about 3700 - and the table costs roughly half a megabyte at that size.
+        /// </summary>
+        public const int MaxStateReserve = 65536;
 
         /// <summary>
         /// The first state number that belongs to mods, which is also the end of vanilla.
@@ -97,7 +109,7 @@ namespace DPTDOOM
             // Touching States first so the table exists and the count is comparable.
             var table = States;
 
-            if (customStatesUsed >= CustomStateReserve)
+            if (customStatesUsed >= table.Length - CustomStateFirst && !GrowStates())
             {
                 return -1;
             }
@@ -105,6 +117,48 @@ namespace DPTDOOM
             var number = CustomStateFirst + customStatesUsed;
             customStatesUsed++;
             return number;
+        }
+
+        /// <summary>
+        /// Doubles the reserve, keeping every number already handed out where it is.
+        ///
+        /// Vanilla numbering does not move and neither do the states a mod has already defined: the
+        /// new slots are appended, exactly as the first reserve was. That is what makes growing safe
+        /// at all - the save loader and the world both hold state numbers, not references.
+        /// </summary>
+        private static bool GrowStates()
+        {
+            var table = states;
+
+            if (table == null)
+            {
+                return false;
+            }
+
+            var capacity = table.Length - CustomStateFirst;
+            var next = capacity * 2;
+
+            if (next > MaxStateReserve)
+            {
+                next = MaxStateReserve;
+            }
+
+            if (next <= capacity)
+            {
+                return false;
+            }
+
+            var grown = new MobjStateDef[CustomStateFirst + next];
+            Array.Copy(table, grown, table.Length);
+
+            for (var i = table.Length; i < grown.Length; i++)
+            {
+                grown[i] = new MobjStateDef(i, Sprite.TROO, 0, -1, null, null,
+                                            MobjState.Null, 0, 0);
+            }
+
+            states = grown;
+            return true;
         }
 
         /// <summary>

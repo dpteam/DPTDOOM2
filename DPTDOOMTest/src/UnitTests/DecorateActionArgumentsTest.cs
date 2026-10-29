@@ -177,14 +177,15 @@ namespace DPTDOOMTest.UnitTests
         public void AnUnsupportedArgumentedActionIsStillNamed()
         {
             // The actions this engine still cannot take must keep failing loudly rather than
-            // half-working. A_CustomBulletAttack is still outside the supported action set.
+            // half-working. A_SetScale changes the actor's rendering size, which this engine has no
+            // per-actor scale for, so it stays outside the supported action set.
             List<string> problems;
 
-            ParseSingle(ActorWith("A_CustomBulletAttack(5, 3, 1, 3)"), out problems);
+            ParseSingle(ActorWith("A_SetScale(1.5)"), out problems);
 
             var text = All(problems);
 
-            StringAssert.Contains(text, "A_CustomBulletAttack");
+            StringAssert.Contains(text, "A_SetScale");
             StringAssert.Contains(text, "takes no arguments");
         }
 

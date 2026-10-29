@@ -183,8 +183,9 @@ namespace DPTDOOM.Scripting
 
                 if (number < 0)
                 {
-                    throw call.Fail("no free state slots left; the reserve is " +
-                                    DoomInfo.CustomStateReserve + " states per run");
+                    throw call.Fail("no free state slots left; the table holds " +
+                                    DoomInfo.States.Length + " states and grows only while " +
+                                    "content is loading");
                 }
 
                 DoomInfo.DefineState(number, sprite, frame, tics, action, MobjState.Null);
@@ -678,6 +679,14 @@ namespace DPTDOOM.Scripting
 
                 return ScriptValue.Void;
             });
+
+            // A_CustomBulletAttack and A_FireBullets. Spread, damage and range are expressions, so
+            // random(8,12) as damage works and is drawn when the frame runs.
+            host.Register("CustomBulletAttack", 9, 9, call =>
+                RegisterBulletAttack(call, false));
+
+            host.Register("FireBullets", 9, 9, call =>
+                RegisterBulletAttack(call, true));
 
             // A_SetArg(index, value): one of the actor's own five numbers. The value is an
             // expression, because ademo1.wad writes floorz - ceilingz and random(190,250) * 8 in it.
@@ -1282,6 +1291,95 @@ namespace DPTDOOM.Scripting
 
             // States of the actor's own, for a mod that brings new frames.
             RegisterStates(host);
+        }
+
+        /// <summary>
+        /// Names already warned about as an unknown puff, so one missing actor is said once.
+        ///
+        /// The converter reports the common case while the file is read. This covers the rest: a
+        /// puff defined in a lump that is converted later, whose name is therefore not registered
+        /// yet when the frame that uses it is read.
+        /// </summary>
+        private static readonly HashSet<string> reportedPuffs =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        private static void WarnUnknownPuff(string name)
+        {
+            lock (reportedPuffs)
+            {
+                if (!reportedPuffs.Add(name))
+                {
+                    return;
+                }
+            }
+
+            ConsoleUi.Warn("bullet puff '" + name + "' is not an actor this engine knows, " +
+                           "so BulletPuff is used instead");
+        }
+
+        /// <summary>
+        /// Registers one bullet attack: the same nine script arguments for both actions, because
+        /// the converter has already resolved the two different DECORATE orders into one.
+        /// </summary>
+        private ScriptValue RegisterBulletAttack(ScriptCall call, bool player)
+        {
+            var number = FrameNumber(call.AsText(0), call);
+
+            var puffName = call.AsText(5);
+            var puff = MobjType.Puff;
+
+            if (puffName.Length > 0)
+            {
+                var type = ActorNames.TypeOf(puffName);
+
+                if (type < 0)
+                {
+                    // Reported, not thrown. Throwing would cost the whole actor - every frame and
+                    // every flag it described - over a puff that only decides what a bullet leaves
+                    // on a wall. The default puff is a visible, harmless substitute, and the warning
+                    // names the actor that asked for the missing one.
+                    WarnUnknownPuff(puffName);
+                }
+                else
+                {
+                    puff = (MobjType)type;
+                }
+            }
+
+            var spreadXY = ResolveSpawnExpression(call, 1);
+            var spreadZ = ResolveSpawnExpression(call, 2);
+            var count = call.AsInt(3);
+            var damage = ResolveSpawnExpression(call, 4);
+            var flags = call.AsInt(6);
+            var range = ResolveSpawnExpression(call, 7);
+            var pointer = call.AsInt(8);
+
+            if (!player)
+            {
+                CheckActionPointer(call, pointer);
+            }
+
+            DoomInfo.SetStateAction(number, (world, mobj) =>
+            {
+                // Evaluate in the order the arguments are written, so the random draws of a
+                // damage expression come at a predictable point in the world's sequence.
+                var spreadXYValue = spreadXY.EvaluateValue(world, mobj).AsFixed();
+                var spreadZValue = spreadZ.EvaluateValue(world, mobj).AsFixed();
+                var damageValue = damage.EvaluateValue(world, mobj).AsInt();
+                var rangeValue = range.EvaluateValue(world, mobj).AsFixed();
+
+                if (player)
+                {
+                    world.WeaponBehavior.FireBullets(mobj, spreadXYValue, spreadZValue, count,
+                        damageValue, puff, flags, rangeValue);
+                    return;
+                }
+
+                world.MonsterBehavior.CustomBulletAttack(mobj, spreadXYValue, spreadZValue, count,
+                    damageValue, puff, rangeValue, flags, ActorPointer.Resolve(mobj, pointer));
+            });
+
+            return ScriptValue.Void;
         }
 
         /// <summary>

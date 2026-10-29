@@ -204,7 +204,29 @@ ACTOR TestImp 3001
 
     Assert-True ($badLog -like "*map MAP01: OK*") "the level still loads"
     Assert-True ($badLog -like "*A_Jump*") "the action this engine lacks is named"
-    Assert-True ($badLog -like "*A_Look*") "and the ones it has are listed"
+    # A_Jump is handled by the converter, so the useful message is what it is missing rather than
+    # a list of unrelated actions.
+    Assert-True ($badLog -like "*chance and a label*") "and the missing arguments are explained"
+
+    Write-Host "With an action this engine has never heard of"
+    $unknownAction = Join-Path $work "unknownaction.dec"
+    @"
+ACTOR TestImp 3001
+{
+  States
+  {
+  See:
+    TROO A 3 A_NotAnAction
+    Loop
+  }
+}
+"@ | Set-Content -Path $unknownAction -Encoding ASCII
+
+    $unknownLog = Run-Game "unknownaction" @('-decorate', $unknownAction)
+
+    Assert-True ($unknownLog -like "*map MAP01: OK*") "the level still loads"
+    Assert-True ($unknownLog -like "*A_NotAnAction*") "the unknown action is named"
+    Assert-True ($unknownLog -like "*A_Look*") "and the ones it has are listed"
 
     Write-Host "With a new actor"
     $newLog = Run-Game "new" @('-decorate', $newActor)
@@ -1068,6 +1090,35 @@ ACTOR ArgImp 3001
     Assert-True ($argsLog -notlike "*no such action*") "A_SetArg is a real action"
     Assert-True ($argsLog -notlike "*not a field or function*") "args[N] is understood in a condition"
     Assert-True ((State-Of $argsLog) -ne $plainState) "the countdown changed the world"
+
+    Write-Host "With a custom bullet attack"
+    $bullets = Join-Path $work "bullets.dec"
+
+    # The two actions read flags and range from different positions, so one block each. A wrong
+    # order would put the range into the flag mask and the flag into the range, which still runs -
+    # it just behaves differently, and only a live check notices.
+    [System.IO.File]::WriteAllText($bullets, @"
+ACTOR GunImp 3001
+{
+  States
+  {
+  Spawn:
+    TROO A 4 A_Look
+  See:
+    TROO A 4 A_CustomBulletAttack(4, 4, 1, 3, "BulletPuff", 40, CBAF_NORANDOM | CBAF_AIMFACING)
+    TROO B 4 A_Chase
+    Loop
+  }
+}
+"@)
+
+    $bulletsLog = Run-Game "bullets" @('-decorate', $bullets)
+
+    Assert-True ($bulletsLog -like "*scripts: OK*") "A_CustomBulletAttack converts"
+    Assert-True ($bulletsLog -like "*map MAP01: OK*") "the level loads"
+    Assert-True ($bulletsLog -notlike "*no such action*") "it is a real action"
+    Assert-True ($bulletsLog -notlike "*decorate problem*") "a supported block reports nothing"
+    Assert-True ((State-Of $bulletsLog) -ne $plainState) "the bullets changed the world"
 
     Write-Host "With a truncated file"
     $cutLog = Run-Game "cut" @('-decorate', $truncated)

@@ -155,6 +155,74 @@ namespace DPTDOOMTest.UnitTests
         }
 
         [TestMethod]
+        public void AScriptActionOnALetterRunAppliesToEveryFrame()
+        {
+            // DECORATE shares one action across a letter run, and zero tics means "no time at all",
+            // so `TNT1 AAAAAAAAA 0 A_SpawnItemEx(...)` is nine spawns in one tic. Attaching the
+            // call to the last frame only lost eight of them - and reported the other eight as
+            // naming an action the engine does not have, which was the visible symptom.
+            var actor = ParseSingle(
+                "ACTOR Gibber 3001\n{\n  States\n  {\n  Death:\n" +
+                "    TNT1 AAAA 0 A_SpawnItemEx(\"BulletPuff\", 0, 0, 0)\n" +
+                "    Stop\n" +
+                "  }\n}", out var problems);
+
+            Assert.AreEqual(0, problems.Count, string.Join("; ", problems.ToArray()));
+
+            var frames = actor.Chains[0].Frames;
+
+            Assert.AreEqual(4, frames.Count);
+
+            foreach (var frame in frames)
+            {
+                Assert.IsTrue(frame.HasSpawnItemEx,
+                    "every frame of the run does the work");
+                Assert.AreEqual("", frame.Action,
+                    "and none of them is left naming an action the engine does not have");
+                Assert.AreEqual("TNT1", frame.Sprite, "each keeps its own picture");
+            }
+        }
+
+        [TestMethod]
+        public void AVanillaActionOnALetterRunStaysAVanillaAction()
+        {
+            // The other direction: A_Chase is an engine action, so it must stay one on every frame.
+            // Routing it to a script reader would make it demand arguments nobody wrote.
+            var actor = ParseSingle(
+                "ACTOR Chaser 3001\n{\n  States\n  {\n  See:\n" +
+                "    TROO AB 4 A_Chase\n" +
+                "    Loop\n" +
+                "  }\n}", out var problems);
+
+            Assert.AreEqual(0, problems.Count, string.Join("; ", problems.ToArray()));
+
+            foreach (var frame in actor.Chains[0].Frames)
+            {
+                Assert.AreEqual("A_Chase", frame.Action);
+                Assert.IsFalse(frame.HasChase, "the vanilla form is not the argumented one");
+            }
+        }
+
+        [TestMethod]
+        public void AScriptActionWithoutParenthesesReachesItsHandler()
+        {
+            // A_FaceTracer is script-backed, so a bare `A_FaceTracer` used to be reported as an
+            // action the engine does not have - for something the converter supports.
+            var actor = ParseSingle(
+                "ACTOR Facer 3001\n{\n  States\n  {\n  See:\n" +
+                "    TROO A 4 A_FaceTracer\n" +
+                "    Loop\n" +
+                "  }\n}", out var problems);
+
+            Assert.AreEqual(0, problems.Count, string.Join("; ", problems.ToArray()));
+
+            var frame = actor.Chains[0].Frames[0];
+
+            Assert.IsTrue(frame.HasFaceTracer, "the handler ran with the defaults");
+            Assert.AreEqual("", frame.Action, "and the frame does not name a missing action");
+        }
+
+        [TestMethod]
         public void AGotoOffsetCountsStates()
         {
             // "Goto Death + 2" means the state two entries after the label, which is the third

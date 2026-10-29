@@ -1415,6 +1415,144 @@ namespace DPTDOOM
         }
 
         /// <summary>
+        /// A_CustomBulletAttack: a burst of hitscan bullets from any actor, aimed at a reference
+        /// actor or along its own facing.
+        ///
+        /// The reference is what the actor turns to and aims at, and its default is
+        /// AAPTR_TARGET. Without a reference and without CBAF_AIMFACING the original does nothing
+        /// at all - it does not fall back to firing straight ahead - so neither does this.
+        /// </summary>
+        public void CustomBulletAttack(Mobj actor, Fixed spreadXY, Fixed spreadZ, int numBullets,
+                                       int damage, MobjType puffType, Fixed range, int flags,
+                                       Mobj reference)
+        {
+            var aimFacing = (flags & CustomBulletAttackFlags.AimFacing) != 0;
+
+            if (reference == null && !aimFacing)
+            {
+                return;
+            }
+
+            if (range.Data == 0)
+            {
+                // Zero means "the default range", not "no range at all". A bullet with a range of
+                // zero travels nowhere, which looks exactly like an action that does nothing.
+                range = WeaponBehavior.MissileRange;
+            }
+
+            if (!aimFacing)
+            {
+                // ZDoom's A_Face(reference): a full turn, not a limited one.
+                FaceTarget(actor, reference, Angle.Ang0, Angle.Ang0);
+            }
+
+            var angle = actor.Angle;
+            var slope = Fixed.Zero;
+
+            if ((flags & CustomBulletAttackFlags.NoPitch) == 0)
+            {
+                slope = world.Hitscan.AimLineAttack(actor, angle, WeaponBehavior.MissileRange);
+            }
+
+            PlayAttackSound(actor);
+
+            BulletVolley(actor, angle, slope, spreadXY, spreadZ, numBullets, damage, puffType,
+                range, (flags & CustomBulletAttackFlags.ExplicitAngle) != 0,
+                (flags & CustomBulletAttackFlags.NoRandom) != 0,
+                (flags & CustomBulletAttackFlags.NoRandomPuffZ) != 0);
+        }
+
+        /// <summary>
+        /// Fires the bullets, once the caller has decided the angle, the slope and the policy.
+        ///
+        /// Shared by A_CustomBulletAttack and A_FireBullets because the volley itself is identical;
+        /// only the aiming and the ammo differ. The flags arrive as booleans rather than as a number
+        /// on purpose: the two actions number their flags differently (NORANDOMPUFFZ is 16 for one
+        /// and 32 for the other), and passing the raw value across would apply the wrong bit.
+        ///
+        /// The random draws are the world generator's and the order is the original's: per bullet
+        /// the angle spread, then the slope spread, then the damage multiplier. Lockstep needs that
+        /// order as much as it needs the values.
+        /// </summary>
+        public void BulletVolley(Mobj actor, Angle angle, Fixed slope,
+                                 Fixed spreadXY, Fixed spreadZ, int numBullets, int damage,
+                                 MobjType puffType, Fixed range, bool explicitAngle,
+                                 bool noRandom, bool noRandomPuffZ)
+        {
+            var random = world.Random;
+
+            if (numBullets <= 0)
+            {
+                numBullets = 1;
+            }
+
+            for (var i = 0; i < numBullets; i++)
+            {
+                var bulletAngle = angle;
+                var bulletSlope = slope;
+
+                if (explicitAngle)
+                {
+                    bulletAngle += AngleFromDegrees(spreadXY);
+                    bulletSlope += spreadZ;
+                }
+                else
+                {
+                    // ZDoom's Random2 is a bell curve in -255..255 made of two draws, so a bullet
+                    // lands near the middle far more often than at the edge. Two draws, not one:
+                    // the shape is part of the feel and of the world hash.
+                    bulletAngle += AngleFromDegrees(spreadXY, random.Next() - random.Next());
+                    bulletSlope += new Fixed((int)((long)spreadZ.Data * (random.Next() - random.Next()) / 255));
+                }
+
+                var bulletDamage = damage;
+
+                if (!noRandom)
+                {
+                    bulletDamage *= random.Next() % 3 + 1;
+                }
+
+                world.Hitscan.LineAttack(actor, bulletAngle, range, bulletSlope, bulletDamage,
+                    puffType, noRandomPuffZ);
+            }
+        }
+
+        /// <summary>
+        /// A spread in degrees, scaled by a value in -255..255 the way ZDoom does it.
+        ///
+        /// Integer arithmetic only: the result goes into the world hash, so it must not depend on
+        /// how a platform rounds a double.
+        /// </summary>
+        private static Angle AngleFromDegrees(Fixed degrees, int scale = 255)
+        {
+            const long fullTurn = 0x100000000L;
+
+            var numerator = (long)degrees.Data * fullTurn * scale;
+            var denominator = 360L * Fixed.FracUnit * 255L;
+
+            if (numerator >= 0)
+            {
+                numerator += denominator / 2;
+            }
+            else
+            {
+                numerator -= denominator / 2;
+            }
+
+            return new Angle((uint)(numerator / denominator));
+        }
+
+        private void PlayAttackSound(Mobj actor)
+        {
+            if (actor.Info.AttackSound != 0 ||
+                ActorSounds.Has((int)actor.Type, ActorSoundSlot.Attack))
+            {
+                world.StartActorSound(actor, ActorSoundSlot.Attack,
+                    actor.Info.AttackSound, SfxType.Weapon);
+            }
+        }
+
+        /// <summary>
         /// A_CustomMeleeAttack: face the target and, if it is in melee range, damage it.
         ///
         /// Kept separate from the vanilla TroopAttack/SargAttack routines because the damage is a

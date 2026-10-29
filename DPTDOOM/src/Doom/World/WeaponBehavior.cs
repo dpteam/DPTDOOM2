@@ -191,6 +191,74 @@ namespace DPTDOOM
         }
 
         /// <summary>
+        /// A_FireBullets: the player's burst of hitscan bullets.
+        ///
+        /// Two things here are the original's and look like accidents until they are written down:
+        ///
+        ///  - the default range is **8192**, four times the monster's 2048. GZDoom widened it for
+        ///    players on purpose, and using the monster range would make a mod's pistol fall short
+        ///    of what it hits in ZDoom;
+        ///  - a **single** bullet with no refire fires down the actor's exact facing, with **no
+        ///    spread at all** - the spread only applies to a volley or to a refire. Collapsing the
+        ///    two paths would make every one-bullet weapon randomly inaccurate.
+        /// </summary>
+        public void FireBullets(Mobj actor, Fixed spreadXY, Fixed spreadZ, int numBullets,
+                                int damage, MobjType puffType, int flags, Fixed range)
+        {
+            if (actor.Player == null)
+            {
+                // ZDoom's A_FireBullets is a player action; a monster running it does nothing.
+                return;
+            }
+
+            if ((flags & FireBulletsFlags.UseAmmo) != 0 &&
+                !TryUseCustomProjectileAmmo(actor.Player))
+            {
+                return;
+            }
+
+            if (range.Data == 0)
+            {
+                range = PlayerMissileRange;
+            }
+
+            var angle = actor.Angle;
+            var slope = Fixed.Zero;
+
+            if ((flags & FireBulletsFlags.NoPitch) == 0)
+            {
+                slope = world.Hitscan.AimLineAttack(actor, angle, range);
+            }
+
+            var noRandom = (flags & FireBulletsFlags.NoRandom) != 0;
+            var noRandomPuffZ = (flags & FireBulletsFlags.NoRandomPuffZ) != 0;
+            var explicitAngle = (flags & FireBulletsFlags.ExplicitAngle) != 0;
+
+            if (numBullets == 0 || (numBullets == 1 && actor.Player.Refire == 0))
+            {
+                // The single-shot path: no spread, one damage roll.
+                var shot = damage;
+
+                if (!noRandom)
+                {
+                    shot *= world.Random.Next() % 3 + 1;
+                }
+
+                world.Hitscan.LineAttack(actor, angle, range, slope, shot, puffType, noRandomPuffZ);
+                return;
+            }
+
+            world.MonsterBehavior.BulletVolley(actor, angle, slope, spreadXY, spreadZ, numBullets,
+                damage, puffType, range, explicitAngle, noRandom, noRandomPuffZ);
+        }
+
+        /// <summary>
+        /// GZDoom's PLAYERMISSILERANGE. Not the same as <see cref="MissileRange"/>: that one is the
+        /// monster range, and the player's is deliberately four times longer.
+        /// </summary>
+        public static readonly Fixed PlayerMissileRange = Fixed.FromInt(8192);
+
+        /// <summary>
         /// Spends one shot for a converted DECORATE projectile/grenade action. Unlike CheckAmmo,
         /// running dry does not lower or switch the weapon: the action simply declines to fire.
         /// </summary>
