@@ -635,6 +635,18 @@ namespace DPTDOOM
         }
 
 
+        /// <summary>
+        /// Whether the actor's target is within melee reach, for A_JumpIfTargetInsideMeleeRange.
+        ///
+        /// The same test the melee attacks use, exposed rather than copied: a mod that branches on
+        /// "can I punch it" must get the same answer as the punch, or the branch leads to an attack
+        /// that misses.
+        /// </summary>
+        public bool IsInMeleeRange(Mobj actor)
+        {
+            return CheckMeleeRange(actor);
+        }
+
         private bool CheckMeleeRange(Mobj actor)
         {
             if (actor.Target == null)
@@ -1039,7 +1051,19 @@ namespace DPTDOOM
         /// </summary>
         public void FaceTarget(Mobj actor, Angle maxTurn, Angle offset)
         {
-            if (actor.Target == null)
+            FaceTarget(actor, actor.Target, maxTurn, offset);
+        }
+
+        /// <summary>
+        /// Turns toward a given actor, which is A_FaceTracer when that actor is the tracer.
+        ///
+        /// The target is a parameter rather than always <see cref="Mobj.Target"/> so that a mod can
+        /// face the thing it is following without first retargeting itself - which would change
+        /// what it attacks on the next tic.
+        /// </summary>
+        public void FaceTarget(Mobj actor, Mobj target, Angle maxTurn, Angle offset)
+        {
+            if (target == null)
             {
                 return;
             }
@@ -1048,7 +1072,7 @@ namespace DPTDOOM
 
             var toTarget = Geometry.PointToAngle(
                 actor.X, actor.Y,
-                actor.Target.X, actor.Target.Y);
+                target.X, target.Y);
 
             if (maxTurn.Data == 0)
             {
@@ -1085,9 +1109,39 @@ namespace DPTDOOM
 
             var random = world.Random;
 
-            if ((actor.Target.Flags & MobjFlags.Shadow) != 0)
+            if ((target.Flags & MobjFlags.Shadow) != 0)
             {
                 actor.Angle += new Angle((random.Next() - random.Next()) << 21);
+            }
+        }
+
+        /// <summary>
+        /// A_MonsterRefire: keep shooting unless the target is gone, dead or out of sight.
+        ///
+        /// The chance is a *keep going* chance, and it is drawn **before** the sight test - that order
+        /// is what the original does, and reversing it would make a monster with a dead target fire
+        /// one more shot instead of leaving. Facing happens first, always, so a monster that leaves
+        /// for its label is still looking at where its target was.
+        ///
+        /// The draw comes from the world generator. GZDoom keeps a separate stream for this action,
+        /// which this engine does not have; the difference is invisible inside one session and the
+        /// same on every end of it, which is what lockstep needs.
+        /// </summary>
+        public void MonsterRefire(Mobj actor, int chance, int jumpState)
+        {
+            FaceTarget(actor);
+
+            if (world.Random.Next() < chance)
+            {
+                return;
+            }
+
+            var target = actor.Target;
+
+            if (target == null || target.Health <= 0 ||
+                !world.VisibilityCheck.CheckSight(actor, target))
+            {
+                actor.JumpToState(jumpState);
             }
         }
 

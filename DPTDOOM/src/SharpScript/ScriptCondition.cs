@@ -215,6 +215,40 @@ namespace DPTDOOM.Scripting
             // jump agrees with where the actor actually stands.
             target.Register("OnFloor", 0, call => ScriptValue.FromBool(Current().Z <= Current().FloorZ));
 
+            // A_CheckCeiling: the mirror image, and the same comparison GZDoom makes - the top of
+            // the actor against the ceiling, not its origin.
+            target.Register("OnCeiling", 0, call =>
+                ScriptValue.FromBool(Current().Z + Current().Height >= Current().CeilingZ));
+
+            // Distance to the tracer, the companion of Distance() for A_JumpIfTracerCloser.
+            target.Register("TracerDistance", 0, call =>
+            {
+                var mobj = Current();
+                var tracer = mobj.Tracer;
+
+                if (tracer == null)
+                {
+                    return ScriptValue.FromFixed(Fixed.MaxValue);
+                }
+
+                return ScriptValue.FromFixed(
+                    Geometry.AproxDistance(mobj.X - tracer.X, mobj.Y - tracer.Y));
+            });
+
+            // A_JumpIfCloser and A_JumpIfTracerCloser, with GZDoom's own rule.
+            //
+            // The horizontal distance alone is not the whole answer: the original also requires the
+            // two actors to overlap vertically, unless `noz` asks for horizontal only. Three calls in
+            // ademo1.wad pass noz=1, and treating the test as horizontal-only would have made a
+            // monster react to something directly above or below it.
+            target.Register("CloserToTarget", 2, call => Closer(Current().Target, call));
+            target.Register("CloserToTracer", 2, call => Closer(Current().Tracer, call));
+
+            // A_JumpIfTargetInsideMeleeRange and its Outside counterpart. The same check the melee
+            // attacks use, so a mod's branch agrees with what a punch would actually reach.
+            target.Register("InMeleeRange", 0, call =>
+                ScriptValue.FromBool(world.MonsterBehavior.IsInMeleeRange(Current())));
+
             // A_CheckFlag: is a named flag set on one of the actor's pointers? The name is checked
             // by the converter, but a hand-written script can still misspell it, so a wrong name is
             // reported once instead of answering false for ever with no explanation.
@@ -241,6 +275,44 @@ namespace DPTDOOM.Scripting
 
                 return ScriptValue.FromBool((actor.Flags & flag) != 0);
             });
+        }
+
+        /// <summary>
+        /// GZDoom's CheckIfCloser, spelled out.
+        ///
+        /// A missing actor answers false rather than throwing: "is the thing I am chasing close" is a
+        /// legitimate question with the answer "no" when there is nothing to chase. The vertical
+        /// part is the part that is easy to drop and hard to notice - a monster would then react to
+        /// something a floor above it - so it is written here exactly as the original does it.
+        /// </summary>
+        private ScriptValue Closer(Mobj other, ScriptCall call)
+        {
+            var self = Current();
+
+            if (other == null)
+            {
+                return ScriptValue.FromBool(false);
+            }
+
+            var distance = call.AsFixed(0);
+            var noz = call.AsBool(1);
+
+            if (Geometry.AproxDistance(other.X - self.X, other.Y - self.Y) >= distance)
+            {
+                return ScriptValue.FromBool(false);
+            }
+
+            if (noz)
+            {
+                return ScriptValue.FromBool(true);
+            }
+
+            // Overlapping vertically, counted from whichever actor is higher.
+            var above = self.Z > other.Z
+                ? self.Z - other.Z - other.Height
+                : other.Z - self.Z - self.Height;
+
+            return ScriptValue.FromBool(above < distance);
         }
 
         /// <summary>

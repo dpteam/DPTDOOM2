@@ -943,6 +943,67 @@ ACTOR CheckImp 3001
     Assert-True ($checksLog -notlike "*decorate problem*") "a block this engine can take reports nothing"
     Assert-True ((State-Of $checksLog) -ne $plainState) "the checks changed the world"
 
+    Write-Host "With the target and tracer questions"
+    $targets = Join-Path $work "targets.dec"
+
+    [System.IO.File]::WriteAllText($targets, @"
+ACTOR TargetImp 3001
+{
+  States
+  {
+  Spawn:
+    TROO A 4 A_Look
+  See:
+    TROO A 4 A_JumpIfTargetOutsideMeleeRange("Ranged")
+    TROO B 4 A_JumpIfTargetInsideMeleeRange("Close")
+    TROO C 4 A_Chase
+    Loop
+  Ranged:
+    TROO D 4 A_MonsterRefire(0, "See")
+    Loop
+  Close:
+    TROO E 4 A_CheckCeiling("See")
+    Loop
+  }
+}
+"@)
+
+    $targetsLog = Run-Game "targets" @('-decorate', $targets)
+
+    Assert-True ($targetsLog -like "*scripts: OK*") "the target questions convert"
+    Assert-True ($targetsLog -like "*map MAP01: OK*") "the level loads"
+    Assert-True ($targetsLog -notlike "*no such action*") "none is a missing action"
+    Assert-True ($targetsLog -notlike "*decorate problem*") "a block this engine can take reports nothing"
+    Assert-True ((State-Of $targetsLog) -ne $plainState) "the questions changed the world"
+
+    Write-Host "With A_JumpIfCloser and its noz argument"
+    $noz = Join-Path $work "noz.dec"
+
+    [System.IO.File]::WriteAllText($noz, @"
+ACTOR NozImp 3001
+{
+  States
+  {
+  Spawn:
+    TROO A 4 A_Look
+  See:
+    TROO A 4 A_JumpIfCloser(4096, "Near", 1)
+    TROO B 4 A_Chase
+    Loop
+  Near:
+    TROO C 4 A_JumpIfTracerCloser(1024, "See", 1)
+    Loop
+  }
+}
+"@)
+
+    $nozLog = Run-Game "noz" @('-decorate', $noz)
+
+    Assert-True ($nozLog -like "*scripts: OK*") "the three-argument form converts"
+    Assert-True ($nozLog -notlike "*needs a condition and a label*") `
+        "noz is no longer treated as a malformed argument list"
+    Assert-True ($nozLog -like "*map MAP01: OK*") "and the level loads"
+
     Write-Host "With a truncated file"
     $cutLog = Run-Game "cut" @('-decorate', $truncated)
 

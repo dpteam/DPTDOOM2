@@ -679,6 +679,43 @@ namespace DPTDOOM.Scripting
                 return ScriptValue.Void;
             });
 
+            // A_FaceTracer: turn toward the tracer, which is a different actor from the target and
+            // must stay one - retargeting the monster to face it would change what it attacks.
+            host.Register("FaceTracer", 3, 3, call =>
+            {
+                var number = FrameNumber(call.AsText(0), call);
+                var maxTurn = AngleFromFixedDegrees(Fixed.FromInt(call.AsInt(1)));
+                var offset = AngleFromFixedDegrees(Fixed.FromInt(call.AsInt(2)));
+
+                DoomInfo.SetStateAction(number, (world, mobj) =>
+                    world.MonsterBehavior.FaceTarget(mobj, mobj.Tracer, maxTurn, offset));
+
+                return ScriptValue.Void;
+            });
+
+            // A_MonsterRefire: a *keep going* chance plus a jump when the target is gone, dead or
+            // hidden. The label is resolved here, while the actor's own chains are known.
+            host.Register("MonsterRefire", 3, 3, call =>
+            {
+                var number = FrameNumber(call.AsText(0), call);
+                var chance = call.AsInt(1);
+                var label = call.AsText(2);
+
+                int target;
+
+                if (!ResolveState(label, out target))
+                {
+                    throw call.Fail("no such state '" + label +
+                                    "' for 'A_MonsterRefire'; it is neither a state of this actor " +
+                                    "nor one of the engine's");
+                }
+
+                DoomInfo.SetStateAction(number, (world, mobj) =>
+                    world.MonsterBehavior.MonsterRefire(mobj, chance, target));
+
+                return ScriptValue.Void;
+            });
+
             // A_AlertMonsters is simulation, not audible sound: it marks sectors so their monsters
             // acquire the selected target on a later look. Keep it on the ordinary noise path.
             host.Register("AlertMonsters", 2, 2, call =>

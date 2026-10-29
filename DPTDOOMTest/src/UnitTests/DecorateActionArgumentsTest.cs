@@ -96,7 +96,11 @@ namespace DPTDOOMTest.UnitTests
 
             var frame = actor.Chains[0].Frames[0];
 
-            Assert.AreEqual("Distance() < 128", frame.JumpCondition);
+            // Not "Distance() < 128": the original also requires the two actors to overlap
+            // vertically unless noz is given, so the question is a call and not a bare comparison.
+            // The horizontal-only version was an approximation that made a monster react to
+            // something a floor above it.
+            Assert.AreEqual("CloserToTarget(128, 0)", frame.JumpCondition);
         }
 
         [TestMethod]

@@ -320,6 +320,16 @@ namespace DPTDOOM.Scripting
         public bool HasAlertMonsters;
         public int AlertMonsterFlags;
 
+        /// <summary>True for A_MonsterRefire: a chance to keep firing and the label when not.</summary>
+        public bool HasMonsterRefire;
+        public int MonsterRefireChance;
+        public string MonsterRefireLabel;
+
+        /// <summary>True for A_FaceTracer, with its turn limit and angle offset in degrees.</summary>
+        public bool HasFaceTracer;
+        public int FaceTracerMaxTurn;
+        public int FaceTracerOffset;
+
         /// <summary>True for A_StartSound.</summary>
         public bool HasStartSound;
 
@@ -1182,6 +1192,28 @@ namespace DPTDOOM.Scripting
                               .Append(");\n");
                     }
 
+                    if (frame.HasFaceTracer)
+                    {
+                        script.Append("    FaceTracer(\"").Append(name).Append("\", ")
+                              .Append(frame.FaceTracerMaxTurn.ToString(CultureInfo.InvariantCulture))
+                              .Append(", ")
+                              .Append(frame.FaceTracerOffset.ToString(CultureInfo.InvariantCulture))
+                              .Append(");\n");
+                    }
+
+                    if (frame.HasMonsterRefire)
+                    {
+                        // The label is resolved by name in the script layer, where the actor's own
+                        // chains are known: a state number here would be wrong for any other actor.
+                        var jumpTo = HasChain(actor, frame.MonsterRefireLabel)
+                            ? FrameName(frame.MonsterRefireLabel, 1)
+                            : frame.MonsterRefireLabel;
+
+                        script.Append("    MonsterRefire(\"").Append(name).Append("\", ")
+                              .Append(frame.MonsterRefireChance.ToString(CultureInfo.InvariantCulture))
+                              .Append(", \"").Append(jumpTo).Append("\");\n");
+                    }
+
                     if (frame.HasStartSound)
                     {
                         script.Append("    StartSound(\"").Append(name).Append("\", \"")
@@ -1319,7 +1351,8 @@ namespace DPTDOOM.Scripting
                         !frame.HasSetHealth && !frame.HasSetAngle && !frame.HasChangeVelocity &&
                         !frame.HasScaleVelocity && !frame.HasStartSound &&
                         !frame.HasSpawnProjectile && !frame.HasFireProjectile &&
-                        !frame.HasThrowGrenade)
+                        !frame.HasThrowGrenade && !frame.HasAlertMonsters &&
+                        !frame.HasFaceTracer && !frame.HasMonsterRefire)
                     {
                         continue;
                     }
@@ -2198,16 +2231,38 @@ namespace DPTDOOM.Scripting
                 string.Equals(frame.Action, "A_JumpIfHealthLower", StringComparison.OrdinalIgnoreCase);
             var isCloser =
                 string.Equals(frame.Action, "A_JumpIfCloser", StringComparison.OrdinalIgnoreCase);
+            var isTracerCloser =
+                string.Equals(frame.Action, "A_JumpIfTracerCloser", StringComparison.OrdinalIgnoreCase);
 
-            if (isJumpIf || isHealthLower || isCloser)
+            if (isJumpIf || isHealthLower || isCloser || isTracerCloser)
             {
-                ReadConditionalJump(arguments, actor, frame, problems, isHealthLower, isCloser);
+                ReadConditionalJump(arguments, actor, frame, problems, isHealthLower,
+                    isCloser || isTracerCloser, isTracerCloser);
                 return;
             }
 
-            if (string.Equals(frame.Action, "A_CheckFloor", StringComparison.OrdinalIgnoreCase))
+            // Three questions whose answer is one word, so they need no expression: "am I on the
+            // floor", "is my target in reach", "am I against the ceiling".
+            if (string.Equals(frame.Action, "A_CheckFloor", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(frame.Action, "A_CheckCeiling", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(frame.Action, "A_JumpIfTargetInsideMeleeRange",
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(frame.Action, "A_JumpIfTargetOutsideMeleeRange",
+                    StringComparison.OrdinalIgnoreCase))
             {
-                ReadCheckFloor(arguments, actor, frame, problems);
+                ReadSingleLabelJump(arguments, actor, frame, problems);
+                return;
+            }
+
+            if (string.Equals(frame.Action, "A_MonsterRefire", StringComparison.OrdinalIgnoreCase))
+            {
+                ReadMonsterRefire(arguments, actor, frame, problems);
+                return;
+            }
+
+            if (string.Equals(frame.Action, "A_FaceTracer", StringComparison.OrdinalIgnoreCase))
+            {
+                ReadFaceTracer(arguments, actor, frame, problems);
                 return;
             }
 
@@ -2409,12 +2464,20 @@ namespace DPTDOOM.Scripting
         /// </summary>
         private static void ReadConditionalJump(List<List<Token>> arguments, DecorateActor actor,
                                                 StateFrame frame, IList<string> problems,
-                                                bool healthLower, bool closer)
+                                                bool healthLower, bool closer, bool tracerCloser)
         {
-            if (arguments.Count != 2)
+            // The distance forms take an optional third argument, `noz`: "compare horizontally
+            // only". Three calls in ademo1.wad pass it, and insisting on exactly two arguments made
+            // them lose their jump entirely - the mod asked a question this engine could answer and
+            // was told it was malformed.
+            var allowed = closer ? 3 : 2;
+
+            if (arguments.Count < 2 || arguments.Count > allowed)
             {
                 problems.Add(actor.Name + " line " + frame.Line + ": '" + frame.Action +
-                             "' needs a condition and a label, so the jump is dropped");
+                             "' needs " + (closer ? "a distance, a label and optionally noz" :
+                                                    "a condition and a label") +
+                             ", so the jump is dropped");
                 frame.Action = "";
                 return;
             }
@@ -2429,12 +2492,12 @@ namespace DPTDOOM.Scripting
 
             string condition;
 
-            if (healthLower || closer)
+            if (healthLower)
             {
                 // "(amount, label)": the question is the comparison, written by the file's own
                 // spelling. Built here rather than parsed, because there is nothing to parse - the
                 // first argument is a single number.
-                if (arguments[0].Count != 1 || !arguments[0][0].IsNumber)
+                if (!TryReadNumber(arguments[0], out var health))
                 {
                     problems.Add(actor.Name + " line " + frame.Line + ": '" + frame.Action +
                                  "' needs a whole number and a label, so the jump is dropped");
@@ -2442,8 +2505,28 @@ namespace DPTDOOM.Scripting
                     return;
                 }
 
-                condition = (healthLower ? "Health() < " : "Distance() < ") +
-                            arguments[0][0].Number.ToString(CultureInfo.InvariantCulture);
+                condition = "Health() < " + health.ToString(CultureInfo.InvariantCulture);
+            }
+            else if (closer)
+            {
+                if (!TryReadNumber(arguments[0], out var distance))
+                {
+                    problems.Add(actor.Name + " line " + frame.Line + ": '" + frame.Action +
+                                 "' needs a whole distance and a label, so the jump is dropped");
+                    frame.Action = "";
+                    return;
+                }
+
+                var noz = arguments.Count > 2 &&
+                          ReadActionBoolean(arguments, 2, false, actor, frame, problems,
+                              "A_JumpIfCloser noz");
+
+                // GZDoom's rule is not "distance only": without noz the two actors must also
+                // overlap vertically, and a test that ignored that would react to something a floor
+                // away. CloserToTarget spells the whole rule out.
+                condition = (tracerCloser ? "CloserToTracer(" : "CloserToTarget(") +
+                            distance.ToString(CultureInfo.InvariantCulture) + ", " +
+                            (noz ? "1" : "0") + ")";
             }
             else
             {
@@ -2463,19 +2546,56 @@ namespace DPTDOOM.Scripting
             frame.Action = "";
         }
 
+        /// <summary>A whole number, allowing a fixed literal such as 128.0 that has no fraction.</summary>
+        private static bool TryReadNumber(List<Token> tokens, out int value)
+        {
+            value = 0;
+
+            if (tokens.Count != 1)
+            {
+                return false;
+            }
+
+            if (tokens[0].IsNumber)
+            {
+                value = tokens[0].Number;
+                return true;
+            }
+
+            // A fixed literal is a decimal with a dot; DECORATE writes distances either way.
+            var text = tokens[0].Text ?? "";
+            var dot = text.IndexOf('.');
+
+            if (dot < 0)
+            {
+                return false;
+            }
+
+            for (var i = dot + 1; i < text.Length; i++)
+            {
+                if (text[i] != '0')
+                {
+                    return false;
+                }
+            }
+
+            return int.TryParse(text.Substring(0, dot), NumberStyles.Integer,
+                CultureInfo.InvariantCulture, out value);
+        }
+
         /// <summary>
-        /// A_CheckFloor(label): leave for the label when the actor is standing on the floor.
+        /// The jumps whose answer is a single word, so their whole argument list is one label:
+        /// A_CheckFloor, A_CheckCeiling, A_JumpIfTargetInsideMeleeRange and its Outside counterpart.
         ///
-        /// The question is the same one the original action asks - z at or below the floor - so it
-        /// becomes a condition function like A_JumpIf's, and the state layer needs no new field.
+        /// They differ only in the question, which is what the generated condition says.
         /// </summary>
-        private static void ReadCheckFloor(List<List<Token>> arguments, DecorateActor actor,
-                                           StateFrame frame, IList<string> problems)
+        private static void ReadSingleLabelJump(List<List<Token>> arguments, DecorateActor actor,
+                                                StateFrame frame, IList<string> problems)
         {
             if (arguments.Count != 1)
             {
-                problems.Add(actor.Name + " line " + frame.Line +
-                             ": 'A_CheckFloor' needs one label, so the jump is dropped");
+                problems.Add(actor.Name + " line " + frame.Line + ": '" + frame.Action +
+                             "' needs one label, so the jump is dropped");
                 frame.Action = "";
                 return;
             }
@@ -2488,9 +2608,129 @@ namespace DPTDOOM.Scripting
                 return;
             }
 
+            string condition;
+
+            if (string.Equals(frame.Action, "A_CheckFloor", StringComparison.OrdinalIgnoreCase))
+            {
+                condition = "OnFloor()";
+            }
+            else if (string.Equals(frame.Action, "A_CheckCeiling", StringComparison.OrdinalIgnoreCase))
+            {
+                condition = "OnCeiling()";
+            }
+            else if (string.Equals(frame.Action, "A_JumpIfTargetInsideMeleeRange",
+                                    StringComparison.OrdinalIgnoreCase))
+            {
+                condition = "InMeleeRange()";
+            }
+            else
+            {
+                condition = "!InMeleeRange()";
+            }
+
             frame.JumpLabel = label;
-            frame.JumpCondition = "OnFloor()";
+            frame.JumpCondition = condition;
             frame.Action = "";
+        }
+
+        /// <summary>
+        /// A_MonsterRefire(chance, label): keep firing unless the target is gone, dead or hidden.
+        ///
+        /// This one cannot be a condition function: it turns to face the target and draws a random
+        /// number before asking, and a condition is read-only by design. It is therefore an action
+        /// that redirects the transition through Mobj.JumpToState, the same door A_Chase uses.
+        /// </summary>
+        private static void ReadMonsterRefire(List<List<Token>> arguments, DecorateActor actor,
+                                              StateFrame frame, IList<string> problems)
+        {
+            if (arguments.Count != 2 || !TryReadNumber(arguments[0], out var chance))
+            {
+                problems.Add(actor.Name + " line " + frame.Line +
+                             ": 'A_MonsterRefire' needs a chance and a label, so it does nothing");
+                frame.Action = "";
+                return;
+            }
+
+            var label = ReadLabel(arguments[1], actor, frame, problems);
+
+            if (label == null)
+            {
+                frame.Action = "";
+                return;
+            }
+
+            if (chance < 0)
+            {
+                chance = 0;
+            }
+            else if (chance > 256)
+            {
+                chance = 256;
+            }
+
+            frame.HasMonsterRefire = true;
+            frame.MonsterRefireChance = chance;
+            frame.MonsterRefireLabel = label;
+            frame.Action = "";
+        }
+
+        /// <summary>
+        /// A_FaceTracer(max_turn, max_pitch, ang_offset, ...): turn toward the tracer.
+        ///
+        /// Only the turn limit and the offset are honoured; the pitch arguments are named in the
+        /// report because this engine has no per-actor pitch. With no tracer the original does
+        /// nothing, and so does this.
+        /// </summary>
+        private static void ReadFaceTracer(List<List<Token>> arguments, DecorateActor actor,
+                                           StateFrame frame, IList<string> problems)
+        {
+            frame.Action = "";
+            frame.HasFaceTracer = true;
+            frame.FaceTracerMaxTurn = 0;
+            frame.FaceTracerOffset = 0;
+
+            if (arguments.Count > 0)
+            {
+                if (!TryReadNumber(arguments[0], out var maxTurn))
+                {
+                    problems.Add(actor.Name + " line " + frame.Line +
+                                 ": 'A_FaceTracer' turn limit must be a whole number of degrees; " +
+                                 "the actor turns all the way");
+                }
+                else
+                {
+                    frame.FaceTracerMaxTurn = maxTurn;
+                }
+            }
+
+            if (arguments.Count > 1)
+            {
+                int pitch;
+
+                if (!TryReadNumber(arguments[1], out pitch) || pitch != 270)
+                {
+                    problems.Add(actor.Name + " line " + frame.Line + ": 'A_FaceTracer' pitch " +
+                                 "limit is ignored - this engine has no per-actor pitch, so the " +
+                                 "actor still turns in the plane it moves in");
+                }
+            }
+
+            if (arguments.Count > 2)
+            {
+                if (!TryReadNumber(arguments[2], out var offset))
+                {
+                    problems.Add(actor.Name + " line " + frame.Line +
+                                 ": 'A_FaceTracer' angle offset must be a whole number of degrees; " +
+                                 "zero is used");
+                }
+                else
+                {
+                    frame.FaceTracerOffset = offset;
+                }
+            }
+
+            ReportIgnoredArguments(arguments, 3, actor, frame, problems, "A_FaceTracer",
+                "pitch offset, flags and z offset");
         }
 
         /// <summary>
