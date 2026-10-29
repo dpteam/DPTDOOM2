@@ -159,6 +159,15 @@ namespace DPTDOOM
         BRS1,
         TLMP,
         TLP2,
+
+        // DECORATE's invisible frame, and the only sprite name here that vanilla Doom does not
+        // have. It is appended rather than inserted so every existing value keeps its number: the
+        // enum indexes SpriteNames, and a mod's state table refers to these by value.
+        //
+        // It has no graphics in any IWAD, so a frame using it draws nothing - which is exactly
+        // what TNT1 means, and why it must not be rejected as a typo.
+        TNT1,
+
         Count
     }
 }

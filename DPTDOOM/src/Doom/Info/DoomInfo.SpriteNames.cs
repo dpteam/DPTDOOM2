@@ -160,7 +160,11 @@ namespace DPTDOOM
             new DoomString("POB2"),
             new DoomString("BRS1"),
             new DoomString("TLMP"),
-            new DoomString("TLP2")
+            new DoomString("TLP2"),
+
+            // DECORATE's invisible sprite. Vanilla Doom has no such name; a mod's frame that uses
+            // it must draw nothing rather than be rejected as a misspelling.
+            new DoomString("TNT1")
         };
     }
 }

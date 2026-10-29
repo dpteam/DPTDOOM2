@@ -913,6 +913,36 @@ ACTOR AlertImp 3001
     Assert-True ($alertLog -notlike "*no such action 'A_AlertMonsters'*") "A_AlertMonsters is a real action"
     Assert-True ((State-Of $alertLog) -ne $plainState) "the alert state changed the world"
 
+    Write-Host "With the conditional checks A_CheckFloor and A_CheckFlag"
+    $checks = Join-Path $work "checks.dec"
+
+    [System.IO.File]::WriteAllText($checks, @"
+ACTOR CheckImp 3001
+{
+  States
+  {
+  Spawn:
+    TROO A 4 A_Look
+  See:
+    TROO A 4 A_CheckFloor("Hit")
+    TROO B 4
+    Loop
+  Hit:
+    TROO C 4 A_CheckFlag("AMBUSH", "See")
+    TROO D 4
+    Loop
+  }
+}
+"@)
+
+    $checksLog = Run-Game "checks" @('-decorate', $checks)
+
+    Assert-True ($checksLog -like "*scripts: OK*") "the conditional checks convert"
+    Assert-True ($checksLog -like "*map MAP01: OK*") "the level loads"
+    Assert-True ($checksLog -notlike "*no such action*") "neither is a missing action"
+    Assert-True ($checksLog -notlike "*decorate problem*") "a block this engine can take reports nothing"
+    Assert-True ((State-Of $checksLog) -ne $plainState) "the checks changed the world"
+
     Write-Host "With a truncated file"
     $cutLog = Run-Game "cut" @('-decorate', $truncated)
 

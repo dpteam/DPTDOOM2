@@ -61,6 +61,24 @@ try {
     Assert-True ($text -notlike "*System.Collections.Generic.KeyNotFoundException*") `
         "missing textures did not escape as a dictionary exception"
 
+    # The frame reader has to resynchronise after a line it does not understand. When it did not,
+    # the argument list of a dropped frame was read as sprite names, and one line produced thousands
+    # of reports about '(' , ',' and ')' - tokens no mod ever writes as a sprite. These four checks
+    # are the shape of that failure, and they are cheap to keep.
+    Assert-True ($text -notlike "*no such sprite '('*") "a dropped frame did not leak '(' as a sprite"
+    Assert-True ($text -notlike "*no such sprite ')'*") "nor ')'"
+    Assert-True ($text -notlike "*no such sprite ','*") "nor ','"
+    Assert-True ($text -notlike "*no such sprite '----'*") `
+        "the keep-the-previous-sprite marker is understood, not reported as a typo"
+
+    # A ceiling on the report, not a target: it catches a return of the cascading failure without
+    # pretending the mod is warning-free. The real number today is well under half of this.
+    $decorateProblems = [regex]::Match($text, 'decorate problem: (\d+)')
+
+    Assert-True $decorateProblems.Success "the DECORATE report was produced"
+    Assert-True ([int]$decorateProblems.Groups[1].Value -lt 6000) `
+        ("the DECORATE report is bounded: " + $decorateProblems.Groups[1].Value + " problems")
+
     Write-Host "ADEMO test passed."
 }
 catch {

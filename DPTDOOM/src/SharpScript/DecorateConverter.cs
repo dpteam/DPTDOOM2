@@ -71,6 +71,15 @@ namespace DPTDOOM.Scripting
         /// Loop refer to, and because a report naming a frame is easier to follow in order.
         /// </summary>
         public readonly List<StateChain> Chains = new List<StateChain>();
+
+        /// <summary>
+        /// Frame modifiers already reported for this actor.
+        ///
+        /// `offset(...)` and `Fast`/`Slow`/`NoDelay` appear on many frames of the same actor, and
+        /// the consequence is the same every time. One line per actor says what was dropped; one
+        /// line per frame would bury the rest of the report under a cosmetic difference.
+        /// </summary>
+        public readonly HashSet<string> ReportedFrameModifiers = new HashSet<string>();
     }
 
     /// <summary>One labelled run of frames.</summary>
@@ -356,8 +365,9 @@ namespace DPTDOOM.Scripting
     /// shortcut. SharpScript already has a parser, a sandbox and an application order that
     /// is tested against the actor table; a second path that applies changes directly would
     /// need its own copy of all three and would drift from the first. Emitting source also
-    /// means a modder can read what their DECORATE became - <c>-decorate-inspect</c> prints
-    /// it - and that is the only way to find out why an actor did not come out as expected.
+    /// means a modder can read what their DECORATE became - the console command
+    /// <c>~decorate</c> prints the generated script and what could not be converted - and that
+    /// is the only way to find out why an actor did not come out as expected.
     ///
     /// What it converts, and what it refuses:
     ///
@@ -426,6 +436,15 @@ namespace DPTDOOM.Scripting
         /// MF_NOGRAVITY, an imp is MF_SHOOTABLE|MF_SOLID|MF_COUNTKILL - rather than invented,
         /// because the whole point of the flags is to match what the engine already does.
         /// </summary>
+        /// <summary>
+        /// DECORATE's "keep the sprite of the previous frame" marker.
+        ///
+        /// Not a WAD sprite name, and not a typo: GZDoom registers it as a sprite index of its own
+        /// (info.cpp, "Sprite 1 is always ----") so a frame can change flags without changing the
+        /// picture. A mod that writes it expects the previous frame to stay on screen.
+        /// </summary>
+        private const string KeepSprite = "----";
+
         private static readonly string[] MonsterFlags = { "Solid", "Shootable", "CountKill" };
 
         private static readonly string[] ProjectileFlags =
@@ -744,7 +763,7 @@ namespace DPTDOOM.Scripting
                     }
                     else
                     {
-                        next = ResolveChainEnd(actor, chain, i + 1);
+                        next = ResolveChainEnd(actor, chain, i + 1, problems);
                     }
 
                     if (frame.Action.Length > 0)
@@ -1385,7 +1404,8 @@ namespace DPTDOOM.Scripting
         /// starting - falls through to the frame after it, and that is what this returns: the
         /// next label's first frame, or the stop when there is none.
         /// </summary>
-        private static string ResolveChainEnd(DecorateActor actor, StateChain chain, int frameCount)
+        private static string ResolveChainEnd(DecorateActor actor, StateChain chain, int frameCount,
+                                              IList<string> problems)
         {
             if (chain.Next == "Loop")
             {
@@ -1407,13 +1427,39 @@ namespace DPTDOOM.Scripting
             if (chain.Next.StartsWith("Goto ", StringComparison.OrdinalIgnoreCase))
             {
                 var target = chain.Next.Substring(5).Trim();
+                var offset = 0;
+                var plus = target.IndexOf('+');
+
+                if (plus > 0)
+                {
+                    // The number counts states from the label's first frame, which is how GZDoom
+                    // resolves it (p_states.cpp: "state += v").
+                    int.TryParse(target.Substring(plus + 1), NumberStyles.Integer,
+                        CultureInfo.InvariantCulture, out offset);
+                    target = target.Substring(0, plus);
+                }
 
                 foreach (var other in actor.Chains)
                 {
-                    if (string.Equals(other.Label, target, StringComparison.OrdinalIgnoreCase))
+                    if (!string.Equals(other.Label, target, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    if (offset == 0)
                     {
                         return FrameName(other.Label, 1);
                     }
+
+                    if (offset < other.Frames.Count)
+                    {
+                        return FrameName(other.Label, offset + 1);
+                    }
+
+                    problems.Add(actor.Name + " line " + chain.Line + ": 'Goto " + target + " + " +
+                                 offset + "' goes past the end of '" + target + "', so the actor " +
+                                 "stops there");
+                    return "";
                 }
 
                 // Not one of this actor's labels, so it may be an engine state: "Goto See"
@@ -1755,7 +1801,38 @@ namespace DPTDOOM.Scripting
                         continue;
                     }
 
-                    chain.Next = "Goto " + target.Text;
+                    var label = target.Text;
+
+                    // "Goto Death + 2" is an offset in states from the label, not a frame of the
+                    // current chain. Reading it as a label left "+ 2" behind, and the state reader
+                    // then took '+' for the sprite of the next frame.
+                    var after = reader.Next(ref line);
+
+                    if (after != null && after.Text == "+")
+                    {
+                        var number = reader.Next(ref line);
+
+                        if (number != null && number.IsNumber && number.Number >= 0)
+                        {
+                            label = label + "+" + number.Number.ToString(CultureInfo.InvariantCulture);
+                        }
+                        else
+                        {
+                            problems.Add(actor.Name + " line " + token.Line + ": 'Goto " + label +
+                                         " +' needs a whole offset; the plain label is used");
+
+                            if (number != null)
+                            {
+                                reader.PushBack(number, ref line);
+                            }
+                        }
+                    }
+                    else if (after != null)
+                    {
+                        reader.PushBack(after, ref line);
+                    }
+
+                    chain.Next = "Goto " + label;
                     continue;
                 }
 
@@ -1790,12 +1867,43 @@ namespace DPTDOOM.Scripting
         {
             var sprite = spriteToken.Text;
 
-            if (!ScriptActorApi.TryParseSprite(sprite, out _))
+            // "----" is not a sprite name but an instruction: keep the sprite of the frame before
+            // this one. ademo1.wad uses it for flag-only frames that must not change the picture,
+            // and treating it as a typo both lost those frames and desynchronised the reader.
+            if (sprite == KeepSprite)
             {
-                problems.Add(actor.Name + " line " + spriteToken.Line + ": no such sprite '" +
-                             sprite + "'; sprites are four-letter WAD names such as TROO. " +
-                             "This frame is not converted");
-                SkipRestOfFrame(reader, ref line);
+                sprite = PreviousSprite(actor, chain);
+
+                if (sprite == null)
+                {
+                    // Nothing to keep: the first frame of the actor. ZDoom would draw whatever the
+                    // actor looked like before, which for a new actor is nothing, so invisible is
+                    // the honest equivalent - and it is named rather than left to surprise.
+                    sprite = "TNT1";
+                    problems.Add(actor.Name + " line " + spriteToken.Line +
+                                 ": '" + KeepSprite + "' has no previous frame to keep, so this " +
+                                 "frame is invisible (TNT1)");
+                }
+            }
+            else if (!ScriptActorApi.TryParseSprite(sprite, out _))
+            {
+                // Two different mistakes end up here, and naming the right one matters: a misspelt
+                // sprite is a four-letter word, while a line special used as an action
+                // (Light_ChangeToValue) is not a frame at all.
+                if (sprite.Length != 4)
+                {
+                    problems.Add(actor.Name + " line " + spriteToken.Line + ": '" + sprite +
+                                 "' is not a frame - a frame starts with a four-letter sprite name " +
+                                 "such as TROO. The rest of this line is skipped");
+                }
+                else
+                {
+                    problems.Add(actor.Name + " line " + spriteToken.Line + ": no such sprite '" +
+                                 sprite + "'; sprites are four-letter WAD names such as TROO. " +
+                                 "This frame is not converted");
+                }
+
+                SkipRestOfLine(reader, ref line, spriteToken.Line);
                 return;
             }
 
@@ -1876,6 +1984,19 @@ namespace DPTDOOM.Scripting
                     chain.Frames[i].Letter = "+" + chain.Frames[i].Letter.TrimStart('+');
                 }
 
+                next = reader.Next(ref line);
+
+                if (next == null)
+                {
+                    return;
+                }
+            }
+
+            // Frame modifiers come between the tics and the action. They are presentation, not
+            // simulation, so they are consumed and named once per actor: leaving them unread made
+            // the state reader treat `offset` as the sprite of the next frame.
+            while (ReadFrameModifier(reader, ref line, actor, spriteToken.Line, next.Text, problems))
+            {
                 next = reader.Next(ref line);
 
                 if (next == null)
@@ -2012,6 +2133,18 @@ namespace DPTDOOM.Scripting
             if (isJumpIf || isHealthLower || isCloser)
             {
                 ReadConditionalJump(arguments, actor, frame, problems, isHealthLower, isCloser);
+                return;
+            }
+
+            if (string.Equals(frame.Action, "A_CheckFloor", StringComparison.OrdinalIgnoreCase))
+            {
+                ReadCheckFloor(arguments, actor, frame, problems);
+                return;
+            }
+
+            if (string.Equals(frame.Action, "A_CheckFlag", StringComparison.OrdinalIgnoreCase))
+            {
+                ReadCheckFlag(arguments, actor, frame, problems);
                 return;
             }
 
@@ -2258,6 +2391,99 @@ namespace DPTDOOM.Scripting
 
             frame.JumpLabel = label;
             frame.JumpCondition = condition;
+            frame.Action = "";
+        }
+
+        /// <summary>
+        /// A_CheckFloor(label): leave for the label when the actor is standing on the floor.
+        ///
+        /// The question is the same one the original action asks - z at or below the floor - so it
+        /// becomes a condition function like A_JumpIf's, and the state layer needs no new field.
+        /// </summary>
+        private static void ReadCheckFloor(List<List<Token>> arguments, DecorateActor actor,
+                                           StateFrame frame, IList<string> problems)
+        {
+            if (arguments.Count != 1)
+            {
+                problems.Add(actor.Name + " line " + frame.Line +
+                             ": 'A_CheckFloor' needs one label, so the jump is dropped");
+                frame.Action = "";
+                return;
+            }
+
+            var label = ReadLabel(arguments[0], actor, frame, problems);
+
+            if (label == null)
+            {
+                frame.Action = "";
+                return;
+            }
+
+            frame.JumpLabel = label;
+            frame.JumpCondition = "OnFloor()";
+            frame.Action = "";
+        }
+
+        /// <summary>
+        /// A_CheckFlag(flag, label, ptr): leave for the label when the pointer actor has the flag.
+        ///
+        /// The flag name is resolved **here**, while the file is read, so a typo costs one report
+        /// line instead of a condition that answers false for ever. The pointer is the same AAPTR
+        /// family the other actions use, and its default is the actor itself, as ZDoom declares.
+        /// </summary>
+        private static void ReadCheckFlag(List<List<Token>> arguments, DecorateActor actor,
+                                          StateFrame frame, IList<string> problems)
+        {
+            if (arguments.Count < 2 || arguments.Count > 3)
+            {
+                problems.Add(actor.Name + " line " + frame.Line +
+                             ": 'A_CheckFlag' needs a flag and a label, so the jump is dropped");
+                frame.Action = "";
+                return;
+            }
+
+            // A quoted name and a bare one are the same thing here, as for sound names: the reader
+            // has already stripped the quotes, and DECORATE files use both spellings.
+            if (arguments[0].Count != 1 || arguments[0][0].IsNumber)
+            {
+                problems.Add(actor.Name + " line " + frame.Line +
+                             ": 'A_CheckFlag' takes a flag name such as \"AMBUSH\", so the jump is dropped");
+                frame.Action = "";
+                return;
+            }
+
+            var name = arguments[0][0].Text;
+            MobjFlags flag;
+
+            if (!ScriptActorApi.TryParseFlagName(name, out flag))
+            {
+                problems.Add(actor.Name + " line " + frame.Line + ": 'A_CheckFlag' names the flag '" +
+                             name + "', which this engine does not have, so the jump is dropped");
+                frame.Action = "";
+                return;
+            }
+
+            var label = ReadLabel(arguments[1], actor, frame, problems);
+
+            if (label == null)
+            {
+                frame.Action = "";
+                return;
+            }
+
+            var pointer = arguments.Count > 2
+                ? ReadPointer(arguments, 2, actor, frame, problems, "A_CheckFlag")
+                : ActorPointer.Default;
+
+            if (pointer < 0)
+            {
+                frame.Action = "";
+                return;
+            }
+
+            frame.JumpLabel = label;
+            frame.JumpCondition = "HasFlag(\"" + name + "\", " +
+                                  pointer.ToString(CultureInfo.InvariantCulture) + ")";
             frame.Action = "";
         }
 
@@ -4607,37 +4833,143 @@ namespace DPTDOOM.Scripting
             return true;
         }
 
-        private static void SkipRestOfFrame(Reader reader, ref int line)
+        /// <summary>
+        /// Consumes one frame modifier, returning whether the token was one.
+        ///
+        /// These sit between the tics and the action: `offset(x, y)` moves the sprite on screen, and
+        /// `Fast`, `Slow` and `NoDelay` change the tics the frame really lasts. This engine has no
+        /// per-frame sprite offset and takes the tics from the file as written, so each is named
+        /// once per actor and the frame is otherwise kept.
+        /// </summary>
+        private static bool ReadFrameModifier(Reader reader, ref int line, DecorateActor actor,
+                                              int frameLine, string text, IList<string> problems)
         {
-            // Only used after an unreadable sprite: the letters, tics and action of that frame
-            // are consumed so the next frame is read from a sane place.
-            var letters = reader.Next(ref line);
+            var name = text.ToUpperInvariant();
 
-            if (letters == null)
+            if (name == "OFFSET")
+            {
+                var open = reader.Next(ref line);
+
+                if (open == null || open.Text != "(")
+                {
+                    if (open != null)
+                    {
+                        reader.PushBack(open, ref line);
+                    }
+
+                    return false;
+                }
+
+                var depth = 1;
+
+                while (depth > 0)
+                {
+                    var token = reader.Next(ref line);
+
+                    if (token == null)
+                    {
+                        return true;
+                    }
+
+                    if (token.Text == "(")
+                    {
+                        depth++;
+                    }
+                    else if (token.Text == ")")
+                    {
+                        depth--;
+                    }
+                }
+
+                ReportFrameModifier(actor, frameLine, "offset",
+                    "sprite offsets are not part of this engine, so the sprite stays centred",
+                    problems);
+
+                return true;
+            }
+
+            if (name == "FAST" || name == "SLOW" || name == "NODELAY")
+            {
+                ReportFrameModifier(actor, frameLine, text,
+                    "this frame modifier is not part of this engine, so the tics are taken as written",
+                    problems);
+
+                return true;
+            }
+
+            return false;
+        }
+
+        private static void ReportFrameModifier(DecorateActor actor, int line, string name,
+                                                string consequence, IList<string> problems)
+        {
+            if (!actor.ReportedFrameModifiers.Add(name.ToUpperInvariant()))
             {
                 return;
             }
 
-            var next = reader.Next(ref line);
+            problems.Add(actor.Name + " line " + line + ": the frame modifier '" + name +
+                         "' is ignored - " + consequence);
+        }
 
-            if (next == null)
+        /// <summary>
+        /// Drops everything left on a line whose frame could not be read.
+        ///
+        /// By line, not by counting tokens. The counting version left the action's argument list
+        /// behind, so '(' , ',' and ')' were then read as the sprite names of following frames: one
+        /// unreadable line in ademo1.wad produced 10619 reports, almost all of them about tokens the
+        /// modder never wrote as sprites. DECORATE writes one frame per line, which makes the line
+        /// boundary the one place a reader can resynchronise without guessing.
+        /// </summary>
+        private static void SkipRestOfLine(Reader reader, ref int line, int frameLine)
+        {
+            while (true)
             {
-                return;
+                var token = reader.Next(ref line);
+
+                if (token == null)
+                {
+                    return;
+                }
+
+                if (token.Line != frameLine)
+                {
+                    // Belongs to the next line, so it is the next frame or a label.
+                    reader.PushBack(token, ref line);
+                    return;
+                }
+            }
+        }
+
+        /// <summary>
+        /// The sprite a "----" frame keeps: the last frame read for this actor, across chains.
+        ///
+        /// Across chains because that is what DECORATE means - the frame before this one in the
+        /// actor's own state list, which is how a corpse chain continues the death animation.
+        /// </summary>
+        private static string PreviousSprite(DecorateActor actor, StateChain chain)
+        {
+            if (chain.Frames.Count > 0)
+            {
+                return chain.Frames[chain.Frames.Count - 1].Sprite;
             }
 
-            if (!next.IsNumber)
+            for (var c = actor.Chains.Count - 1; c >= 0; c--)
             {
-                reader.PushBack(next, ref line);
-                return;
+                var other = actor.Chains[c];
+
+                if (other == chain)
+                {
+                    continue;
+                }
+
+                if (other.Frames.Count > 0)
+                {
+                    return other.Frames[other.Frames.Count - 1].Sprite;
+                }
             }
 
-            var action = reader.Next(ref line);
-
-            if (action != null && !IsActionName(action.Text) &&
-                !string.Equals(action.Text, "Bright", StringComparison.OrdinalIgnoreCase))
-            {
-                reader.PushBack(action, ref line);
-            }
+            return null;
         }
 
         private static void ReadFlag(DecorateActor actor, string name, bool value)

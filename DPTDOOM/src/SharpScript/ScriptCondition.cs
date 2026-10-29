@@ -209,6 +209,71 @@ namespace DPTDOOM.Scripting
 
                 return ScriptValue.FromInt(low + world.Random.Next() % (high - low + 1));
             });
+
+            // A_CheckFloor: the actor has come down. The comparison is the same one the original
+            // action makes, and it reads the floor the mover has already worked out, so a mod's
+            // jump agrees with where the actor actually stands.
+            target.Register("OnFloor", 0, call => ScriptValue.FromBool(Current().Z <= Current().FloorZ));
+
+            // A_CheckFlag: is a named flag set on one of the actor's pointers? The name is checked
+            // by the converter, but a hand-written script can still misspell it, so a wrong name is
+            // reported once instead of answering false for ever with no explanation.
+            target.Register("HasFlag", 2, call =>
+            {
+                var name = call.AsText(0);
+                var pointer = call.AsInt(1);
+
+                var actor = ActorPointer.Resolve(Current(), pointer);
+
+                // A pointer that leads nowhere is not an error: "the tracer has DONTTHRUST" is a
+                // perfectly good question with the answer "no" when there is no tracer.
+                if (actor == null)
+                {
+                    return ScriptValue.FromBool(false);
+                }
+
+                MobjFlags flag;
+
+                if (!TryFlag(name, out flag))
+                {
+                    throw call.Fail("no such flag '" + name + "'");
+                }
+
+                return ScriptValue.FromBool((actor.Flags & flag) != 0);
+            });
+        }
+
+        /// <summary>
+        /// Flag names already looked up, so a condition does not parse a string on every frame.
+        ///
+        /// A chasing monster asks its condition several times a second, and parsing the name on each
+        /// ask would put string work inside the simulation. The set of names a mod uses is tiny and
+        /// fixed once the file has loaded, which is exactly what a cache is for.
+        /// </summary>
+        private static readonly Dictionary<string, MobjFlags> knownFlags =
+            new Dictionary<string, MobjFlags>(StringComparer.OrdinalIgnoreCase);
+
+        private static bool TryFlag(string name, out MobjFlags flag)
+        {
+            lock (knownFlags)
+            {
+                if (knownFlags.TryGetValue(name, out flag))
+                {
+                    return true;
+                }
+            }
+
+            if (!ScriptActorApi.TryParseFlagName(name, out flag))
+            {
+                return false;
+            }
+
+            lock (knownFlags)
+            {
+                knownFlags[name] = flag;
+            }
+
+            return true;
         }
 
         private Mobj Current()
