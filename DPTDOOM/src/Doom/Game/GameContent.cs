@@ -689,6 +689,11 @@ namespace DPTDOOM
             // own copy of all three, and the two would drift.
             var converted = new System.Text.StringBuilder();
 
+            // A repeated actor is resolved, not refused: the later block wins, as it did in the
+            // ports these mods were written for. It goes to its own list because the problem
+            // report's consequence line would otherwise claim the actor kept the engine's values.
+            var decorateWarnings = new System.Collections.Generic.List<string>();
+
             // One compilation unit per source. Two sources may legitimately refine the same
             // actor; concatenating them as text made the script parser reject the second
             // Thing_3001 as a duplicate and lose both changes. Separate units apply in order,
@@ -700,7 +705,8 @@ namespace DPTDOOM
                     var text = DecorateConverter.Convert(
                         System.IO.File.ReadAllText(path),
                         DoomInfo.MobjInfos,
-                        decorateProblems);
+                        decorateProblems,
+                        decorateWarnings);
 
                     converted.Append(text);
 
@@ -729,7 +735,8 @@ namespace DPTDOOM
                     var text = DecorateConverter.Convert(
                         System.Text.Encoding.UTF8.GetString(wad.ReadLump(decorateLumps[i])),
                         DoomInfo.MobjInfos,
-                        lumpProblems);
+                        lumpProblems,
+                        decorateWarnings);
 
                     converted.Append(text);
 
@@ -772,6 +779,21 @@ namespace DPTDOOM
             foreach (var problem in library.Problems)
             {
                 LoadReport.Add("script problem", problem, "that script is skipped, the actor keeps its old behaviour");
+            }
+
+            foreach (var warning in decorateWarnings)
+            {
+                LoadReport.Add("duplicate definition", warning,
+                    "the later definition is used; the file still loads");
+            }
+
+            foreach (var warning in library.Warnings)
+            {
+                // Not a problem: the later definition won and the file is in use. Old ports warned
+                // about a repeated actor and newer ones refuse it; a mod written for the older
+                // behaviour must load, and the line says which definition was replaced.
+                LoadReport.Add("duplicate definition", warning,
+                    "the later definition is used; the file still loads");
             }
 
             // Two different outcomes, told apart on purpose. A script that fails to parse is

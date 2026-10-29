@@ -523,13 +523,21 @@ namespace DPTDOOMTest.UnitTests
         }
 
         [TestMethod]
-        public void ADuplicateFunctionIsRefused()
+        public void ADuplicateFunctionReplacesTheEarlierOne()
         {
-            // Almost always a paste that was meant to be renamed; keeping one silently
-            // makes the other look like it does nothing.
-            var error = Fails("fn Main() { return 1; } fn Main() { return 2; }");
+            // Older ports warned about a repeated actor and used the later block; newer ones refuse
+            // the file. Refusing is what makes an old WAD unusable, and it used to cost every other
+            // actor in the same file as well, so the later definition wins and the duplicate is a
+            // warning rather than a parse failure.
+            var unit = ScriptParser.Parse("fn Main() { return 1; } fn Main() { return 2; }");
 
-            StringAssert.Contains(error.Message, "defined twice");
+            Assert.AreEqual(1, unit.Functions.Count, "one function survives");
+            Assert.AreEqual(1, unit.Warnings.Count, "and the duplicate is still reported");
+            StringAssert.Contains(unit.Warnings[0], "defined again");
+
+            var interpreter = new ScriptInterpreter(unit, new ScriptHost());
+            Assert.AreEqual(2, interpreter.Call("Main").AsInt(),
+                "the later definition is the one that runs");
         }
 
         [TestMethod]

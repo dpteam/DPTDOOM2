@@ -124,17 +124,27 @@ namespace DPTDOOM.Scripting
 
                 var name = Expect(TokenKind.Identifier, "a function name").Text;
 
-                if (unit.Find(name) != null)
+                // A repeated name replaces the earlier definition and is warned about, not refused.
+                //
+                // This is the older ports' behaviour, and it is the one that keeps old WADs
+                // playable: a file that declares the same actor twice is usually a patch applied on
+                // top of itself, and the later block is the one the author meant. Throwing here cost
+                // the whole file - every other actor in it as well - over a duplicate that the
+                // engine can resolve without guessing.
+                var existing = unit.Find(name);
+
+                if (existing != null)
                 {
-                    // Reported rather than shadowed: a duplicate is almost always a
-                    // paste that was meant to be renamed, and silently keeping one of the
-                    // two makes the other look like it has no effect.
-                    throw new ScriptException("'" + name + "' is defined twice", start.Line);
+                    unit.Warnings.Add("line " + start.Line + ": '" + name + "' is defined again; " +
+                                      "the definition at line " + existing.Line +
+                                      " is replaced by this one");
                 }
 
-                var declaration = new FunctionDeclaration();
+                var declaration = existing ?? new FunctionDeclaration();
+
                 declaration.Name = name;
                 declaration.Line = start.Line;
+                declaration.Parameters.Clear();
 
                 Expect(TokenKind.LeftParen, "'(' after the function name");
 
@@ -157,7 +167,11 @@ namespace DPTDOOM.Scripting
 
                 Expect(TokenKind.RightParen, "')'");
                 declaration.Body = ParseBlock();
-                unit.Functions.Add(declaration);
+
+                if (existing == null)
+                {
+                    unit.Functions.Add(declaration);
+                }
             }
 
             if (unit.Functions.Count == 0)

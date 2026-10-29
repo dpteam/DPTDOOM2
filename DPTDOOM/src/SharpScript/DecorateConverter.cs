@@ -459,6 +459,21 @@ namespace DPTDOOM.Scripting
         /// </summary>
         public static string Convert(string text, MobjInfo[] table, IList<string> problems)
         {
+            return Convert(text, table, problems, null);
+        }
+
+        /// <summary>
+        /// Converts, telling warnings apart from problems.
+        ///
+        /// A warning is something the converter resolved without losing anything - a repeated actor
+        /// whose later block replaced the earlier one. It must not be counted as a problem: the actor
+        /// <b>was</b> changed, and the report's problem line says "keeps the engine's values", which
+        /// would be a lie. When no warning list is given the notice goes to
+        /// <paramref name="problems"/>, so it is never dropped silently.
+        /// </summary>
+        public static string Convert(string text, MobjInfo[] table, IList<string> problems,
+                                     IList<string> warnings)
+        {
             var actors = Parse(text, problems);
             var script = new StringBuilder();
 
@@ -468,6 +483,13 @@ namespace DPTDOOM.Scripting
             // belongs to, or one defined later in the file, so registering names as a side effect of
             // emission would make valid references depend on their position in the text.
             var targets = new Dictionary<DecorateActor, MobjInfo>();
+
+            // The block that finally describes each DoomEdNum. A file that declares the same actor
+            // twice - a patch applied on top of itself, which old mods do - must not produce two
+            // functions with one name: the script parser would refuse the whole file and every
+            // other actor in it. The later block wins, as it did in the ports these mods were
+            // written for, and the earlier one is named in the report.
+            var winners = new Dictionary<int, DecorateActor>();
 
             foreach (var actor in actors)
             {
@@ -480,11 +502,56 @@ namespace DPTDOOM.Scripting
 
                 targets[actor] = target;
 
+                DecorateActor previous;
+
+                if (winners.TryGetValue(target.DoomEdNum, out previous))
+                {
+                    string notice;
+
+                    if (string.Equals(previous.Name, actor.Name, StringComparison.OrdinalIgnoreCase))
+                    {
+                        notice = actor.Name + " line " + actor.Line +
+                                 ": the actor is defined again; this definition replaces the one " +
+                                 "at line " + previous.Line + ", which is what older ports did";
+                    }
+                    else
+                    {
+                        notice = actor.Name + " line " + actor.Line + ": DoomEdNum " +
+                                 target.DoomEdNum.ToString(CultureInfo.InvariantCulture) +
+                                 " is already used by '" + previous.Name + "' at line " +
+                                 previous.Line + "; the map places this later actor instead";
+                    }
+
+                    if (warnings != null)
+                    {
+                        warnings.Add(notice);
+                    }
+                    else
+                    {
+                        problems.Add(notice);
+                    }
+                }
+
+                winners[target.DoomEdNum] = actor;
+            }
+
+            foreach (var actor in actors)
+            {
+                MobjInfo target;
+
+                if (!targets.TryGetValue(actor, out target) || winners[target.DoomEdNum] != actor)
+                {
+                    continue;
+                }
+
                 // The friendly name is needed by A_SpawnItemEx and by a later block that refines
                 // the same actor. Register it for every real target, not only for an unnumbered
                 // actor: a mod may give a custom actor an explicit spawnid and then spawn it by
                 // name. The name is registered only after a real target exists, so a refused block
                 // cannot leave a name pointing at nothing.
+                //
+                // Only the winner is registered: a name whose definition was replaced does not
+                // exist any more, and letting it spawn the replacement would be a silent mismatch.
                 ActorNames.Register(actor.Name, DoomInfo.TypeOf(target.DoomEdNum));
             }
 
@@ -492,8 +559,10 @@ namespace DPTDOOM.Scripting
             {
                 MobjInfo target;
 
-                if (!targets.TryGetValue(actor, out target))
+                if (!targets.TryGetValue(actor, out target) || winners[target.DoomEdNum] != actor)
                 {
+                    // A replaced definition contributes nothing: reporting its refused properties
+                    // would describe an actor that no longer exists.
                     continue;
                 }
 

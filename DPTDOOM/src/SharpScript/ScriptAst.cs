@@ -166,6 +166,16 @@ namespace DPTDOOM.Scripting
     {
         public readonly List<FunctionDeclaration> Functions = new List<FunctionDeclaration>();
 
+        /// <summary>
+        /// Things the parser accepted but a reader should know about.
+        ///
+        /// Separate from a parse failure on purpose. A file that defines the same function twice
+        /// still describes a usable actor - the later definition wins - so the file must load. Saying
+        /// so as an error would take the whole file away from the player over a duplicate that older
+        /// ports merely warned about.
+        /// </summary>
+        public readonly List<string> Warnings = new List<string>();
+
         public FunctionDeclaration Find(string name)
         {
             foreach (var function in Functions)

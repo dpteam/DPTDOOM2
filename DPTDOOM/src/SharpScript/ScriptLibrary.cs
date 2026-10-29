@@ -52,6 +52,7 @@ namespace DPTDOOM.Scripting
         private readonly List<Compiled> compiled = new List<Compiled>();
         private readonly List<ActorPatch> patches = new List<ActorPatch>();
         private readonly List<string> problems = new List<string>();
+        private readonly List<string> warnings = new List<string>();
 
         private bool applied;
 
@@ -67,6 +68,20 @@ namespace DPTDOOM.Scripting
         public IList<string> Problems
         {
             get { return problems; }
+        }
+
+        /// <summary>
+        /// What the loader resolved without failing: a duplicate definition that the later block
+        /// replaced, for instance.
+        ///
+        /// Separate from <see cref="Problems"/> because the two are different outcomes. A warning
+        /// means the script took effect; an entry in the problem list means it did not, and the
+        /// console says "Failed" for it. Folding the first into the second would tell the player a
+        /// working file is broken, which is exactly the report nobody reads twice.
+        /// </summary>
+        public IList<string> Warnings
+        {
+            get { return warnings; }
         }
 
         /// <summary>
@@ -88,6 +103,13 @@ namespace DPTDOOM.Scripting
             {
                 problems.Add(source + ": " + e.Message);
                 return;
+            }
+
+            // Carried over before the actor scan: a duplicate function is resolved by the parser,
+            // and the caller has to hear about it even when every actor name in the file is fine.
+            foreach (var warning in unit.Warnings)
+            {
+                warnings.Add(source + " " + warning);
             }
 
             var named = 0;
