@@ -100,6 +100,26 @@ namespace DPTDOOM
         private Fixed viewPitch;
 
         /// <summary>
+        /// A yaw offset added to the camera without turning the actor.
+        ///
+        /// Presentation, exactly like <see cref="viewPitch"/>: not in the tic commands, not in a
+        /// demo, not in the world hash. A director needs to point the camera somewhere other than
+        /// where the player is facing - a shot from the side, a turntable, a locked-off angle - and
+        /// doing that by rotating the mobj would change what it shoots at.
+        /// </summary>
+        private Angle viewYaw;
+
+        /// <summary>
+        /// The camera offsets asked for on the command line, used when there is no input device.
+        ///
+        /// Without this, <c>-pitch</c> and <c>-yaw</c> did nothing in a headless or render run:
+        /// <see cref="UpdateViewPitch"/> zeroes the tilt when it has no mouse to read, which is
+        /// right for a window that lost its input and wrong for a camera that was set on purpose.
+        /// </summary>
+        private Fixed fixedViewPitch;
+        private Angle fixedViewYaw;
+
+        /// <summary>
         /// How far the view may tilt, in virtual pixels.
         ///
         /// A third of the screen. Beyond that the shear starts to show as stretched
@@ -115,6 +135,9 @@ namespace DPTDOOM
         }
 
         public Fixed ViewPitch => viewPitch;
+
+        /// <summary>The camera's yaw offset, for the renderer only.</summary>
+        public Angle ViewYaw => viewYaw;
 
         /// <summary>
         /// The console, so the renderer can draw it and tests can drive it.
@@ -268,6 +291,15 @@ namespace DPTDOOM
             {
                 config.view_freelook = true;
                 viewPitch = Fixed.FromInt(MathEx.Clamp(args.pitch.Value, -PitchLimit, PitchLimit));
+                fixedViewPitch = viewPitch;
+            }
+
+            // A camera angle offset, for a render or a screenshot. Kept out of the world: the actor
+            // still faces where the input says, only the picture looks elsewhere.
+            if (args.yaw.Present)
+            {
+                viewYaw = Angle.FromDegree(args.yaw.Value);
+                fixedViewYaw = viewYaw;
             }
 
             if (args.profiler.Present)
@@ -1136,9 +1168,20 @@ namespace DPTDOOM
         /// </summary>
         private void UpdateViewPitch()
         {
-            if (userInput == null || !config.view_freelook)
+            if (userInput == null)
+            {
+                // No input device - a headless run, a render, a dedicated server. The camera is
+                // whatever the command line asked for: zeroing it here is what made -pitch do
+                // nothing outside the window.
+                viewPitch = fixedViewPitch;
+                viewYaw = fixedViewYaw;
+                return;
+            }
+
+            if (!config.view_freelook)
             {
                 viewPitch = Fixed.Zero;
+                viewYaw = fixedViewYaw;
                 return;
             }
 

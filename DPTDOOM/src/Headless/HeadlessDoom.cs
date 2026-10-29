@@ -122,6 +122,14 @@ namespace DPTDOOM.Headless
 
             using (var content = new GameContent(args))
             {
+                // A frame sequence is its own loop: it advances by whole frames at a fixed rate
+                // rather than by whatever the machine managed, and it writes a file per frame. The
+                // two loops share the game, not the timing.
+                if (args.render.Present)
+                {
+                    return RenderSequence.Run(args, config, content);
+                }
+
                 var video = new HeadlessVideo(config, content);
 
         if (args.profile.Present && video.Profile != null)

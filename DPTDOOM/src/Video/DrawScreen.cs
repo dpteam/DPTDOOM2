@@ -26,6 +26,16 @@ namespace DPTDOOM.Video
         private int height;
         private byte[] data;
 
+        /// <summary>
+        /// One byte per pixel: 1 where something was drawn, 0 where the screen is still empty.
+        ///
+        /// The frame-sequence render mode writes the HUD and the weapon as separate layers for
+        /// compositing, and a layer has to say which pixels it owns. The alternative - a magic
+        /// palette index as a key - fails on a mod whose HUD happens to use that colour, and it
+        /// cannot express a soft edge. Allocated lazily, so an ordinary run never pays for it.
+        /// </summary>
+        private byte[] covered;
+
         private Patch[] chars;
 
         public DrawScreen(Wad wad, int width, int height)
@@ -155,6 +165,7 @@ namespace DPTDOOM.Video
                     for (; i < drawLength; i++)
                     {
                         data[p] = column.Data[sourceIndex + frac.ToIntFloor()];
+                        Mark(p);
                         p++;
                         frac += step;
                     }
@@ -164,6 +175,7 @@ namespace DPTDOOM.Video
                     for (; i < drawLength; i++)
                     {
                         data[p] = translation[column.Data[sourceIndex + frac.ToIntFloor()]];
+                        Mark(p);
                         p++;
                         frac += step;
                     }
@@ -508,6 +520,7 @@ namespace DPTDOOM.Video
                 for (var i = 0; i < h; i++)
                 {
                     data[pos] = (byte)color;
+                    Mark(pos);
                     pos++;
                 }
             }
@@ -641,6 +654,7 @@ namespace DPTDOOM.Video
                 while (true)
                 {
                     data[height * x + y] = (byte)color;
+                    Mark(height * x + y);
 
                     if (x == x2)
                     {
@@ -663,6 +677,7 @@ namespace DPTDOOM.Video
                 while (true)
                 {
                     data[height * x + y] = (byte)color;
+                    Mark(height * x + y);
 
                     if (y == y2)
                     {
@@ -684,6 +699,36 @@ namespace DPTDOOM.Video
         public int Width => width;
         public int Height => height;
         public byte[] Data => data;
+
+        /// <summary>
+        /// Starts a new layer: forgets what was covered and leaves the pixels as they are.
+        ///
+        /// The pixels do not need clearing for a keyed layer, because a pixel that was not drawn
+        /// is written as transparent and its colour is never read.
+        /// </summary>
+        public void BeginLayer()
+        {
+            if (covered == null)
+            {
+                covered = new byte[data.Length];
+            }
+            else
+            {
+                Array.Clear(covered, 0, covered.Length);
+            }
+        }
+
+        /// <summary>Which pixels of the current layer were drawn, or null before the first layer.</summary>
+        public byte[] Covered => covered;
+
+        /// <summary>Marks one pixel as drawn. A no-op until a layer has begun.</summary>
+        private void Mark(int index)
+        {
+            if (covered != null)
+            {
+                covered[index] = 1;
+            }
+        }
 
         /// <summary>
         /// Flips a rectangle left to right, in place.

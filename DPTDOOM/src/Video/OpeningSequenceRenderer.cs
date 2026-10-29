@@ -45,7 +45,7 @@ namespace DPTDOOM.Video
                     break;
 
                 case OpeningSequenceState.Demo:
-                    parent.RenderGame(sequence.DemoGame, frameFrac, Fixed.Zero);
+                    parent.RenderGame(sequence.DemoGame, frameFrac, Fixed.Zero, Angle.Ang0);
                     break;
 
                 case OpeningSequenceState.Credit:

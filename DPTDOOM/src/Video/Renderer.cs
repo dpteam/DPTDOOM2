@@ -23,6 +23,53 @@ namespace DPTDOOM.Video
 {
     public sealed class Renderer
     {
+        /// <summary>
+        /// What one render call draws, for the frame-sequence render mode.
+        ///
+        /// A machinima wants the level, the weapon and the HUD apart: the weapon on a transparent
+        /// background can be put over a different shot, and a HUD drawn separately survives a
+        /// reframe without being stretched. Full is the ordinary game frame and the only mode the
+        /// window ever uses.
+        /// </summary>
+        public enum Layer
+        {
+            Full,
+            World,
+            Weapon,
+            Hud
+        }
+
+        /// <summary>Which parts of the frame the next render draws.</summary>
+        public Layer RenderLayer = Layer.Full;
+
+        /// <summary>
+        /// Writes alpha 0 where nothing was drawn, instead of a background colour.
+        ///
+        /// Only meaningful for <see cref="Layer.World"/>, <see cref="Layer.Weapon"/> and
+        /// <see cref="Layer.Hud"/>: those are layers to composite, and a layer with an opaque
+        /// background is a rectangle of black over the shot underneath.
+        /// </summary>
+        public bool KeyedLayer;
+
+        /// <summary>Which pixels the last layer actually drew, or null for a full frame.</summary>
+        public byte[] Covered => screen.Covered;
+
+        /// <summary>
+        /// A colour grade applied to the palette table, for a render.
+        ///
+        /// The renderer works in palette indices and converts once per frame, so grading the 256
+        /// entries costs nothing per pixel and cannot touch the world: it is the same picture with
+        /// a different lookup, which is exactly what a machinima needs - a night scene, a flashback,
+        /// a colour that matches a title card. Doing it by tinting the framebuffer afterwards would
+        /// be the same result for more work.
+        ///
+        /// Off unless asked for, and applied to whichever palette the frame uses, so a mod's own
+        /// damage flash is graded along with everything else.
+        /// </summary>
+        public PaletteGrade Grade;
+
+        private uint[] graded = new uint[256];
+
         private static double[] gammaCorrectionParameters = new double[]
         {
             1.00,
@@ -75,7 +122,6 @@ namespace DPTDOOM.Video
         public Renderer(Config config, GameContent content)
         {
             this.config = config;
-
             palette = content.Palette;
 
             if (config.video_highresolution)
@@ -118,11 +164,11 @@ namespace DPTDOOM.Video
             }
             else if (doom.State == DoomState.DemoPlayback)
             {
-                RenderGame(doom.DemoPlayback.Game, frameFrac, doom.ViewPitch);
+                RenderGame(doom.DemoPlayback.Game, frameFrac, doom.ViewPitch, doom.ViewYaw);
             }
             else if (doom.State == DoomState.Game)
             {
-                RenderGame(doom.Game, frameFrac, doom.ViewPitch, doom.ChatLines);
+                RenderGame(doom.Game, frameFrac, doom.ViewPitch, doom.ViewYaw, doom.ChatLines);
             }
 
             if (!doom.Menu.Active)
@@ -159,7 +205,7 @@ namespace DPTDOOM.Video
         {
             config.hud_crosshair = crosshair;
 
-            RenderGame(game, Fixed.One, viewPitch);
+            RenderGame(game, Fixed.One, viewPitch, Angle.Ang0);
 
             var colors = palette[0];
             WriteData(colors, destination);
@@ -173,7 +219,8 @@ namespace DPTDOOM.Video
             }
         }
 
-        public void RenderGame(DoomGame game, Fixed frameFrac, Fixed viewPitch, ChatLog chatLines = null)
+        public void RenderGame(DoomGame game, Fixed frameFrac, Fixed viewPitch, Angle viewYaw,
+                               ChatLog chatLines = null)
         {
             if (game.Paused)
             {
@@ -207,7 +254,8 @@ namespace DPTDOOM.Video
                     threeD.ProfilerLevel = config.hud_profiler;
                     threeD.RoflMode = config.rofl_mode;
                     threeD.Stats = stats;
-                    threeD.Render(displayPlayer, frameFrac, viewPitch);
+                    threeD.SkipPlayerSprites = RenderLayer == Layer.World;
+                    threeD.Render(displayPlayer, frameFrac, viewPitch, viewYaw);
 
                     var hudStart = Profile.Stamp();
                     if (threeD.WindowSize < 8)
@@ -225,47 +273,9 @@ namespace DPTDOOM.Video
                 var messageScale = screen.Width / 320;
                 var messageBottom = screen.Height - StatusBarRenderer.Height * messageScale;
 
-                // Chat first, at the top, because it is the thing a player missed while fighting
-                // and needs to be able to look up and read. It has its own log now: a pickup
-                // message used to overwrite the last chat line, and eight seconds was the whole
-                // memory of the conversation.
-                var chatStart = Profile.Stamp();
-
-                var drawnChatLines = ChatLogRenderer.Render(screen,
-                                                           chatLines == null
-                                                               ? null
-                                                               : chatLines.Entries,
-                                                           messageScale, messageBottom);
-
-                Profile.Add(RenderProfile.Section.Hud, Profile.Stamp() - chatStart);
-
-                if (config.video_displaymessage ||
-                    consolePlayer.MessageAlwaysShown ||
-                    ReferenceEquals(consolePlayer.Message, (string)DoomInfo.Strings.MSGOFF))
+                if (RenderLayer == Layer.Full)
                 {
-                    if (consolePlayer.MessageTime > 0)
-                    {
-                        var hudStart = Profile.Stamp();
-
-                        // Below the chat log, so the two do not sit on top of each other. While
-                        // typing, this line is "Say: ..." and the log above it is the conversation.
-                        var messageY = drawnChatLines > 0
-                            ? (ChatLogRenderer.TopMargin + drawnChatLines * 8 + 2) * messageScale
-                            : 7 * messageScale;
-
-                        // Wrapped, because a message may be ninety-six characters and the screen
-                        // holds about forty per line. Drawing it as one line silently cut the rest
-                        // off at the right edge.
-                        //
-                        // The bottom is the top of the status bar, not the bottom of the screen.
-                        // The bar is drawn before this, so a message long enough to reach it would
-                        // be painted on top of the health and ammo - which reads as a rendering
-                        // fault rather than as a long message.
-                        screen.DrawTextWrapped(consolePlayer.Message, 0, messageY, messageScale,
-                                               messageBottom);
-
-                        Profile.Add(RenderProfile.Section.Hud, Profile.Stamp() - hudStart);
-                    }
+                    DrawHudText(consolePlayer, chatLines, messageScale, messageBottom);
                 }
             }
             else if (game.State == GameState.Intermission)
@@ -275,6 +285,60 @@ namespace DPTDOOM.Video
             else if (game.State == GameState.Finale)
             {
                 finale.Render(game.Finale);
+            }
+        }
+
+        /// <summary>
+        /// The chat log and the message line, which sit over the status bar.
+        ///
+        /// Split out so the HUD layer of a render can draw them without the world: the two passes
+        /// must produce the same pixels, or a composited HUD would not match the flat frame it
+        /// replaces.
+        /// </summary>
+        private void DrawHudText(Player consolePlayer, ChatLog chatLines,
+                                 int messageScale, int messageBottom)
+        {
+            // Chat first, at the top, because it is the thing a player missed while fighting
+            // and needs to be able to look up and read. It has its own log now: a pickup
+            // message used to overwrite the last chat line, and eight seconds was the whole
+            // memory of the conversation.
+            var chatStart = Profile.Stamp();
+
+            var drawnChatLines = ChatLogRenderer.Render(screen,
+                                                       chatLines == null
+                                                           ? null
+                                                           : chatLines.Entries,
+                                                       messageScale, messageBottom);
+
+            Profile.Add(RenderProfile.Section.Hud, Profile.Stamp() - chatStart);
+
+            if (config.video_displaymessage ||
+                consolePlayer.MessageAlwaysShown ||
+                ReferenceEquals(consolePlayer.Message, (string)DoomInfo.Strings.MSGOFF))
+            {
+                if (consolePlayer.MessageTime > 0)
+                {
+                    var hudStart = Profile.Stamp();
+
+                    // Below the chat log, so the two do not sit on top of each other. While
+                    // typing, this line is "Say: ..." and the log above it is the conversation.
+                    var messageY = drawnChatLines > 0
+                        ? (ChatLogRenderer.TopMargin + drawnChatLines * 8 + 2) * messageScale
+                        : 7 * messageScale;
+
+                    // Wrapped, because a message may be ninety-six characters and the screen
+                    // holds about forty per line. Drawing it as one line silently cut the rest
+                    // off at the right edge.
+                    //
+                    // The bottom is the top of the status bar, not the bottom of the screen.
+                    // The bar is drawn before this, so a message long enough to reach it would
+                    // be painted on top of the health and ammo - which reads as a rendering
+                    // fault rather than as a long message.
+                    screen.DrawTextWrapped(consolePlayer.Message, 0, messageY, messageScale,
+                                           messageBottom);
+
+                    Profile.Add(RenderProfile.Section.Hud, Profile.Stamp() - hudStart);
+                }
             }
         }
 
@@ -293,7 +357,61 @@ namespace DPTDOOM.Video
 
             stats = doom.Stats;
 
+            // A layer starts from a clean slate: what a layer owns is decided by what it draws, and
+            // pixels left over from the previous frame would be claimed as part of it.
+            if (RenderLayer != Layer.Full)
+            {
+                screen.BeginLayer();
+            }
+
+            RenderLayerInto(doom, frameFrac);
+
+            var colors = SelectPalette(doom);
+
+            if (Grade != null && !Grade.IsIdentity)
+            {
+                Grade.Apply(colors, graded);
+                colors = graded;
+            }
+
+            var convertStart = Profile.Stamp();
+            WriteData(colors, destination);
+            Profile.Add(RenderProfile.Section.Convert, Profile.Stamp() - convertStart);
+
+            Profile.EndFrame();
+        }
+
+        /// <summary>
+        /// Draws whatever the current layer asks for, and nothing else.
+        ///
+        /// The layer switch lives here rather than in each screen because the parts of a frame are
+        /// not separated by class: the status bar, the chat log and the message line are all drawn
+        /// inside the game pass, and the weapon is drawn by the world renderer. Splitting them
+        /// means saying "which of these am I drawing now" in one place.
+        /// </summary>
+        private void RenderLayerInto(Doom doom, Fixed frameFrac)
+        {
+            if (RenderLayer == Layer.Hud)
+            {
+                RenderHudOnly(doom);
+                return;
+            }
+
+            if (RenderLayer == Layer.Weapon)
+            {
+                RenderWeaponOnly(doom);
+                return;
+            }
+
             RenderDoom(doom, frameFrac);
+
+            if (RenderLayer == Layer.World)
+            {
+                // No menu and no console: a layer is footage, and a menu in the middle of a take is
+                // an accident rather than a choice.
+                return;
+            }
+
             RenderMenu(doom);
 
             // The console goes over everything, including the menu: it is the one
@@ -302,7 +420,67 @@ namespace DPTDOOM.Video
             {
                 console.Render(doom.ConsoleOverlay, doom.FrameCount);
             }
+        }
 
+        private void RenderWeaponOnly(Doom doom)
+        {
+            var game = CurrentGame(doom);
+
+            if (game == null || game.State != GameState.Level || game.World == null)
+            {
+                return;
+            }
+
+            threeD.SkipWorld = true;
+            threeD.SkipPlayerSprites = false;
+
+            try
+            {
+                threeD.Render(game.World.DisplayPlayer, frameFrac: Fixed.One,
+                    viewPitch: doom.ViewPitch, viewYaw: doom.ViewYaw);
+            }
+            finally
+            {
+                threeD.SkipWorld = false;
+            }
+        }
+
+        private void RenderHudOnly(Doom doom)
+        {
+            var game = CurrentGame(doom);
+
+            if (game == null || game.State != GameState.Level || game.World == null)
+            {
+                return;
+            }
+
+            var consolePlayer = game.World.ConsolePlayer;
+
+            statusBar.Render(consolePlayer, true);
+
+            var messageScale = screen.Width / 320;
+            var messageBottom = screen.Height - StatusBarRenderer.Height * messageScale;
+
+            DrawHudText(consolePlayer, doom.ChatLines, messageScale, messageBottom);
+        }
+
+        private static DoomGame CurrentGame(Doom doom)
+        {
+            if (doom.State == DoomState.Game)
+            {
+                return doom.Game;
+            }
+
+            if (doom.State == DoomState.DemoPlayback)
+            {
+                return doom.DemoPlayback.Game;
+            }
+
+            return null;
+        }
+
+        private uint[] SelectPalette(Doom doom)
+        {
             var colors = palette[0];
             if (doom.State == DoomState.Game &&
                 doom.Game.State == GameState.Level &&
@@ -322,11 +500,7 @@ namespace DPTDOOM.Video
                 colors = palette[GetPaletteNumber(doom.DemoPlayback.Game.World.ConsolePlayer)];
             }
 
-            var convertStart = Profile.Stamp();
-            WriteData(colors, destination);
-            Profile.Add(RenderProfile.Section.Convert, Profile.Stamp() - convertStart);
-
-            Profile.EndFrame();
+            return colors;
         }
 
         private void RenderWipe(Doom doom, byte[] destination)

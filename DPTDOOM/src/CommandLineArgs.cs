@@ -17,6 +17,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 
@@ -99,6 +100,64 @@ namespace DPTDOOM
         public readonly Arg<int> stateat;
         public readonly Arg<string> shot;
         public readonly Arg version;
+
+        /// <summary>
+        /// Where to write a numbered frame sequence, or absent.
+        ///
+        /// A render is not a screenshot: it is every frame of a run, named
+        /// <c>frame_00000.png</c> upwards, at a fixed frame rate and a fixed number of tics, so the
+        /// same command produces the same frames. That is what makes it usable as footage rather
+        /// than as a picture - an external tool assembles the frames into a video, and a take that
+        /// cannot be repeated cannot be edited.
+        /// </summary>
+        public readonly Arg<string> render;
+
+        /// <summary>Frames per simulated tic, so 1 is 35 fps and 2 is 70.</summary>
+        public readonly Arg<int> renderfps;
+
+        /// <summary>
+        /// Resolution multiplier over 320x200: 1 is 320x200, 2 is 640x400, 3 is 960x600.
+        ///
+        /// The renderer is built for 320x200 scaled by a whole number, which is why this is a
+        /// multiplier and not a width: a fractional scale would put the status bar and the
+        /// crosshair on half pixels.
+        /// </summary>
+        public readonly Arg<int> renderres;
+
+        /// <summary>
+        /// Tics to simulate before recording starts.
+        ///
+        /// The level-start wipe takes a variable number of updates - it seeds its column heights
+        /// from the clock - so a recording that begins at the first frame cannot be repeated. It
+        /// also usually begins on a black screen. Skipping a few tics solves both, and gives a
+        /// director a way to start on the moment that matters.
+        /// </summary>
+        public readonly Arg<int> renderskip;
+
+        /// <summary>
+        /// A yaw offset in degrees, added to the camera without turning the player.
+        ///
+        /// Presentation, like <see cref="pitch"/>: not in the tic commands, not in a demo, not in
+        /// the world hash. It exists so a camera can look where the director wants while the actor
+        /// still moves where the input says.
+        /// </summary>
+        public readonly Arg<int> yaw;
+
+        /// <summary>Which part of the frame to render: full, world, weapon or hud.</summary>
+        public readonly Arg<string> renderlayer;
+
+        /// <summary>How an empty pixel of a layer is written: green (default) or alpha.</summary>
+        public readonly Arg<string> renderkey;
+
+        /// <summary>A named colour grade: night, noir, sepia, vivid.</summary>
+        public readonly Arg<string> grade;
+
+        /// <summary>Grade parameters, when a preset is not what is wanted.</summary>
+        public readonly Arg<double> saturation;
+        public readonly Arg<string> tint;
+        public readonly Arg<double> brightness;
+        public readonly Arg<double> contrast;
+        public readonly Arg<int> posterise;
 
         public readonly Arg<string> net;
         public readonly Arg<int> port;
@@ -298,6 +357,32 @@ namespace DPTDOOM
             stateat = GetInt(args, "-stateat");
             shot = GetString(args, "-shot");
             version = new Arg(args.Contains("-version") || args.Contains("--version"));
+
+            // A render is headless by definition: there is no window to show it in, and drawing to
+            // one would make the frame rate depend on the machine.
+            render = GetString(args, "-render");
+            renderfps = GetInt(args, "-renderfps");
+            renderres = GetInt(args, "-renderres");
+            renderskip = GetInt(args, "-renderskip");
+            yaw = GetInt(args, "-yaw");
+
+            renderlayer = GetString(args, "-renderlayer");
+            renderkey = GetString(args, "-renderkey");
+            grade = GetString(args, "-grade");
+            saturation = GetDouble(args, "-saturation");
+            tint = GetString(args, "-tint");
+            brightness = GetDouble(args, "-brightness");
+            contrast = GetDouble(args, "-contrast");
+            posterise = GetInt(args, "-posterise");
+
+            if (render.Present)
+            {
+                // A frame sequence is not something a window can show: it is written frame by
+                // frame as fast as the machine manages. Asking for one therefore asks for headless,
+                // the same way -dedicated does, so a caller cannot accidentally get a window it
+                // then has to close.
+                headless = new Arg(true);
+            }
 
             net = GetString(args, "-net");
 
@@ -591,6 +676,29 @@ namespace DPTDOOM
             }
 
             return new Arg<int>();
+        }
+
+        /// <summary>
+        /// A decimal argument, parsed with the invariant culture.
+        ///
+        /// A grade is a number a script writes, and a machine with a comma for a decimal separator
+        /// would otherwise read "0,8" as one and "0.8" as nothing - which fails silently, as a
+        /// default value.
+        /// </summary>
+        private static Arg<double> GetDouble(string[] args, string name)
+        {
+            var values = GetValues(args, name);
+            if (values.Length == 1)
+            {
+                double result;
+                if (double.TryParse(values[0], NumberStyles.Float, CultureInfo.InvariantCulture,
+                                    out result))
+                {
+                    return new Arg<double>(result);
+                }
+            }
+
+            return new Arg<double>();
         }
 
         private static string[] GetValues(string[] args, string name)

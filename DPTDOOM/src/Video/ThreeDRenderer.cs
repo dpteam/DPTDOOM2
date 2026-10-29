@@ -810,6 +810,18 @@ namespace DPTDOOM.Video
         }
 
         /// <summary>
+        /// Skips the level itself, leaving only the weapon.
+        ///
+        /// For a render layer: the weapon drawn on a transparent background can be composited over
+        /// anything, and a director can put a real gun over a different shot. The setup still runs,
+        /// because the weapon's position depends on the same view state the world uses.
+        /// </summary>
+        public bool SkipWorld;
+
+        /// <summary>Skips the weapon, leaving only the level.</summary>
+        public bool SkipPlayerSprites;
+
+        /// <summary>
         /// Draws the world with an optional vertical tilt.
         ///
         /// The tilt is a shear of the projection: the horizon moves up or down the
@@ -825,6 +837,19 @@ namespace DPTDOOM.Video
         /// </summary>
         public void Render(Player player, Fixed frameFrac, Fixed viewPitch)
         {
+            Render(player, frameFrac, viewPitch, Angle.Ang0);
+        }
+
+        /// <summary>
+        /// Draws the world with a camera yaw offset, which turns the picture without turning the
+        /// actor.
+        ///
+        /// The offset goes into the camera angle only: the mobj keeps the angle the input gave it,
+        /// so what it shoots at does not change. That is the whole point - a director can put the
+        /// camera beside the player, or behind a corner, and the simulation is not told.
+        /// </summary>
+        public void Render(Player player, Fixed frameFrac, Fixed viewPitch, Angle viewYaw)
+        {
             this.frameFrac = frameFrac;
 
             ApplyViewPitch(viewPitch);
@@ -836,7 +861,7 @@ namespace DPTDOOM.Video
             viewX = player.Mobj.GetInterpolatedX(frameFrac);
             viewY = player.Mobj.GetInterpolatedY(frameFrac);
             viewZ = player.GetInterpolatedViewZ(frameFrac);
-            viewAngle = player.GetInterpolatedAngle(frameFrac);
+            viewAngle = player.GetInterpolatedAngle(frameFrac) + viewYaw;
 
             viewSin = Trig.Sin(viewAngle);
             viewCos = Trig.Cos(viewAngle);
@@ -861,25 +886,38 @@ namespace DPTDOOM.Video
             profile.Add(RenderProfile.Section.Setup, profile.Stamp() - setupStart);
 
             var bspStart = profile.Stamp();
-            RenderBspNode(world.Map.Nodes.Length - 1);
+
+            if (!SkipWorld)
+            {
+                RenderBspNode(world.Map.Nodes.Length - 1);
+            }
+
             profile.Add(RenderProfile.Section.Bsp, profile.Stamp() - bspStart);
             profile.Count(RenderProfile.Counter.WallRanges, visWallRangeCount);
 
+            if (!SkipWorld)
+            {
+                var spriteStart = profile.Stamp();
+                RenderSprites();
+                profile.Add(RenderProfile.Section.Sprites, profile.Stamp() - spriteStart);
+
+                spriteStart = profile.Stamp();
+                RenderMaskedTextures();
+                profile.Add(RenderProfile.Section.Masked, profile.Stamp() - spriteStart);
+            }
+
+            var playerStart = profile.Stamp();
+
+            if (!SkipPlayerSprites)
+            {
+                DrawPlayerSprites(player);
+            }
+
+            profile.Add(RenderProfile.Section.PlayerSprites, profile.Stamp() - playerStart);
+
             var phaseStart = profile.Stamp();
-            RenderSprites();
-            profile.Add(RenderProfile.Section.Sprites, profile.Stamp() - phaseStart);
 
-            phaseStart = profile.Stamp();
-            RenderMaskedTextures();
-            profile.Add(RenderProfile.Section.Masked, profile.Stamp() - phaseStart);
-
-            phaseStart = profile.Stamp();
-            DrawPlayerSprites(player);
-            profile.Add(RenderProfile.Section.PlayerSprites, profile.Stamp() - phaseStart);
-
-            phaseStart = profile.Stamp();
-
-            if (windowSize < 7)
+            if (!SkipWorld && windowSize < 7)
             {
                 FillBackScreen();
             }
