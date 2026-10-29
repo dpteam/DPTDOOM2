@@ -291,14 +291,37 @@ namespace DPTDOOM
             return SetState(DoomInfo.States[number], number == 0);
         }
 
+        /// <summary>
+        /// How many zero-tic transitions one call may walk before the state graph is called a cycle.
+        ///
+        /// A state with zero tics exists only to run its action, so the walk continues into the next
+        /// one. A mod can build a cycle of them - a frame that jumps to itself, or two frames that
+        /// jump to each other - and the loop then never ends. Vanilla's longest chain is a handful
+        /// of states, so this limit is far above anything legitimate while still being instant.
+        /// </summary>
+        private const int MaxStateWalk = 1000;
+
         private bool SetState(MobjStateDef st, bool isNull)
         {
             // A while-true loop rather than do/while, and that is not style: `continue` inside a
             // do/while jumps to the *condition*, so a jump that resolved to a state with tics left
             // left the actor on the old one. The first version of this did exactly that, and the
             // jump silently did nothing.
+            var walked = 0;
+
             while (true)
             {
+                // A cycle of zero-tic states is a mod's mistake, not a reason to freeze the game:
+                // the window is drawn, so the player sees a hang and not an error. Stopping on the
+                // current frame with one tic left is the smallest change that keeps the actor
+                // alive, and the report says which state it happened on.
+                if (++walked > MaxStateWalk)
+                {
+                    tics = 1;
+                    ReportStateCycle(st);
+                    return true;
+                }
+
                 if (isNull)
                 {
                     this.state = DoomInfo.States[(int)MobjState.Null];
@@ -386,6 +409,34 @@ namespace DPTDOOM
                 }
             }
         }
+
+        /// <summary>
+        /// Says once per state that the actor is stuck in a cycle of zero-tic frames.
+        ///
+        /// Once, because the actor re-enters the same walk on every tic: a warning per tic would
+        /// flood the console the moment the cycle starts and hide the line that explains it.
+        /// </summary>
+        private void ReportStateCycle(MobjStateDef st)
+        {
+            if (reportedStateCycle != null && reportedStateCycle.Contains(st.Number))
+            {
+                return;
+            }
+
+            if (reportedStateCycle == null)
+            {
+                reportedStateCycle = new HashSet<int>();
+            }
+
+            reportedStateCycle.Add(st.Number);
+
+            ConsoleUi.Warn("state " + st.Number + " of " + Type +
+                           " keeps jumping to itself without spending a tic; the actor is held " +
+                           "on this frame. Check the mod's A_Jump and A_JumpIf targets");
+        }
+
+        /// <summary>States already named as a zero-tic cycle, so each is reported once.</summary>
+        private HashSet<int> reportedStateCycle;
 
         /// <summary>
         /// Asks the current transition to continue at another state instead of the next one.
@@ -834,5 +885,65 @@ namespace DPTDOOM
 
         private static readonly Dictionary<string, int> EmptyItems =
             new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>How many args an actor has, which is what DECORATE allows.</summary>
+        public const int ArgumentCount = 5;
+
+        /// <summary>
+        /// DECORATE's args[0..4]: five numbers a map or a mod puts on the actor.
+        ///
+        /// They are the actor's own variables, used by the mods this engine targets as a small
+        /// scratchpad - "how many times has this been hit", "which light is next", "how long until
+        /// the door opens". Null until something writes one, for the same reason the item counters
+        /// are: a vanilla actor has no args and must not pay for them.
+        /// </summary>
+        private int[] args;
+
+        public int GetArg(int index)
+        {
+            if (args == null || index < 0 || index >= ArgumentCount)
+            {
+                return 0;
+            }
+
+            return args[index];
+        }
+
+        public void SetArg(int index, int value)
+        {
+            if (index < 0 || index >= ArgumentCount)
+            {
+                return;
+            }
+
+            if (args == null)
+            {
+                args = new int[ArgumentCount];
+            }
+
+            args[index] = value;
+        }
+
+        /// <summary>True when any arg differs from zero, for the save file.</summary>
+        public bool HasArgs
+        {
+            get
+            {
+                if (args == null)
+                {
+                    return false;
+                }
+
+                for (var i = 0; i < ArgumentCount; i++)
+                {
+                    if (args[i] != 0)
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+        }
     }
 }

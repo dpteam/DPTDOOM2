@@ -1037,6 +1037,38 @@ ACTOR ItemImp 3001
     Assert-True ($itemsLog -notlike "*takes no arguments*") "and none is refused for its arguments"
     Assert-True ((State-Of $itemsLog) -ne $plainState) "the counters changed the world"
 
+    Write-Host "With A_SetArg and args[N]"
+    $argDecorate = Join-Path $work "actorargs.dec"
+
+    # A countdown in the actor's own arg, gating a jump - the shape ademo1.wad uses.
+    [System.IO.File]::WriteAllText($argDecorate, @"
+ACTOR ArgImp 3001
+{
+  States
+  {
+  Spawn:
+    TROO A 4 A_Look
+  See:
+    TROO A 4 A_JumpIf(args[0] == 0, "Reset")
+    TROO B 4 A_SetArg(0, args[0] - 1)
+    TROO C 4 A_Chase
+    Loop
+  Reset:
+    TROO D 4 A_SetArg(0, 4)
+    TROO E 4 A_Chase
+    Loop
+  }
+}
+"@)
+
+    $argsLog = Run-Game "actorargs" @('-decorate', $argDecorate)
+
+    Assert-True ($argsLog -like "*scripts: OK*") "A_SetArg converts"
+    Assert-True ($argsLog -like "*map MAP01: OK*") "the level loads"
+    Assert-True ($argsLog -notlike "*no such action*") "A_SetArg is a real action"
+    Assert-True ($argsLog -notlike "*not a field or function*") "args[N] is understood in a condition"
+    Assert-True ((State-Of $argsLog) -ne $plainState) "the countdown changed the world"
+
     Write-Host "With a truncated file"
     $cutLog = Run-Game "cut" @('-decorate', $truncated)
 

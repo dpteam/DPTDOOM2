@@ -154,7 +154,7 @@ namespace DPTDOOM
                 {
                     var mobj = thinker as Mobj;
 
-                    if (mobj != null && HasItems(mobj))
+                    if (mobj != null && CarriesState(mobj))
                     {
                         carriers++;
                     }
@@ -169,7 +169,10 @@ namespace DPTDOOM
                 var writer = new BinaryWriter(stream);
 
                 writer.Write(new byte[] { (byte)'D', (byte)'P', (byte)'T', (byte)'I' });
-                writer.Write((byte)1);
+
+                // Version 2 adds the five args after the item list. Version 1 is still readable, so
+                // a save made by the build that introduced items is not lost.
+                writer.Write((byte)2);
                 writer.Write(carriers);
 
                 var ordinal = 0;
@@ -183,7 +186,7 @@ namespace DPTDOOM
                         continue;
                     }
 
-                    if (!HasItems(mobj))
+                    if (!CarriesState(mobj))
                     {
                         ordinal++;
                         continue;
@@ -202,6 +205,11 @@ namespace DPTDOOM
                         writer.Write(pair.Value);
                     }
 
+                    for (var arg = 0; arg < Mobj.ArgumentCount; arg++)
+                    {
+                        writer.Write(mobj.GetArg(arg));
+                    }
+
                     ordinal++;
                 }
 
@@ -209,8 +217,14 @@ namespace DPTDOOM
                 return stream.ToArray();
             }
 
-            private static bool HasItems(Mobj mobj)
+            /// <summary>Whether this actor needs a record in the block at all.</summary>
+            private static bool CarriesState(Mobj mobj)
             {
+                if (mobj.HasArgs)
+                {
+                    return true;
+                }
+
                 foreach (var pair in mobj.Items)
                 {
                     return true;
@@ -861,11 +875,11 @@ namespace DPTDOOM
 
                 var version = data[ptr++];
 
-                if (version != 1)
+                if (version != 1 && version != 2)
                 {
                     ptr = start;
                     ConsoleUi.Warn("save items: section version " + version +
-                                   " is not known, so named item counters are not restored");
+                                   " is not known, so named item counters and args are not restored");
                     return;
                 }
 
@@ -927,6 +941,28 @@ namespace DPTDOOM
                         if (ordinal >= 0 && ordinal < mobjs.Count)
                         {
                             mobjs[ordinal].GiveItem(name, amount);
+                        }
+                    }
+
+                    // Version 2 adds the five args after the item list.
+                    if (version >= 2)
+                    {
+                        if (ptr + 4 * Mobj.ArgumentCount > data.Length)
+                        {
+                            ConsoleUi.Warn("save items: the section is cut short, so the remaining " +
+                                           "args are not restored");
+                            return;
+                        }
+
+                        for (var arg = 0; arg < Mobj.ArgumentCount; arg++)
+                        {
+                            var value = BitConverter.ToInt32(data, ptr);
+                            ptr += 4;
+
+                            if (ordinal >= 0 && ordinal < mobjs.Count)
+                            {
+                                mobjs[ordinal].SetArg(arg, value);
+                            }
                         }
                     }
                 }

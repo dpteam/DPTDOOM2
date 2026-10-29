@@ -330,6 +330,11 @@ namespace DPTDOOM.Scripting
         public int FaceTracerMaxTurn;
         public int FaceTracerOffset;
 
+        /// <summary>True for A_SetArg: which arg, and the expression written into it.</summary>
+        public bool HasSetArg;
+        public int SetArgIndex;
+        public string SetArgExpression;
+
         /// <summary>True for A_GiveInventory or A_TakeInventory.</summary>
         public bool HasGiveItem;
         public bool HasTakeItem;
@@ -1201,6 +1206,15 @@ namespace DPTDOOM.Scripting
                               .Append(");\n");
                     }
 
+                    if (frame.HasSetArg)
+                    {
+                        script.Append("    SetArg(\"").Append(name).Append("\", ")
+                              .Append(frame.SetArgIndex.ToString(CultureInfo.InvariantCulture))
+                              .Append(", \"")
+                              .Append(SpawnExFunctionName(actor, chain.Label, i + 1, 25))
+                              .Append("\");\n");
+                    }
+
                     if (frame.HasGiveItem || frame.HasTakeItem)
                     {
                         script.Append("    ").Append(frame.HasGiveItem ? "GiveItem" : "TakeItem")
@@ -1373,7 +1387,7 @@ namespace DPTDOOM.Scripting
                         !frame.HasSpawnProjectile && !frame.HasFireProjectile &&
                         !frame.HasThrowGrenade && !frame.HasAlertMonsters &&
                         !frame.HasFaceTracer && !frame.HasMonsterRefire &&
-                        !frame.HasGiveItem && !frame.HasTakeItem)
+                        !frame.HasGiveItem && !frame.HasTakeItem && !frame.HasSetArg)
                     {
                         continue;
                     }
@@ -1450,6 +1464,12 @@ namespace DPTDOOM.Scripting
                             frame.ProjectileSideExpression);
                         EmitSpawnExpression(script, actor, chain.Label, i + 1, 20,
                             frame.ProjectileAngleExpression);
+                    }
+
+                    if (frame.HasSetArg)
+                    {
+                        EmitSpawnExpression(script, actor, chain.Label, i + 1, 25,
+                            frame.SetArgExpression);
                     }
 
                     if (frame.HasGiveItem || frame.HasTakeItem)
@@ -2287,6 +2307,12 @@ namespace DPTDOOM.Scripting
                 return;
             }
 
+            if (string.Equals(frame.Action, "A_SetArg", StringComparison.OrdinalIgnoreCase))
+            {
+                ReadSetArg(arguments, actor, frame, problems);
+                return;
+            }
+
             if (string.Equals(frame.Action, "A_GiveInventory", StringComparison.OrdinalIgnoreCase))
             {
                 ReadItemChange(arguments, actor, frame, problems, true);
@@ -2676,6 +2702,46 @@ namespace DPTDOOM.Scripting
             frame.JumpLabel = label;
             frame.JumpCondition = condition;
             frame.Action = "";
+        }
+
+        /// <summary>
+        /// A_SetArg(index, value): write one of the actor's own five numbers.
+        ///
+        /// The index is checked here, while the file is read: an out-of-range index is a typo, and
+        /// a script that throws at play time would cost the whole actor. The value stays an
+        /// expression, because mods store arithmetic and random() in it.
+        /// </summary>
+        private static void ReadSetArg(List<List<Token>> arguments, DecorateActor actor,
+                                       StateFrame frame, IList<string> problems)
+        {
+            frame.Action = "";
+
+            if (arguments.Count != 2 || !TryReadNumber(arguments[0], out var index))
+            {
+                problems.Add(actor.Name + " line " + frame.Line +
+                             ": 'A_SetArg' needs an arg number and a value, so nothing is set");
+                return;
+            }
+
+            if (index < 0 || index >= Mobj.ArgumentCount)
+            {
+                problems.Add(actor.Name + " line " + frame.Line + ": 'A_SetArg' names arg " + index +
+                             ", and an actor has " + Mobj.ArgumentCount +
+                             " (args[0] to args[" + (Mobj.ArgumentCount - 1) + "]), so nothing is set");
+                return;
+            }
+
+            var value = DecorateCondition.TranslateExpression(
+                JoinTokens(arguments[1]), actor.Name, frame.Line, problems);
+
+            if (value == null)
+            {
+                return;
+            }
+
+            frame.HasSetArg = true;
+            frame.SetArgIndex = index;
+            frame.SetArgExpression = value;
         }
 
         /// <summary>

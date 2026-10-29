@@ -52,7 +52,12 @@ namespace DPTDOOM.Scripting
             { "y", "Y()" },
             { "z", "Z()" },
             { "tics", "Tics()" },
-            { "angle", "Angle()" }
+            { "angle", "Angle()" },
+
+            // The sector heights, which mods use to turn an actor's own position into a distance:
+            // ademo1.wad stores "floorz - ceilingz" in an arg and reads it back later.
+            { "floorz", "FloorZ()" },
+            { "ceilingz", "CeilingZ()" }
         };
 
         /// <summary>
@@ -310,6 +315,25 @@ namespace DPTDOOM.Scripting
                 return "Random(" + low + ", " + high + ")";
             }
 
+            // args[0]..args[4]: the actor's own numbers. Indexed, so the index is read here and
+            // becomes a plain call argument - the language has no arrays and needs none.
+            if (string.Equals(name, "args", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!reader.TryOperator("["))
+                {
+                    throw new Untranslatable("'args' needs an index in brackets, such as args[0]");
+                }
+
+                var index = reader.ReadNumber();
+
+                if (index == null || !reader.TryOperator("]"))
+                {
+                    throw new Untranslatable("'args[' needs a whole index and a closing ']'");
+                }
+
+                return "Arg(" + index + ")";
+            }
+
             string call;
 
             if (fields.TryGetValue(name, out call))
@@ -325,7 +349,7 @@ namespace DPTDOOM.Scripting
 
             throw new Untranslatable("'" + name + "' is not a field or function this engine has " +
                                      "in a condition; it has health, target, momx, momy, momz, " +
-                                     "x, y, z, tics and random");
+                                     "x, y, z, floorz, ceilingz, angle, tics, args[N] and random");
         }
 
         // ------------------------------------------------------------ reading

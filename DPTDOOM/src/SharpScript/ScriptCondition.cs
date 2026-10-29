@@ -170,6 +170,14 @@ namespace DPTDOOM.Scripting
             target.Register("Y", 0, call => ScriptValue.FromFixed(Current().Y));
             target.Register("Z", 0, call => ScriptValue.FromFixed(Current().Z));
 
+            // The sector heights the actor currently stands between, which mods subtract from
+            // each other to measure a gap.
+            target.Register("FloorZ", 0, call => ScriptValue.FromFixed(Current().FloorZ));
+            target.Register("CeilingZ", 0, call => ScriptValue.FromFixed(Current().CeilingZ));
+
+            // DECORATE's args[N]: the actor's own five numbers.
+            target.Register("Arg", 1, call => ScriptValue.FromInt(Current().GetArg(call.AsInt(0))));
+
             // The tics left in the current frame, which is what a mod asks when it wants to act
             // once per animation rather than once per tic.
             target.Register("Tics", 0, call => ScriptValue.FromInt(Current().Tics));

@@ -679,6 +679,27 @@ namespace DPTDOOM.Scripting
                 return ScriptValue.Void;
             });
 
+            // A_SetArg(index, value): one of the actor's own five numbers. The value is an
+            // expression, because ademo1.wad writes floorz - ceilingz and random(190,250) * 8 in it.
+            host.Register("SetArg", 3, 3, call =>
+            {
+                var number = FrameNumber(call.AsText(0), call);
+                var index = call.AsInt(1);
+                var value = ResolveSpawnExpression(call, 2);
+
+                if (index < 0 || index >= Mobj.ArgumentCount)
+                {
+                    throw call.Fail("arg " + index + " does not exist; an actor has " +
+                                    Mobj.ArgumentCount + " (args[0] to args[" +
+                                    (Mobj.ArgumentCount - 1) + "])");
+                }
+
+                DoomInfo.SetStateAction(number, (world, mobj) =>
+                    mobj.SetArg(index, value.EvaluateValue(world, mobj).AsInt()));
+
+                return ScriptValue.Void;
+            });
+
             // A_GiveInventory and A_TakeInventory: named counters on one actor.
             //
             // The amount is an expression, because ademo1.wad writes random(1,3) in it, and it is
